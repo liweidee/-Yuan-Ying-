@@ -12,6 +12,9 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      - name: Select Xcode 26.1+
+        run: sudo xcode-select -switch /Applications/Xcode_26.1.app/Contents/Developer
+
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
