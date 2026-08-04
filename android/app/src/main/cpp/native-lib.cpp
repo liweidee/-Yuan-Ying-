@@ -54,6 +54,9 @@ Java_com_example_yuanying_NodeJSManager_nodeStart(
     }
     argv[argc] = nullptr;
 
+    // 设置 NODE_PATH 环境变量（在 node::Start 之前）
+    setenv("NODE_PATH", "/data/data/com.example.yignshijie/files/nodejs-project/node_modules", 1);
+
     // ---- 调用 nodejs-mobile 的正确入口 ----
     LOGI("Calling node::Start...");
     int result = node::Start(argc, argv);

@@ -164,8 +164,6 @@ class NodeJSManager private constructor(context: Context) {
                     "--native-port", nativeServerPort.toString()
                 )
 
-                android.os.Process.setEnvVars(mapOf("NODE_PATH" to sourcePath))
-
                 isRunning = true
                 mainHandler.post { completion?.invoke(true) }
 
