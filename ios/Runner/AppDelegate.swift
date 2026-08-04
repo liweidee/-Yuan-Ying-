@@ -16,11 +16,14 @@ import UIKit
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 
+  // ===== Flutter 3.41+ UIScene 迁移后的正确入口 =====
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
     
+    // ===== 用 applicationRegistrar.messenger() 替代旧的 controller.binaryMessenger =====
+    let binaryMessenger = engineBridge.applicationRegistrar.messenger()
+    
     // ===== 注册 Node.js MethodChannel =====
-    let binaryMessenger = engineBridge.binaryMessenger
     let nodeJSChannel = FlutterMethodChannel(
       name: "com.tvbox/nodejs",
       binaryMessenger: binaryMessenger
@@ -69,7 +72,8 @@ import UIKit
         result(FlutterError(code: "INVALID_ARGS", message: "Missing url", details: nil))
         return
       }
-      NodeJSManager.shared().loadSource(from: url) { success, message in
+      // ===== 修复 2：OC 方法 loadSourceFromURL: 映射为 Swift 的 fromURL: =====
+      NodeJSManager.shared().loadSource(fromURL: url) { success, message in
         if success {
           result(["success": true])
         } else {
