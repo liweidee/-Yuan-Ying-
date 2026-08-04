@@ -147,7 +147,7 @@ devtools_options.yaml
 
 pili_release.json
 
-dist
+/dist
 
 test*
 
