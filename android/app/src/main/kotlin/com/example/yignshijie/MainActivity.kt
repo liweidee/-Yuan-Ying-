@@ -8,6 +8,7 @@ import android.view.WindowManager.LayoutParams
 import com.ryanheise.audioservice.AudioServiceActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
+import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.plugin.common.MethodChannel.Result
@@ -33,7 +34,6 @@ class MainActivity : AudioServiceActivity(), MethodCallHandler {
             window.attributes.layoutInDisplayCutoutMode =
                 LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
         }
-
         // ===== 初始化 NodeJSManager =====
         nodeJSManager = NodeJSManager.getInstance(this)
         nodeJSManager.onPortReceived = { port, type ->
@@ -47,13 +47,11 @@ class MainActivity : AudioServiceActivity(), MethodCallHandler {
     // ===== 注册 Flutter 通道 =====
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-
         nodeJSChannel = MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             "com.tvbox/nodejs"
         )
         nodeJSChannel?.setMethodCallHandler(this)
-
         nodeJSEventChannel = EventChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             "com.tvbox/nodejs/events"
@@ -81,20 +79,22 @@ class MainActivity : AudioServiceActivity(), MethodCallHandler {
         AndroidHelper.ToDart.onUserLeaveHint?.run()
     }
 
-    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration?) {
+    override fun onPictureInPictureModeChanged(
+        isInPictureInPictureMode: Boolean,
+        newConfig: Configuration?
+    ) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         AndroidHelper.isPipMode = isInPictureInPictureMode
     }
 
     // ===== MethodCallHandler 实现 =====
-    override fun onMethodCall(call: MethodChannel.MethodCall, result: Result) {
+    override fun onMethodCall(call: MethodCall, result: Result) {
         when (call.method) {
             "startNodeJS" -> {
                 nodeJSManager.startNodeJS { success ->
                     result.success(success)
                 }
             }
-
             "loadSourceFromURL" -> {
                 val url = call.argument<String>("url")
                 if (url == null) {
@@ -105,26 +105,27 @@ class MainActivity : AudioServiceActivity(), MethodCallHandler {
                     if (success) {
                         result.success(mapOf("success" to true))
                     } else {
-                        result.success(mapOf("success" to false, "message" to (message ?: "Unknown error")))
+                        result.success(
+                            mapOf(
+                                "success" to false,
+                                "message" to (message ?: "Unknown error")
+                            )
+                        )
                     }
                 }
             }
-
             "deleteSource" -> {
                 nodeJSManager.deleteSource { success ->
                     result.success(success)
                 }
             }
-
             "getSourcePath" -> {
                 result.success(nodeJSManager.getDocumentsSourcePath())
             }
-
             "stopNodeJS" -> {
                 nodeJSManager.stopNodeJS()
                 result.success(null)
             }
-
             else -> result.notImplemented()
         }
     }
