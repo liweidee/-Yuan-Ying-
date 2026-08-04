@@ -154,50 +154,50 @@ class _HelpActionState extends State<HelpAction> {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
+    // 收集所有内容组件（不包含底部固定的超时和按钮）
+    final contentChildren = <Widget>[
+      // 消息
+      if (widget.config.msg != null && widget.config.msg!.isNotEmpty)
+        _buildMessage(context),
+      // 数据键值对
+      if (widget.config.data != null && widget.config.data!.isNotEmpty)
+        _buildData(context),
+      // 图片
+      if (widget.config.imageUrl != null && widget.config.imageUrl!.isNotEmpty)
+        _buildImage(context),
+      // 二维码
+      if (widget.config.qrcode != null && widget.config.qrcode!.isNotEmpty)
+        _buildQrcode(context),
+      // 详细信息
+      if (widget.config.detail != null && widget.config.detail!.isNotEmpty)
+        _buildDetail(context),
+      // 步骤
+      if (widget.config.steps != null && widget.config.steps!.isNotEmpty)
+        _buildSteps(context),
+      // FAQ
+      if (widget.config.faq != null && widget.config.faq!.isNotEmpty)
+        _buildFaq(context),
+      // 链接
+      if (widget.config.links != null && widget.config.links!.isNotEmpty)
+        _buildLinks(context),
+      // 联系信息
+      if (widget.config.contact != null) _buildContact(context),
+    ];
+
     return Column(
       mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // 消息
-        if (widget.config.msg != null && widget.config.msg!.isNotEmpty)
-          _buildMessage(context),
-
-        // 数据键值对
-        if (widget.config.data != null && widget.config.data!.isNotEmpty)
-          _buildData(context),
-
-        // 图片
-        if (widget.config.imageUrl != null && widget.config.imageUrl!.isNotEmpty)
-          _buildImage(context),
-
-        // 二维码
-        if (widget.config.qrcode != null && widget.config.qrcode!.isNotEmpty)
-          _buildQrcode(context),
-
-        // 详细信息
-        if (widget.config.detail != null && widget.config.detail!.isNotEmpty)
-          _buildDetail(context),
-
-        // 步骤
-        if (widget.config.steps != null && widget.config.steps!.isNotEmpty)
-          _buildSteps(context),
-
-        // FAQ
-        if (widget.config.faq != null && widget.config.faq!.isNotEmpty)
-          _buildFaq(context),
-
-        // 链接
-        if (widget.config.links != null && widget.config.links!.isNotEmpty)
-          _buildLinks(context),
-
-        // 联系信息
-        if (widget.config.contact != null)
-          _buildContact(context),
-
-        // 超时
+        // 内容区域 - 自适应高度，不会强制拉伸，内容多时可滚动
+        Flexible(
+          child: ListView(
+            physics: const BouncingScrollPhysics(),
+            shrinkWrap: true,
+            children: contentChildren,
+          ),
+        ),
+        // 超时提示（固定在底部）
         if (widget.config.timeout > 0 && _timeLeft > 0) _buildTimeout(context),
-
-        // 按钮
+        // 按钮区（固定在底部）
         _buildButtons(context),
       ],
     );

@@ -957,7 +957,8 @@ class _MultiInputActionState extends State<MultiInputAction> {
               _buildImage(context),
 
             // ===== 中间滚动区域 =====
-            Expanded(
+            // 改为 Flexible，自适应高度，不强制拉伸
+            Flexible(
               child: SingleChildScrollView(
                 physics: const BouncingScrollPhysics(),
                 child: Column(

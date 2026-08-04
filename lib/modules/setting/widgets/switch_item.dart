@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:yuanying/core/constants/storage_keys.dart';
 import 'package:yuanying/utils/storage_manager.dart';
 
@@ -73,9 +74,7 @@ class _SetSwitchItemState extends State<SetSwitchItem> {
 
     widget.onChanged?.call(val);
     if (widget.needReboot) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('重启生效')),
-      );
+      SmartDialog.showToast('重启生效');
     }
     if (mounted) setState(() {});
   }

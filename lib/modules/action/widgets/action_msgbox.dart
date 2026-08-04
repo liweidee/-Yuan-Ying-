@@ -204,40 +204,43 @@ class _MsgBoxActionState extends State<MsgBoxAction> {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
+    // 收集所有内容组件（不包含底部固定的超时和按钮）
+    final contentChildren = <Widget>[
+      // 图标
+      if (_showIcon) _buildIcon(context),
+      // 消息
+      if (widget.config.msg != null && widget.config.msg!.isNotEmpty)
+        _buildMessage(context),
+      // 详情
+      if (widget.config.detail != null && widget.config.detail!.isNotEmpty)
+        _buildDetail(context),
+      // 列表
+      if (widget.config.list != null && widget.config.list!.isNotEmpty)
+        _buildList(context),
+      // 图片
+      if (widget.config.imageUrl != null && widget.config.imageUrl!.isNotEmpty)
+        _buildImage(context),
+      // 二维码
+      if (widget.config.qrcode != null && widget.config.qrcode!.isNotEmpty)
+        _buildQrcode(context),
+      // 进度条
+      if (widget.config.showProgress) _buildProgress(context),
+    ];
+
     return Column(
       mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        // 图标
-        if (_showIcon) _buildIcon(context),
-
-        // 消息
-        if (widget.config.msg != null && widget.config.msg!.isNotEmpty)
-          _buildMessage(context),
-
-        // 详情
-        if (widget.config.detail != null && widget.config.detail!.isNotEmpty)
-          _buildDetail(context),
-
-        // 列表
-        if (widget.config.list != null && widget.config.list!.isNotEmpty)
-          _buildList(context),
-
-        // 图片
-        if (widget.config.imageUrl != null && widget.config.imageUrl!.isNotEmpty)
-          _buildImage(context),
-
-        // 二维码
-        if (widget.config.qrcode != null && widget.config.qrcode!.isNotEmpty)
-          _buildQrcode(context),
-
-        // 进度条
-        if (widget.config.showProgress) _buildProgress(context),
-
-        // 超时
+        // 内容区域 - 自适应高度，不会强制拉伸，内容多时可滚动
+        Flexible(
+          child: ListView(
+            physics: const BouncingScrollPhysics(),
+            shrinkWrap: true,
+            children: contentChildren,
+          ),
+        ),
+        // 超时提示（固定在底部）
         if (widget.config.timeout > 0 && _timeLeft > 0) _buildTimeout(context),
-
-        // 按钮
+        // 按钮区（固定在底部）
         _buildButtons(context),
       ],
     );

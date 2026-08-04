@@ -414,18 +414,35 @@ class _InputActionState extends State<InputAction> {
           ? _renderer.currentMessage.value
           : widget.config.msg ?? '';
 
+      // 收集所有内容组件（不包含底部固定的超时和按钮）
+      final contentChildren = <Widget>[
+        // 消息
+        if (displayMessage.isNotEmpty) _buildMessage(context, displayMessage),
+        // 图片
+        if (widget.config.imageUrl != null && widget.config.imageUrl!.isNotEmpty)
+          _buildImage(context),
+        // 二维码
+        if (widget.config.qrcode != null && widget.config.qrcode!.isNotEmpty)
+          _buildQrcode(context),
+        // 输入框（当没有二维码时显示）
+        if (widget.config.qrcode == null || widget.config.qrcode!.isEmpty)
+          _buildInput(context),
+      ];
+
       return Column(
         mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (displayMessage.isNotEmpty) _buildMessage(context, displayMessage),
-          if (widget.config.imageUrl != null && widget.config.imageUrl!.isNotEmpty)
-            _buildImage(context),
-          if (widget.config.qrcode != null && widget.config.qrcode!.isNotEmpty)
-            _buildQrcode(context),
-          if (widget.config.qrcode == null || widget.config.qrcode!.isEmpty)
-            _buildInput(context),
+          // 内容区域 - 自适应高度，不会强制拉伸，内容多时可滚动
+          Flexible(
+            child: ListView(
+              physics: const BouncingScrollPhysics(),
+              shrinkWrap: true,
+              children: contentChildren,
+            ),
+          ),
+          // 超时提示（固定在底部）
           if (widget.config.timeout > 0 && _timeLeft > 0) _buildTimeout(context),
+          // 按钮区（固定在底部）
           _buildButtons(context),
         ],
       );

@@ -66,9 +66,7 @@ class _HomePageState extends State<HomePage>
         );
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Action 配置解析失败')),
-      );
+      SmartDialog.showToast('Action 配置解析失败');
       return;
     }
 
@@ -115,9 +113,7 @@ class _HomePageState extends State<HomePage>
 
       // 如果仍然为空，提示并返回
       if (sourceKeys.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('没有可用的搜索源')),
-        );
+        SmartDialog.showToast('没有可用的搜索源');
         return;
       }
 
