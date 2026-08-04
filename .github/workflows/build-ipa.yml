@@ -1,0 +1,128 @@
+# .github/workflows/build-ipa.yml
+name: Build IPA (TrollStore)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.1'
+          channel: 'stable'
+          cache: false
+
+      - name: Download and Setup NodeMobile.xcframework
+        run: |
+          set -e
+          echo "=== Downloading NodeMobile.xcframework ==="
+          mkdir -p ios/Frameworks
+
+          DOWNLOAD_URL="https://github.com/nodejs-mobile/nodejs-mobile/releases/download/v18.20.4/nodejs-mobile-v18.20.4-ios.zip"
+          curl -L -o ios/Frameworks/nodejs-mobile.zip "$DOWNLOAD_URL"
+          cd ios/Frameworks
+          unzip -o -q nodejs-mobile.zip
+          rm nodejs-mobile.zip
+          cd ../..
+
+          if [ ! -d "ios/Frameworks/NodeMobile.xcframework" ]; then
+            echo "❌ NodeMobile.xcframework not found"
+            exit 1
+          fi
+
+          echo "✅ NodeMobile.xcframework downloaded"
+
+      # ===== 移除：不再需要构建 Node.js（使用预构建的 dist） =====
+
+      - name: Build iOS App
+        run: |
+          set -e
+          echo "=== Building iOS app ==="
+
+          flutter pub get
+
+          cd ios
+          pod install --repo-update
+
+          echo "=== Configuring code signing for TrollStore ==="
+          python3 << 'PYEOF'
+          with open('Runner.xcodeproj/project.pbxproj', 'r') as f:
+              content = f.read()
+          # 替换为你的实际 iOS Bundle ID
+          content = content.replace(
+              'PRODUCT_BUNDLE_IDENTIFIER = com.example.piliplus;',
+              'PRODUCT_BUNDLE_IDENTIFIER = com.example.piliplus;\n\t\t\t\tDEVELOPMENT_TEAM = 0000000000;'
+          )
+          content = content.replace('CODE_SIGN_STYLE = Automatic;', 'CODE_SIGN_STYLE = Manual;')
+          with open('Runner.xcodeproj/project.pbxproj', 'w') as f:
+              f.write(content)
+          print('DEVELOPMENT_TEAM and CODE_SIGN_STYLE configured')
+          PYEOF
+
+          cd ..
+          flutter build ios --release --no-codesign --no-tree-shake-icons
+
+      # ===== 保留：从源码目录复制到 App Bundle（确保包含） =====
+      - name: Copy Node.js files to App Bundle
+        run: |
+          set -e
+          echo "=== Copying Node.js files to App Bundle ==="
+
+          APP_PATH=$(find build/ios -name "*.app" -type d | head -1)
+          if [ -z "$APP_PATH" ]; then
+            echo "❌ App bundle not found"
+            exit 1
+          fi
+
+          echo "Found app: $APP_PATH"
+
+          mkdir -p "$APP_PATH/nodejs-project/dist"
+          cp ios/Runner/nodejs-project/dist/main.js "$APP_PATH/nodejs-project/dist/"
+          cp ios/Runner/nodejs-project/dist/main.js.md5 "$APP_PATH/nodejs-project/dist/" 2>/dev/null || true
+
+          echo "✅ Node.js files copied to app bundle"
+          ls -la "$APP_PATH/nodejs-project/dist/"
+
+      - name: Prepare IPA
+        id: prepare
+        run: |
+          echo "=== Preparing IPA ==="
+
+          APP_PATH=$(find build/ios -name "*.app" -type d | head -1)
+          if [ -z "$APP_PATH" ]; then
+            echo "❌ App bundle not found"
+            exit 1
+          fi
+
+          echo "Found app: $APP_PATH"
+
+          rm -rf "$APP_PATH/_CodeSignature"
+          rm -rf "$APP_PATH/embedded.mobileprovision"
+          rm -rf "$APP_PATH/CodeResources" 2>/dev/null || true
+
+          echo "✅ Code signature removed"
+
+          TEMP_DIR=$(mktemp -d)
+          mkdir -p "$TEMP_DIR/Payload"
+          cp -r "$APP_PATH" "$TEMP_DIR/Payload/"
+
+          mkdir -p Build
+          cd "$TEMP_DIR"
+          zip -r -q -X "$GITHUB_WORKSPACE/Build/app.ipa" Payload
+
+          echo "✅ IPA created"
+          ls -lh "$GITHUB_WORKSPACE/Build/app.ipa"
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-ipa
+          path: Build/app.ipa
+          retention-days: 30

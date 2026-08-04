@@ -1,0 +1,12 @@
+[project]
+name = "yuanying_py"
+version = "0.1.0"
+dependencies = [
+    "requests",
+    "jsonpath",
+    "json5",
+    "jinja2",
+    "cachetools",
+    "beautifulsoup4",
+    "html5lib"
+]
