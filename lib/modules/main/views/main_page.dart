@@ -153,10 +153,15 @@ class _MainPageState extends State<MainPage> {
         );
       }),
       overlayColor: WidgetStateProperty.resolveWith((states) {
-        if (states.contains(WidgetState.hovered)) {
+        // 只要包含 pressed、hovered、focused 中的任意一种，都返回透明
+        if (states.any((state) =>
+            state == WidgetState.pressed ||
+            state == WidgetState.hovered ||
+            state == WidgetState.focused
+        )) {
           return Colors.transparent;
         }
-        return null;
+        return null; // 其他极少情况保留默认
       }),
       destinations: navigationBars.map((item) {
         return NavigationDestination(
@@ -172,7 +177,7 @@ class _MainPageState extends State<MainPage> {
     // 2. 胶囊 NavigationBar
     // ============================================================
     final capsuleNavigationBar = NavigationBar(
-      height: 56,
+      height: 70,
       elevation: 0,
       selectedIndex: selectedIndex,
       onDestinationSelected: _controller.switchPage,

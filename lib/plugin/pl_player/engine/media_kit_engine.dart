@@ -6,7 +6,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show HapticFeedback, DeviceOrientation;
+import 'package:flutter/services.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:flutter_volume_controller/flutter_volume_controller.dart';
 import 'package:get/get.dart';
@@ -1032,7 +1032,12 @@ class MediaKitEngine implements IPlayerEngine {
     try {
       if (status) {
         if (PlatformUtils.isMobile) {
-          hideSystemBar();
+          // 隐藏系统导航栏（沉浸式）
+          SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+          SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+            systemNavigationBarColor: Colors.transparent,
+            systemNavigationBarDividerColor: Colors.transparent,
+          ));
           await changeOrientation(
             isVertical: isVertical,
             orientation: orientation,
@@ -1043,7 +1048,9 @@ class MediaKitEngine implements IPlayerEngine {
       } else {
         if (PlatformUtils.isMobile) {
           if (!removeSafeArea) {
-            showSystemBar();
+            // 恢复系统栏（但保留边缘到边缘，以便状态栏透明）
+            SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+            SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.light);
           }
           if (orientation == null && mode == FullScreenMode.none) {
             return;
@@ -1057,6 +1064,12 @@ class MediaKitEngine implements IPlayerEngine {
       _setFullScreen(status);
       _fsProcessing = false;
     }
+  }
+
+  @override
+  Future<void> setOrientation(List<DeviceOrientation> orientations) async {
+    if (!PlatformUtils.isMobile) return;
+    await SystemChrome.setPreferredOrientations(orientations);
   }
 
   @override

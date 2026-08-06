@@ -1527,6 +1527,7 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
               ),
             ),
 
+          // 电池电量按钮
           if (isFullScreen && PlayerPref.showBatteryLevel)
             ViewSafeArea(
               left: false,
@@ -1563,6 +1564,54 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
               ),
             ),
 
+          // 向切换按钮
+          if (PlatformUtils.isMobile)
+            ViewSafeArea(
+              left: false,
+              right: !plPlayerController.removeSafeArea,
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: FractionalTranslation(
+                  translation: const Offset(-1, -0.7),
+                  child: Obx(
+                    () => Offstage(
+                      offstage: !plPlayerController.showControls.value,
+                      child: DecoratedBox(
+                        decoration: const BoxDecoration(
+                          color: Color(0x45000000),
+                          borderRadius: BorderRadius.all(Radius.circular(8)),
+                        ),
+                        child: ComBtn(
+                          tooltip: '旋转屏幕',
+                          icon: const Icon(
+                            Icons.screen_rotation,
+                            size: 20,
+                            color: Colors.white,
+                          ),
+                          onTap: () {
+                            // 通过 MediaQuery 获取当前屏幕方向
+                            final orientation = MediaQuery.of(context).orientation;
+                            if (orientation == Orientation.portrait) {
+                              plPlayerController.setOrientation([
+                                DeviceOrientation.landscapeLeft,
+                                DeviceOrientation.landscapeRight,
+                              ]);
+                            } else {
+                              plPlayerController.setOrientation([
+                                DeviceOrientation.portraitUp,
+                                DeviceOrientation.portraitDown,
+                              ]);
+                            }
+                          },
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+
+          // 截图按钮
           if (plPlayerController.showFsScreenshotBtn)
             ViewSafeArea(
               left: false,

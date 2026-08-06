@@ -1,0 +1,82 @@
+import 'package:flutter/material.dart';
+import 'package:get/get.dart';
+import 'package:yuanying/utils/grid.dart';
+import 'package:yuanying/common/widgets/video_card/video_card_v.dart';
+import 'package:yuanying/common/widgets/video_card/video_card_h.dart';
+import 'package:yuanying/t4/models/video_item.dart';
+import 'package:yuanying/models/common/card_layout_mode.dart';
+import 'package:yuanying/modules/home/controllers/home_controller.dart';
+
+/// 推荐分类页面
+///
+/// 特点：
+/// - 无下拉刷新（RefreshIndicator）
+/// - 无加载更多（loadMore）
+/// - 数据来自 HomeController.recommendList（由 fetchHome 接口返回）
+/// - 支持布局模式切换（网格/列表）
+class RecommendPage extends StatelessWidget {
+  final List<VideoItem> data;
+  final Function(VideoItem) onVideoTap;
+
+  const RecommendPage({
+    Key? key,
+    required this.data,
+    required this.onVideoTap,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    // ===== 使用 Obx 监听布局模式变化 =====
+    return Obx(() {
+      final mode = Get.find<HomeController>().cardLayoutMode.value;
+
+      if (data.isEmpty) {
+        return Center(
+          child: Text(
+            '暂无推荐数据',
+            style: TextStyle(
+              color: theme.colorScheme.outline,
+              fontSize: 14,
+            ),
+          ),
+        );
+      }
+
+      // 列表模式
+      if (Grid.isListMode(mode)) {
+        return ListView.builder(
+          padding: const EdgeInsets.only(bottom: 100),
+          itemCount: data.length,
+          itemBuilder: (context, index) {
+            final item = data[index];
+            return VideoCardH(
+              videoItem: item,
+              onTap: () => onVideoTap(item),
+            );
+          },
+        );
+      }
+
+      // 网格模式
+      final gridDelegate = Grid.videoCardVDelegate(
+        context,
+        mode: mode,
+        minHeight: 25,
+      );
+      return GridView.builder(
+        padding: const EdgeInsets.only(bottom: 100),
+        gridDelegate: gridDelegate,
+        itemCount: data.length,
+        itemBuilder: (context, index) {
+          final item = data[index];
+          return VideoCardV(
+            videoItem: item,
+            onTap: () => onVideoTap(item),
+          );
+        },
+      );
+    });
+  }
+}

@@ -316,7 +316,7 @@ class PlayerPref {
   static bool get enableVerticalExpand => _box.get('enableVerticalExpand', defaultValue: false);
   static set enableVerticalExpand(bool value) => _box.put('enableVerticalExpand', value);
 
-  static bool get autoPlayEnable => _box.get('autoPlayEnable', defaultValue: false);
+  static bool get autoPlayEnable => _box.get('autoPlayEnable', defaultValue: true);
   static set autoPlayEnable(bool value) => _box.put('autoPlayEnable', value);
 
   static bool get horizontalSeasonPanel => _box.get('horizontalSeasonPanel', defaultValue: false);

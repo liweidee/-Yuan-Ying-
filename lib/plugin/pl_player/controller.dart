@@ -119,6 +119,9 @@ class PlPlayerController {
 
     final oldEngine = _engine!;
 
+    // 捕获旧引擎的全屏状态
+    final wasFullScreen = oldEngine.isFullScreen.value;
+
     // 捕获当前状态
     final dataSource = _lastParams?.dataSource;
     final position = oldEngine.position;
@@ -159,6 +162,13 @@ class PlPlayerController {
       await _engine!.setVolume(volume);
       // 恢复循环模式（setPlayRepeat 是 void，直接调用）
       _engine!.setPlayRepeat(repeat);
+
+      // 如果之前是全屏，在新引擎上恢复全屏（触发横屏）
+      if (wasFullScreen) {
+        await Future.delayed(const Duration(milliseconds: 50));
+        await _engine!.triggerFullScreen(status: true);
+      }
+    
       // 恢复播放状态
       if (isPlaying) {
         await _engine!.play();
@@ -359,6 +369,9 @@ class PlPlayerController {
     orientation: orientation,
     isManualFS: isManualFS,
   );
+
+  Future<void> setOrientation(List<DeviceOrientation> orientations) => 
+    _ensureEngine().setOrientation(orientations);
 
   // ============================================================
   // 14. 透传：轨道

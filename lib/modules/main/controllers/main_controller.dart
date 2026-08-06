@@ -3,8 +3,6 @@ import 'package:get/get.dart';
 import 'package:yuanying/models/common/bar_hide_type.dart';
 import 'package:yuanying/models/common/nav_bar_config.dart';
 import 'package:yuanying/modules/setting/models/setting_pref.dart';
-// import 'package:yuanying/utils/storage_manager.dart';
-// import 'package:yuanying/core/constants/storage_keys.dart';
 
 class MainController extends GetxController {
   // ===== 导航配置 =====
@@ -14,22 +12,22 @@ class MainController extends GetxController {
   final RxInt selectedIndex = 0.obs;
   final RxBool useBottomNav = true.obs;
 
-  // ===== 底栏收齐 - 只保留偏移量，无额外状态 =====
+  // ===== 底栏收齐 =====
   final RxDouble barOffset = 0.0.obs;
   final RxBool hideBottomBar = SettingPref.hideBottomBar.obs;
   BarHideType get barHideType => SettingPref.barHideType;
 
+  // ===== 顶部栏收齐 =====
+  final RxDouble topBarOffset = 0.0.obs;
+  final RxBool hideTopBar = SettingPref.hideTopBar.obs;
+
   // ===== 返回时直接退出 =====
   bool directExitOnBack = SettingPref.directExitOnBack;
 
-  // 判断是否为即时模式
   bool get isInstantMode => barHideType == BarHideType.instant;
 
-  // ===== 导航栏样式版本号（用于触发 UI 刷新） =====
   final RxInt navStyleVersion = 0.obs;
 
-  // ============================================================
-  // 核心方法
   // ============================================================
 
   void setNavBarConfig() {
@@ -52,11 +50,11 @@ class MainController extends GetxController {
 
   @override
   void onInit() {
-    // StorageManager.deleteSetting(SettingBoxKey.navBarSort);
     super.onInit();
     setNavBarConfig();
     _updateUseBottomNav();
     barOffset.value = 0.0;
+    topBarOffset.value = 0.0;
   }
 
   void updateUseBottomNav({double? width, double? height}) {
@@ -86,22 +84,13 @@ class MainController extends GetxController {
     selectedIndex.value = index;
   }
 
-  // ============================================================
-  // 导航栏样式刷新方法
-  // ============================================================
-
-  /// 获取当前导航栏样式（直接读取存储值）
   NavigationBarStyle get currentNavBarStyle => SettingPref.navigationBarStyle;
 
-  /// 刷新导航栏样式（切换样式后调用）
   void refreshNavBarStyle() {
     navStyleVersion.value++;
   }
 
-  // ============================================================
-  // 底栏偏移 - 直接设置偏移量，永远不隐藏 Widget
-  // ============================================================
-
+  // ===== 底栏偏移更新 =====
   void updateBottomBarOffset(double offset) {
     if (!hideBottomBar.value || !useBottomNav.value) {
       barOffset.value = 0.0;
@@ -109,18 +98,25 @@ class MainController extends GetxController {
     }
     const maxOffset = 56.0;
     final clamped = offset.clamp(0.0, maxOffset);
-    
-    // ===== 即时模式直接跳转，同步模式平滑过渡 =====
     if (isInstantMode) {
-      // 即时模式：超过一半就完全隐藏，否则完全显示
-      if (clamped > maxOffset * 0.5) {
-        barOffset.value = maxOffset;
-      } else {
-        barOffset.value = 0.0;
-      }
+      barOffset.value = clamped > maxOffset * 0.5 ? maxOffset : 0.0;
     } else {
-      // 同步模式：线性跟随
       barOffset.value = clamped;
+    }
+  }
+
+  // ===== 顶部栏偏移更新（由 CategoryPage 调用，传入具体偏移量） =====
+  void updateTopBarOffset(double offset) {
+    if (!hideTopBar.value) {
+      topBarOffset.value = 0.0;
+      return;
+    }
+    const maxOffset = 52.0 + 44.0; // 顶部栏 + 状态栏
+    final clamped = offset.clamp(0.0, maxOffset);
+    if (isInstantMode) {
+      topBarOffset.value = clamped > maxOffset * 0.5 ? maxOffset : 0.0;
+    } else {
+      topBarOffset.value = clamped;
     }
   }
 
@@ -128,6 +124,13 @@ class MainController extends GetxController {
     hideBottomBar.value = SettingPref.hideBottomBar;
     if (!hideBottomBar.value) {
       barOffset.value = 0.0;
+    }
+  }
+
+  void refreshHideTopBar() {
+    hideTopBar.value = SettingPref.hideTopBar;
+    if (!hideTopBar.value) {
+      topBarOffset.value = 0.0;
     }
   }
 }

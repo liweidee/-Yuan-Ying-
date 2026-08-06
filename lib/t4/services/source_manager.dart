@@ -814,6 +814,7 @@ class SourceManager extends GetxController {
       site['key']?.toString() ?? '',
       ext: site['ext'],
     );
+    await service.initSpider();
   }
 
   void _switchToT4Site(Map<String, dynamic> site) {

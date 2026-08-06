@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:yuanying/common/widgets/custom_icon.dart';
+import 'dart:io' show Platform;
 import 'package:yuanying/modules/danmaku/controllers/danmaku_controller.dart';
 import 'package:yuanying/modules/danmaku/widgets/danmaku_view.dart';
 import 'package:yuanying/modules/video/controllers/video_controller.dart';
@@ -503,6 +504,22 @@ class _DetailPageState extends State<DetailPage>
           ),
           scaffoldBackgroundColor: Colors.black,
         ),
+        child: playerContent,
+      );
+    }
+
+    // ===== iOS 非全屏竖屏时，添加顶部安全区域避开刘海 =====
+    final bool needSafeArea = Platform.isIOS &&
+        !controller.playerController.isFullScreen.value &&
+        MediaQuery.of(context).orientation == Orientation.portrait &&
+        !removeSafeArea;
+
+    if (needSafeArea) {
+      playerContent = SafeArea(
+        top: true,
+        bottom: false,
+        left: false,
+        right: false,
         child: playerContent,
       );
     }

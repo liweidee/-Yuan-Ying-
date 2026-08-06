@@ -1,18 +1,19 @@
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter/gestures.dart';
 import 'package:get/get.dart';
 import 'package:yuanying/core/routes/app_pages.dart';
 import 'package:yuanying/core/theme/style.dart';
 import 'package:yuanying/common/widgets/button/icon_button.dart';
-import 'package:yuanying/common/widgets/flutter/refresh_indicator.dart'
-    as custom;
+import 'package:yuanying/common/widgets/flutter/refresh_indicator.dart' as custom;
 import 'package:yuanying/common/widgets/video_card/video_card_v.dart';
 import 'package:yuanying/common/widgets/video_card/video_card_h.dart';
 import 'package:yuanying/common/skeleton/video_card_v.dart';
 import 'package:yuanying/t4/models/video_item.dart';
 import 'package:yuanying/modules/home/controllers/home_controller.dart';
+import 'package:yuanying/modules/home/controllers/category_controller.dart';
+import 'package:yuanying/modules/home/views/category_page.dart';
+import 'package:yuanying/modules/home/views/recommend_page.dart';
 import 'package:yuanying/t4/services/source_manager.dart';
 import 'package:yuanying/utils/grid.dart';
 import 'package:yuanying/modules/action/widgets/action_renderer.dart';
@@ -23,6 +24,8 @@ import 'package:yuanying/services/search_filter_service.dart';
 import 'package:yuanying/utils/storage.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:yuanying/modules/setting/views/site_config_page.dart';
+import 'package:yuanying/common/widgets/custom_height_widget.dart';
+import 'package:yuanying/models/common/bar_hide_type.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -35,7 +38,6 @@ class _HomePageState extends State<HomePage>
     with AutomaticKeepAliveClientMixin {
   late final HomeController controller;
   late final SourceManager sourceManager;
-  late TextScaler textScaler;
   late final ActionRenderer actionRenderer;
 
   @override
@@ -47,14 +49,11 @@ class _HomePageState extends State<HomePage>
     controller = Get.put(HomeController());
     sourceManager = Get.find<SourceManager>();
     actionRenderer = Get.find<ActionRenderer>();
-
-    // ===== 监听滚动更新底栏偏移 =====
-    controller.scrollController.addListener(_onScrollUpdateBottomBar);
   }
 
-  /// 跳转到详情页或处理 Action
+  // 跳转详情
   void _navigateToDetail(VideoItem item) {
-    // ===== 1. Action 卡片处理 =====
+    // Action 卡片
     if (item.isAction) {
       final config = item.actionConfig;
       if (config != null) {
@@ -70,54 +69,37 @@ class _HomePageState extends State<HomePage>
       return;
     }
 
-    // ===== 2. 文件夹处理 =====
+    // 文件夹
     if (item.vodTag == 'folder') {
       final category = Category(
         typeId: item.vodId,
         typeName: item.vodName,
       );
       controller.switchCategory(category);
-      if (controller.scrollController.hasClients) {
-        controller.scrollController.animateTo(
-          0,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
-      }
       return;
     }
 
-    // ===== 3. 豆瓣源：直接跳转到搜索结果页 =====
+    // 豆瓣/TMDB 源
     final site = sourceManager.currentSite.value;
     final siteName = site?['name']?.toString() ?? '';
     if (siteName.contains('豆瓣[官]') || siteName.contains('TMDB[官]')) {
-      // 获取搜索过滤器
       final filterService = Get.find<SearchFilterService>();
       List<String> sourceKeys;
       final bool onlyDefault = filterService.onlyDefaultSource.value;
-      
       if (onlyDefault) {
-        // 只搜当前源
         final currentKey = sourceManager.currentSite.value?['key']?.toString() ?? '';
         sourceKeys = currentKey.isNotEmpty ? [currentKey] : [];
       } else {
-        // 搜所有已启用的源
         sourceKeys = filterService.enabledSourceKeyList;
       }
-
-      // 兜底：如果源列表为空，则使用当前源
       if (sourceKeys.isEmpty) {
         final currentKey = sourceManager.currentSite.value?['key']?.toString() ?? '';
         if (currentKey.isNotEmpty) sourceKeys = [currentKey];
       }
-
-      // 如果仍然为空，提示并返回
       if (sourceKeys.isEmpty) {
         SmartDialog.showToast('没有可用的搜索源');
         return;
       }
-
-      // 跳转到搜索结果页
       Get.toNamed(
         AppPages.searchResult,
         arguments: {
@@ -129,11 +111,10 @@ class _HomePageState extends State<HomePage>
       return;
     }
 
-    // ===== 4. 普通视频：跳转详情页 =====
-    final pwd = site?['ext'] is Map 
+    // 普通视频
+    final pwd = site?['ext'] is Map
         ? (site!['ext'] as Map)['pwd']?.toString() ?? 'tinydust'
         : 'tinydust';
-    
     Get.toNamed(
       AppPages.detail,
       arguments: {
@@ -153,193 +134,8 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  // ===== 滚动监听：更新底栏偏移 =====
-  void _onScrollUpdateBottomBar() {
-    final scrollCtr = controller.scrollController;
-    if (!scrollCtr.hasClients) return;
-    final offset = scrollCtr.position.pixels;
-    
-    final mainController = Get.find<MainController>();
-    mainController.updateBottomBarOffset(offset);
-  }
-
-  @override
-  void dispose() {
-    controller.scrollController.removeListener(_onScrollUpdateBottomBar);
-    super.dispose();
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    textScaler = MediaQuery.textScalerOf(context);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    super.build(context);
-    final theme = Theme.of(context);
-
-    return Scaffold(
-      body: Container(
-        clipBehavior: Clip.hardEdge,
-        margin: const EdgeInsets.symmetric(horizontal: Style.safeSpace),
-        decoration: const BoxDecoration(borderRadius: Style.mdRadius),
-        child: Obx(() {
-          // ===== 1. 配置加载中 =====
-          if (sourceManager.isConfigLoading.value) {
-            return Column(
-              children: [
-                _buildTopBar(theme),
-                Expanded(
-                  child: Center(
-                    child: SizedBox(
-                      width: 40,
-                      height: 40,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 3,
-                        color: theme.colorScheme.primary,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            );
-          }
-
-          if (sourceManager.configLoadError.value) {
-            // 配置加载失败
-            return _buildConfigError(theme);
-          }
-
-          // ===== 2. 首页请求中 =====
-          if (controller.isHomeLoading.value) {
-            return Column(
-              children: [
-                _buildTopBar(theme),
-                Expanded(
-                  child: Center(
-                    child: SizedBox(
-                      width: 40,
-                      height: 40,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 3,
-                        color: theme.colorScheme.primary,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            );
-          }
-
-          // ===== 3. 切换源中 =====
-          if (controller.isSwitchingSource.value) {
-            return Column(
-              children: [
-                _buildTopBar(theme),
-                Expanded(
-                  child: Center(
-                    child: SizedBox(
-                      width: 40,
-                      height: 40,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 3,
-                        color: theme.colorScheme.primary,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            );
-          }
-
-          // ===== 4. 首页请求失败 =====
-          if (controller.isHomeError.value) {
-            return Column(
-              children: [
-                _buildTopBar(theme),
-                Expanded(
-                  child: Center(
-                    child: Text(
-                      '暂无数据',
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: theme.colorScheme.outline,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            );
-          }
-
-          // ===== 5. 配置列表为空（加载完成后才判断） =====
-          if (sourceManager.sites.isEmpty) {
-            return _buildEmptyConfig(theme);
-          }
-
-          // ===== 6. 正常内容 =====
-          final bool isInstant = Get.find<MainController>().isInstantMode;
-          final bool isRecommend = controller.currentCategory.value?.typeId == 'recommend' || (controller.currentCategory.value == null && controller.categories.isNotEmpty);
-
-          Widget scrollView = CustomScrollView(
-            controller: controller.scrollController,
-            physics: const AlwaysScrollableScrollPhysics(),
-            slivers: [
-              SliverAppBar(
-                pinned: !controller.hideTopBar.value,
-                floating: controller.hideTopBar.value,
-                snap: false,
-                elevation: 0,
-                backgroundColor: theme.colorScheme.surface,
-                toolbarHeight: 52,
-                expandedHeight: 52,
-                key: ValueKey('appbar_${isInstant ? 'instant' : 'sync'}'),
-                flexibleSpace: FlexibleSpaceBar(
-                  background: _buildTopBar(theme),
-                ),
-              ),
-              if (controller.categories.isNotEmpty)   // 仅当有分类时才显示
-                SliverPersistentHeader(
-                  pinned: true,
-                  delegate: _CategoryHeaderDelegate(theme: theme),
-                ),
-              Obx(() {
-                final siteKey = sourceManager.currentSite.value?['key'] ?? '';
-                final showFilter = controller.getFilterVisibility(siteKey);
-                final cid = controller.currentCategory.value?.typeId;
-                final hasFilter = cid != null &&
-                    controller.filters.containsKey(cid) &&
-                    controller.filters[cid]!.isNotEmpty;
-
-                if (!showFilter || !hasFilter) {
-                  return const SliverToBoxAdapter(child: SizedBox.shrink());
-                }
-                return SliverToBoxAdapter(child: _buildFilterBar(theme));
-              }),
-              const SliverToBoxAdapter(child: SizedBox(height: 12)),
-              Obx(() => _buildContent(theme)),
-            ],
-          );
-
-          // 推荐分类禁用下拉刷新
-          if (!isRecommend) {
-            return custom.RefreshIndicator(
-              onRefresh: controller.refreshData,
-              child: scrollView,
-            );
-          }
-
-          return scrollView;
-        }),
-      ),
-    );
-  }
-
   Widget _buildEmptyConfig(ThemeData theme) {
     final colorScheme = theme.colorScheme;
-
     return Column(
       children: [
         _buildTopBar(theme),
@@ -350,12 +146,11 @@ class _HomePageState extends State<HomePage>
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  // 第一行：图标 + 文字（水平居中）
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Icon(
-                        Icons.api_outlined,  // 替换为更合适的接口图标
+                        Icons.api_outlined,
                         size: 24,
                         color: colorScheme.outline.withValues(alpha: 0.6),
                       ),
@@ -372,7 +167,6 @@ class _HomePageState extends State<HomePage>
                     ],
                   ),
                   const SizedBox(height: 20),
-                  // 第二行：配置按钮（无图标）
                   FilledButton(
                     onPressed: () => Get.toNamed(AppPages.setting),
                     style: FilledButton.styleFrom(
@@ -438,7 +232,6 @@ class _HomePageState extends State<HomePage>
                   const SizedBox(height: 16),
                   FilledButton(
                     onPressed: () {
-                      // 重新加载配置
                       sourceManager.loadConfig();
                     },
                     style: FilledButton.styleFrom(
@@ -459,7 +252,7 @@ class _HomePageState extends State<HomePage>
   Widget _buildTopBar(ThemeData theme) {
     return Container(
       height: 52,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
       color: theme.colorScheme.surface,
       child: Row(
         children: [
@@ -470,21 +263,21 @@ class _HomePageState extends State<HomePage>
             mainAxisSize: MainAxisSize.min,
             children: [
               IconButton(
-                  icon: const Icon(Icons.search, size: 20),
+                  icon: const Icon(Icons.search, size: 22),
                   onPressed: () => Get.toNamed(AppPages.search),
-                  splashRadius: 20),
+                  splashRadius: 22),
               IconButton(
                   icon: const Icon(Icons.send, size: 20),
                   onPressed: _showPushDialog,
                   splashRadius: 20),
               IconButton(
-                  icon: const Icon(Icons.history, size: 20),
+                  icon: const Icon(Icons.history, size: 22),
                   onPressed: () => Get.toNamed(AppPages.history),
-                  splashRadius: 20),
+                  splashRadius: 22),
               IconButton(
-                  icon: const Icon(Icons.star_border, size: 20),
+                  icon: const Icon(Icons.star_border, size: 22),
                   onPressed: () => Get.toNamed(AppPages.favorite),
-                  splashRadius: 20),
+                  splashRadius: 22),
             ],
           ),
         ],
@@ -501,17 +294,6 @@ class _HomePageState extends State<HomePage>
       return Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // ----- 头像：点击弹出切换接口弹窗 -----
-          // GestureDetector(
-          //   onTap: _showSwitchInterfaceDialog,
-          //   child: CircleAvatar(
-          //     radius: 14,
-          //     backgroundColor: theme.colorScheme.primaryContainer,
-          //     backgroundImage: logo.isNotEmpty ? NetworkImage(logo) : null,
-          //     child: logo.isEmpty ? const Icon(Icons.api, size: 16) : null,
-          //   ),
-          // ),
-          // ----- 头像：圆角方形 -----
           GestureDetector(
             onTap: _showSwitchInterfaceDialog,
             child: ClipRRect(
@@ -539,12 +321,11 @@ class _HomePageState extends State<HomePage>
             ),
           ),
           const SizedBox(width: 6),
-          // ----- 源名称：点击弹出切换源弹窗 -----
           GestureDetector(
             onTap: _showSourceSwitchDialog,
-            behavior: HitTestBehavior.opaque,  // 确保点击事件穿透
+            behavior: HitTestBehavior.opaque,
             child: SizedBox(
-              width: 120,
+              width: 100,
               child: MarqueeText(
                 name,
                 style: TextStyle(
@@ -569,7 +350,6 @@ class _HomePageState extends State<HomePage>
     final sites = sourceManager.sites;
     if (sites.isEmpty) return;
 
-    // ===== 提取所有标签（按源显示顺序排列） =====
     final allTags = <String>[];
     for (final site in sites) {
       final name = site['name']?.toString() ?? '';
@@ -584,7 +364,6 @@ class _HomePageState extends State<HomePage>
     }
     final tagList = allTags;
 
-    // ---- 修改宽度计算 ----
     final double screenWidth = MediaQuery.of(context).size.width;
     final double dialogWidth = screenWidth > 600 ? 400.0 : screenWidth * 0.85;
 
@@ -600,7 +379,6 @@ class _HomePageState extends State<HomePage>
             child: Container(
               width: dialogWidth,
               constraints: BoxConstraints(
-                // maxHeight: MediaQuery.of(context).size.height * 0.8,
                 maxHeight: 500.0,
                 minHeight: 300.0,
               ),
@@ -631,8 +409,7 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  /// 切换接口弹窗（中央弹窗）
-    void _showSwitchInterfaceDialog() {
+  void _showSwitchInterfaceDialog() {
     final customSites = GStorage.getCustomSites();
     if (customSites.isEmpty) {
       SmartDialog.showToast('暂无接口配置，请先添加');
@@ -676,7 +453,6 @@ class _HomePageState extends State<HomePage>
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // ----- 头部 -----
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 20, 16, 12),
                   child: Row(
@@ -721,7 +497,6 @@ class _HomePageState extends State<HomePage>
                     ],
                   ),
                 ),
-                // ----- 列表 -----
                 Flexible(
                   child: ListView(
                     shrinkWrap: true,
@@ -735,7 +510,6 @@ class _HomePageState extends State<HomePage>
 
                       return GestureDetector(
                         onTap: () {
-                          // 保存接口配置 key
                           GStorage.setSetting('selected_config_key', key);
 
                           if (source == 'local') {
@@ -760,17 +534,14 @@ class _HomePageState extends State<HomePage>
                               }
                             }
                           } else if (source == 'local_file') {
-                            // ===== 新增：处理本地文件配置 =====
                             final filePath = site['api']?.toString();
                             if (filePath != null && filePath.isNotEmpty) {
                               sourceManager.loadFileConfig(filePath, siteKey: key);
                             }
                           } else {
-                            // 远程接口正常切换
                             sourceManager.switchConfig(key);
                           }
 
-                          // 关闭弹窗
                           Navigator.pop(dialogContext);
                         },
                         child: Container(
@@ -820,8 +591,367 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  static void _showAllCategoriesDialog(BuildContext context) {
-    final controller = Get.find<HomeController>();
+  double _getTextWidth(BuildContext context, String text, TextStyle style) {
+    final textPainter = TextPainter(
+      text: TextSpan(text: text, style: style),
+      textDirection: TextDirection.ltr,
+      textScaler: MediaQuery.textScalerOf(context),
+    )..layout();
+    return textPainter.width.clamp(0.0, MediaQuery.of(context).size.width * 0.25);
+  }
+
+  // Widget _buildNormalContent(ThemeData theme) {
+  //   final mainController = Get.find<MainController>();
+  //   final hideTopBar = controller.hideTopBar.value;
+  //   final topPadding = MediaQuery.of(context).padding.top;
+  //   final topBarHeight = 52 + topPadding;
+
+  //   // 构建顶部栏
+  //   Widget topBar = Container(
+  //     height: topBarHeight,
+  //     padding: EdgeInsets.only(top: topPadding),
+  //     color: theme.colorScheme.surface,
+  //     child: _buildTopBar(theme),
+  //   );
+
+  //   if (hideTopBar) {
+  //     final offset = mainController.topBarOffset.value;
+  //     final maxOffset = topBarHeight;
+  //     if (mainController.barHideType == BarHideType.instant) {
+  //       final show = offset < maxOffset * 0.5;
+  //       topBar = AnimatedOpacity(
+  //         opacity: show ? 1 : 0,
+  //         duration: const Duration(milliseconds: 300),
+  //         child: AnimatedContainer(
+  //           duration: const Duration(milliseconds: 300),
+  //           height: show ? topBarHeight : 0,
+  //           child: topBar,
+  //         ),
+  //       );
+  //     } else {
+  //       final visibleHeight = (topBarHeight - offset).clamp(0.0, topBarHeight);
+  //       topBar = CustomHeightWidget(
+  //         height: visibleHeight,
+  //         offset: Offset(0, -offset),
+  //         child: topBar,
+  //       );
+  //     }
+  //   }
+
+  //   // 分类 TabBar
+  //   final categories = controller.categories;
+  //   final siteKey = sourceManager.currentSite.value?['key'] ?? '';
+  //   final showFilter = controller.getFilterVisibility(siteKey);
+
+  //   Widget tabBar = Container(
+  //     height: 46,
+  //     color: theme.colorScheme.surface,
+  //     child: Row(
+  //       crossAxisAlignment: CrossAxisAlignment.stretch,
+  //       children: [
+  //         Expanded(
+  //           child: SingleChildScrollView(
+  //             scrollDirection: Axis.horizontal,
+  //             physics: const BouncingScrollPhysics(),
+  //             child: Row(
+  //               children: categories.map((item) {
+  //                 final isSelected = controller.currentCategory.value?.typeId == item.typeId;
+  //                 final textStyle = TextStyle(
+  //                   fontSize: 14,
+  //                   color: isSelected
+  //                       ? theme.colorScheme.primary
+  //                       : theme.colorScheme.onSurface,
+  //                   fontWeight: isSelected ? FontWeight.w500 : FontWeight.normal,
+  //                 );
+  //                 return GestureDetector(
+  //                   onTap: () => controller.switchCategory(item),
+  //                   child: Container(
+  //                     height: 46,
+  //                     padding: const EdgeInsets.symmetric(horizontal: 16),
+  //                     child: Stack(
+  //                       alignment: Alignment.center,
+  //                       children: [
+  //                         Text(item.typeName, style: textStyle),
+  //                         if (isSelected)
+  //                           Positioned(
+  //                             bottom: 6,
+  //                             child: Container(
+  //                               width: _getTextWidth(context, item.typeName, textStyle),
+  //                               height: 2,
+  //                               decoration: BoxDecoration(
+  //                                 color: theme.colorScheme.primary,
+  //                                 borderRadius: BorderRadius.circular(1),
+  //                               ),
+  //                             ),
+  //                           ),
+  //                       ],
+  //                     ),
+  //                   ),
+  //                 );
+  //               }).toList(),
+  //             ),
+  //           ),
+  //         ),
+  //         Container(
+  //           color: theme.colorScheme.surface,
+  //           child: Row(
+  //             children: [
+  //               Obx(() {
+  //                 final cid = controller.currentCategory.value?.typeId;
+  //                 final hasFilter = cid != null &&
+  //                     controller.filters.containsKey(cid) &&
+  //                     controller.filters[cid]!.isNotEmpty;
+  //                 if (!hasFilter) return const SizedBox.shrink();
+  //                 return IconButton(
+  //                   padding: EdgeInsets.zero,
+  //                   constraints: const BoxConstraints(),
+  //                   icon: Icon(
+  //                     showFilter ? Icons.filter_alt : Icons.filter_alt_off,
+  //                     size: 20,
+  //                   ),
+  //                   onPressed: () => controller.toggleFilterBar(siteKey),
+  //                   splashRadius: 20,
+  //                 );
+  //               }),
+  //               const SizedBox(width: 4),
+  //               Obx(() {
+  //                 final mode = controller.cardLayoutMode.value;
+  //                 return IconButton(
+  //                   padding: EdgeInsets.zero,
+  //                   constraints: const BoxConstraints(),
+  //                   icon: Icon(mode.icon, size: 20),
+  //                   onPressed: controller.toggleCardLayout,
+  //                   tooltip: mode.label,
+  //                   splashRadius: 20,
+  //                 );
+  //               }),
+  //               const SizedBox(width: 4),
+  //               IconButton(
+  //                 padding: EdgeInsets.zero,
+  //                 constraints: const BoxConstraints(),
+  //                 icon: const Icon(Icons.expand_more, size: 20),
+  //                 onPressed: () => _showAllCategoriesDialog(context),
+  //                 splashRadius: 20,
+  //               ),
+  //             ],
+  //           ),
+  //         ),
+  //       ],
+  //     ),
+  //   );
+
+  //   // 判断当前分类是否有筛选
+  //   final currentCategory = controller.currentCategory.value;
+  //   final hasFilter = currentCategory != null &&
+  //       controller.filters.containsKey(currentCategory.typeId) &&
+  //       controller.filters[currentCategory.typeId]!.isNotEmpty;
+
+  //   // ===== TabBarView 内容：推荐分类单独渲染 =====
+  //   Widget tabView = TabBarView(
+  //     controller: controller.tabController!,
+  //     children: categories.map((category) {
+  //       // ===== 推荐分类使用 RecommendPage =====
+  //       if (category.typeId == 'recommend') {
+  //         return RecommendPage(
+  //           data: controller.recommendList,
+  //           onVideoTap: _navigateToDetail,
+  //         );
+  //       }
+
+  //       // ===== 非推荐分类使用 CategoryPage =====
+  //       final ctrl = controller.getOrCreateController(category.typeId);
+  //       return CategoryPage(
+  //         controller: ctrl!,
+  //         onVideoTap: _navigateToDetail,
+  //       );
+  //     }).toList(),
+  //   );
+
+  //   return Column(
+  //     children: [
+  //       topBar,
+  //       tabBar,
+  //       // 只有无筛选时才添加间距（有筛选时由筛选栏自身提供）
+  //       // if (!hasFilter) const SizedBox(height: 8),
+  //       Expanded(child: tabView),
+  //     ],
+  //   );
+  // }
+
+  Widget _buildNormalContent(ThemeData theme) {
+    final mainController = Get.find<MainController>();
+    final hideTopBar = controller.hideTopBar.value;
+    final topPadding = MediaQuery.of(context).padding.top;
+    final topBarHeight = 52 + topPadding;
+
+    // 构建顶部栏
+    Widget topBar = Container(
+      height: topBarHeight,
+      padding: EdgeInsets.only(top: topPadding),
+      color: theme.colorScheme.surface,
+      child: _buildTopBar(theme),
+    );
+
+    if (hideTopBar) {
+      final offset = mainController.topBarOffset.value;
+      final maxOffset = topBarHeight;
+      if (mainController.barHideType == BarHideType.instant) {
+        final show = offset < maxOffset * 0.5;
+        topBar = AnimatedOpacity(
+          opacity: show ? 1 : 0,
+          duration: const Duration(milliseconds: 300),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 300),
+            height: show ? topBarHeight : 0,
+            child: topBar,
+          ),
+        );
+      } else {
+        final visibleHeight = (topBarHeight - offset).clamp(0.0, topBarHeight);
+        topBar = CustomHeightWidget(
+          height: visibleHeight,
+          offset: Offset(0, -offset),
+          child: topBar,
+        );
+      }
+    }
+
+    // ===== 分类 TabBar（参考详情页布局） =====
+    final categories = controller.categories;
+    final siteKey = sourceManager.currentSite.value?['key'] ?? '';
+    final showFilter = controller.getFilterVisibility(siteKey);
+
+    Widget tabBar = Container(
+      height: 46,
+      color: theme.colorScheme.surface,
+      child: Row(
+        children: [
+          // 左侧：原生 TabBar
+          Expanded(
+            flex: 3,
+            child: TabBar(
+              controller: controller.tabController,
+              isScrollable: true,
+              tabAlignment: TabAlignment.start,
+              dividerColor: Colors.transparent,
+              dividerHeight: 0,
+              indicatorColor: theme.colorScheme.primary,
+              // ===== 长度：label 与文字等宽，tab 与整个 Tab 等宽 =====
+              indicatorSize: TabBarIndicatorSize.label,
+              // ===== 粗细：2.0 是默认，可调大调小 =====
+              indicatorWeight: 0.1,
+              // 下划线左右各缩进大小
+              // indicatorPadding: EdgeInsets.zero,
+              // indicatorPadding: EdgeInsets.symmetric(horizontal: 4),
+              labelColor: theme.colorScheme.primary,
+              unselectedLabelColor: theme.colorScheme.onSurface,
+              labelStyle: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+              ),
+              unselectedLabelStyle: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.normal,
+              ),
+              // ===== 去除 hover/点击/长按背景层效果 =====
+              overlayColor: WidgetStateProperty.all(Colors.transparent),
+              splashFactory: NoSplash.splashFactory,
+              tabs: categories.map((item) {
+                return Tab(text: item.typeName);
+              }).toList(),
+              onTap: (index) {
+                controller.switchCategory(categories[index]);
+              },
+            ),
+          ),
+          // 右侧：固定按钮区
+          Container(
+            color: theme.colorScheme.surface,
+            child: Row(
+              children: [
+                // 筛选开关（只有当前分类有筛选时才显示）
+                Obx(() {
+                  final cid = controller.currentCategory.value?.typeId;
+                  final hasFilter = cid != null &&
+                      controller.filters.containsKey(cid) &&
+                      controller.filters[cid]!.isNotEmpty;
+                  if (!hasFilter) return const SizedBox.shrink();
+                  return IconButton(
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                    icon: Icon(
+                      showFilter ? Icons.filter_alt : Icons.filter_alt_off,
+                      size: 20,
+                    ),
+                    onPressed: () => controller.toggleFilterBar(siteKey),
+                    splashRadius: 20,
+                  );
+                }),
+                const SizedBox(width: 4),
+                // 布局切换
+                Obx(() {
+                  final mode = controller.cardLayoutMode.value;
+                  return IconButton(
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                    icon: Icon(mode.icon, size: 20),
+                    onPressed: controller.toggleCardLayout,
+                    tooltip: mode.label,
+                    splashRadius: 20,
+                  );
+                }),
+                const SizedBox(width: 4),
+                // 全部分类展开
+                IconButton(
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                  icon: const Icon(Icons.expand_more, size: 20),
+                  onPressed: () => _showAllCategoriesDialog(context),
+                  splashRadius: 20,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+
+    // 判断当前分类是否有筛选
+    final currentCategory = controller.currentCategory.value;
+    final hasFilter = currentCategory != null &&
+        controller.filters.containsKey(currentCategory.typeId) &&
+        controller.filters[currentCategory.typeId]!.isNotEmpty;
+
+    // ===== TabBarView 内容 =====
+    Widget tabView = TabBarView(
+      controller: controller.tabController!,
+      children: categories.map((category) {
+        if (category.typeId == 'recommend') {
+          return RecommendPage(
+            data: controller.recommendList,
+            onVideoTap: _navigateToDetail,
+          );
+        }
+        final ctrl = controller.getOrCreateController(category.typeId);
+        return CategoryPage(
+          controller: ctrl!,
+          onVideoTap: _navigateToDetail,
+        );
+      }).toList(),
+    );
+
+    return Column(
+      children: [
+        topBar,
+        tabBar,
+        // 只有无筛选时才添加间距（有筛选时由筛选栏自身提供）
+        if (!hasFilter) const SizedBox(height: 8),
+        Expanded(child: tabView),
+      ],
+    );
+  }
+
+  void _showAllCategoriesDialog(BuildContext context) {
     final categories = controller.categories;
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
@@ -833,13 +963,12 @@ class _HomePageState extends State<HomePage>
       builder: (context) {
         return Container(
           decoration: BoxDecoration(
-            color: colorScheme.surface, // 使用主题表面色
+            color: colorScheme.surface,
             borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // 拖拽指示器
               Container(
                 margin: const EdgeInsets.only(top: 12),
                 width: 40,
@@ -864,11 +993,7 @@ class _HomePageState extends State<HomePage>
                     const Spacer(),
                     GestureDetector(
                       onTap: () => Navigator.pop(context),
-                      child: Icon(
-                        Icons.close,
-                        size: 20,
-                        color: colorScheme.outline,
-                      ),
+                      child: Icon(Icons.close, size: 20, color: colorScheme.outline),
                     ),
                   ],
                 ),
@@ -924,416 +1049,117 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  /// 筛选栏 - 彻底解决溢出问题
-  Widget _buildFilterBar(ThemeData theme) {
-    return Obx(() {
-      final cid = controller.currentCategory.value?.typeId;
-      if (cid == null) return const SizedBox.shrink();
-
-      final groups = controller.filters[cid];
-      if (groups == null || groups.isEmpty) return const SizedBox.shrink();
-
-      return Container(
-        color: theme.colorScheme.surface,
-        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min, // 高度由内容决定
-          children: groups.map((group) {
-            // 构建该组的所有筛选项
-            final children = group.values.map((value) {
-              final isSelected =
-                  controller.currentFilterValues[group.key] == value.value;
-              return Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: GestureDetector(
-                  onTap: () => controller.updateFilter(group.key, value.value),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-                    decoration: BoxDecoration(
-                      color: isSelected
-                          ? theme.colorScheme.secondaryContainer
-                          : Colors.transparent,
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: Text(
-                      value.name,
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: isSelected
-                            ? theme.colorScheme.onSecondaryContainer
-                            : theme.colorScheme.onSurface,
-                        fontWeight: isSelected ? FontWeight.w500 : FontWeight.normal,
-                      ),
-                    ),
-                  ),
-                ),
-              );
-            }).toList();
-
-            // 每个筛选组独立水平滚动
-            // ClampingScrollPhysics：只有内容溢出时才可滚动，未溢出不可拖动
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 4),
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                physics: const ClampingScrollPhysics(), // 溢出才滚动
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: children,
-                ),
-              ),
-            );
-          }).toList(),
-        ),
-      );
-    });
-  }
-
-  Widget _buildContent(ThemeData theme) {
-    final mode = controller.cardLayoutMode.value;
-
-    // ===== 列表模式 =====
-    if (Grid.isListMode(mode)) {
-      // 加载中
-      if (controller.isLoading.value && controller.videoList.isEmpty) {
-        return SliverFillRemaining(
-          child: Center(
-            child: SizedBox(
-              width: 40,
-              height: 40,
-              child: CircularProgressIndicator(
-                strokeWidth: 3,
-                color: theme.colorScheme.primary,
-              ),
-            ),
-          ),
-        );
-      }
-
-      // 错误状态
-      if (controller.errorMsg.value.isNotEmpty &&
-          controller.errorMsg.value != '暂无配置，请去设置页添加接口' &&
-          controller.videoList.isEmpty) {
-        return SliverFillRemaining(
-          child: Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(controller.errorMsg.value),
-                const SizedBox(height: 16),
-                ElevatedButton(
-                  onPressed: controller.refreshData,
-                  child: const Text('重试'),
-                ),
-              ],
-            ),
-          ),
-        );
-      }
-
-      // 空数据
-      if (controller.videoList.isEmpty) {
-        return SliverFillRemaining(
-          child: Center(
-            child: Text(
-              '暂无数据',
-              style: TextStyle(
-                color: theme.colorScheme.outline,
-                fontSize: 14,
-              ),
-            ),
-          ),
-        );
-      }
-
-      // 列表渲染
-      return SliverPadding(
-        padding: const EdgeInsets.only(bottom: 100),
-        sliver: SliverList(
-          delegate: SliverChildBuilderDelegate(
-            (context, index) {
-              if (index == controller.videoList.length - 1) controller.loadMore();
-              final item = controller.videoList[index];
-              return VideoCardH(
-                videoItem: item,
-                onTap: () => _navigateToDetail(item), //传入回调
-              );
-            },
-            childCount: controller.videoList.length,
-          ),
-        ),
-      );
-    }
-
-    // ===== 网格模式（2列/3列） =====
-    final gridDelegate = Grid.videoCardVDelegate(
-      context,
-      mode: mode,
-      minHeight: 25,
-    );
-
-    // 加载中显示圆圈（首次加载分类或筛选变化时）
-    if (controller.isLoading.value && controller.videoList.isEmpty) {
-      return SliverFillRemaining(
-        child: Center(
-          child: SizedBox(
-            width: 40,
-            height: 40,
-            child: CircularProgressIndicator(
-              strokeWidth: 3,
-              color: theme.colorScheme.primary,
-            ),
-          ),
-        ),
-      );
-    }
-
-    // 错误状态（非“暂无配置”的错误）
-    if (controller.errorMsg.value.isNotEmpty &&
-        controller.errorMsg.value != '暂无配置，请去设置页添加接口' &&
-        controller.videoList.isEmpty) {
-      return SliverFillRemaining(
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(controller.errorMsg.value),
-              const SizedBox(height: 16),
-              ElevatedButton(
-                onPressed: controller.refreshData,
-                child: const Text('重试'),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    // 空数据
-    if (controller.videoList.isEmpty) {
-      return SliverFillRemaining(
-        child: Center(
-          child: Text(
-            '暂无数据',
-            style: TextStyle(
-              color: theme.colorScheme.outline,
-              fontSize: 14,
-            ),
-          ),
-        ),
-      );
-    }
-
-    // 显示数据列表（网格）
-    return SliverPadding(
-      padding: const EdgeInsets.only(bottom: 100),
-      sliver: SliverGrid.builder(
-        gridDelegate: gridDelegate,
-        itemBuilder: (context, index) {
-          if (index == controller.videoList.length - 1) controller.loadMore();
-          final item = controller.videoList[index];
-          return VideoCardV(
-            videoItem: item,
-            onTap: () => _navigateToDetail(item),  //传入回调
-          );
-        },
-        itemCount: controller.videoList.length,
-      ),
-    );
-  }
-
-  late final SliverGridDelegateWithExtentAndRatio gridDelegate =
-      SliverGridDelegateWithExtentAndRatio(
-    mainAxisSpacing: Style.cardSpace,
-    crossAxisSpacing: Style.cardSpace,
-    maxCrossAxisExtent: 180.0,
-    childAspectRatio: Style.aspectRatio,
-    mainAxisExtent: textScaler.scale(90),
-  );
-}
-
-class _CategoryHeaderDelegate extends SliverPersistentHeaderDelegate {
-  final ThemeData theme;
-
-  const _CategoryHeaderDelegate({required this.theme});
-
-  @override
-  double get minExtent => 46;
-
-  @override
-  double get maxExtent => 46;
-
-  @override
-  bool shouldRebuild(covariant _CategoryHeaderDelegate old) => false;
-
-  @override
-  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
-    return Container(
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        boxShadow: [
-          BoxShadow(
-            color: theme.shadowColor.withOpacity(0.08),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: const _CategoryStickyContent(),
-    );
-  }
-}
-
-double _getTextWidth(BuildContext context, String text, TextStyle style) {
-  final textPainter = TextPainter(
-    text: TextSpan(text: text, style: style),
-    textDirection: TextDirection.ltr,
-    textScaler: MediaQuery.textScalerOf(context),
-  )..layout();
-  // 限制最大宽度，防止极端情况
-  return textPainter.width.clamp(0.0, MediaQuery.of(context).size.width * 0.25);
-}
-
-class _CategoryStickyContent extends StatelessWidget {
-  const _CategoryStickyContent();
-
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final theme = Theme.of(context);
-    final controller = Get.find<HomeController>();
-    final sourceManager = Get.find<SourceManager>();
 
-    return Obx(() {
-      final categories = controller.categories;
-      if (categories.isEmpty) {
-        return ColoredBox(
-          color: theme.colorScheme.surface,
-          child: const SizedBox(height: 46),
-        );
-      }
-
-      final siteKey = sourceManager.currentSite.value?['key'] ?? '';
-      final showFilter = controller.filterBarVisibility[siteKey] ?? true;
-
-      return Container(
-        height: 46,
-        color: theme.colorScheme.surface,
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // 左侧：分类列表
-            Expanded(
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                physics: const BouncingScrollPhysics(),
-                child: Row(
-                  children: categories.map((item) {
-                    final isSelected = controller.currentCategory.value?.typeId == item.typeId;
-                    final textStyle = TextStyle(
-                      fontSize: 14,
-                      color: isSelected
-                          ? theme.colorScheme.primary
-                          : theme.colorScheme.onSurface,
-                      fontWeight: isSelected ? FontWeight.w500 : FontWeight.normal,
-                    );
-
-                    return GestureDetector(
-                      onTap: () => controller.switchCategory(item),
-                      child: Container(
-                        height: 46,
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: Stack(
-                          alignment: Alignment.center,
-                          children: [
-                            // ===== 文字：永远居中 =====
-                            Text(
-                              item.typeName,
-                              style: textStyle,
-                            ),
-                            // ===== 下划线：独立定位，不挤压文字 =====
-                            if (isSelected)
-                              Positioned(
-                                bottom: 6,  // 距离底部 6px，可自由调整
-                                child: Container(
-                                  width: _getTextWidth(
-                                    context,
-                                    item.typeName,
-                                    textStyle,
-                                  ),
-                                  height: 2,
-                                  decoration: BoxDecoration(
-                                    color: theme.colorScheme.primary,
-                                    borderRadius: BorderRadius.circular(1),
-                                  ),
-                                ),
-                              ),
-                          ],
-                        ),
+    return Scaffold(
+      body: Container(
+        clipBehavior: Clip.hardEdge,
+        margin: const EdgeInsets.symmetric(horizontal: Style.safeSpace),
+        decoration: const BoxDecoration(borderRadius: Style.mdRadius),
+        child: Obx(() {
+          if (sourceManager.isConfigLoading.value) {
+            return Column(
+              children: [
+                _buildTopBar(theme),
+                Expanded(
+                  child: Center(
+                    child: SizedBox(
+                      width: 40,
+                      height: 40,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 3,
+                        color: theme.colorScheme.primary,
                       ),
-                    );
-                  }).toList(),
-                ),
-              ),
-            ),
-
-            // 右侧：固定按钮（无任何偏移，与容器对齐）
-            Container(
-              color: theme.colorScheme.surface,
-              child: Row(
-                children: [
-                  Obx(() {
-                    final cid = controller.currentCategory.value?.typeId;
-                    final hasFilter = cid != null &&
-                        controller.filters.containsKey(cid) &&
-                        controller.filters[cid]!.isNotEmpty;
-                    if (!hasFilter) return const SizedBox.shrink();
-                    return IconButton(
-                      icon: Icon(
-                        showFilter ? Icons.filter_alt : Icons.filter_alt_off,
-                        size: 20,
-                      ),
-                      onPressed: () => controller.toggleFilterBar(siteKey),
-                      splashRadius: 20,
-                    );
-                  }),
-                  Obx(() {
-                    final mode = controller.cardLayoutMode.value;
-                    return IconButton(
-                      icon: Icon(mode.icon, size: 20),
-                      onPressed: controller.toggleCardLayout,
-                      tooltip: mode.label,
-                      splashRadius: 20,
-                    );
-                  }),
-                  IconButton(
-                    icon: const Icon(Icons.expand_more, size: 20),
-                    onPressed: () =>
-                        _HomePageState._showAllCategoriesDialog(context),
-                    splashRadius: 20,
+                    ),
                   ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      );
-    });
+                ),
+              ],
+            );
+          }
+
+          if (sourceManager.configLoadError.value) {
+            return _buildConfigError(theme);
+          }
+
+          if (controller.isHomeLoading.value) {
+            return Column(
+              children: [
+                _buildTopBar(theme),
+                Expanded(
+                  child: Center(
+                    child: SizedBox(
+                      width: 40,
+                      height: 40,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 3,
+                        color: theme.colorScheme.primary,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            );
+          }
+
+          if (controller.isSwitchingSource.value) {
+            return Column(
+              children: [
+                _buildTopBar(theme),
+                Expanded(
+                  child: Center(
+                    child: SizedBox(
+                      width: 40,
+                      height: 40,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 3,
+                        color: theme.colorScheme.primary,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            );
+          }
+
+          if (controller.isHomeError.value) {
+            return Column(
+              children: [
+                _buildTopBar(theme),
+                Expanded(
+                  child: Center(
+                    child: Text(
+                      '暂无数据',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: theme.colorScheme.outline,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            );
+          }
+
+          if (sourceManager.sites.isEmpty) {
+            return _buildEmptyConfig(theme);
+          }
+
+          return _buildNormalContent(theme);
+        }),
+      ),
+    );
   }
 
-  double _getTextWidth(BuildContext context, String text, TextStyle style) {
-    final textPainter = TextPainter(
-      text: TextSpan(text: text, style: style),
-      textDirection: TextDirection.ltr,
-      textScaler: MediaQuery.textScalerOf(context),
-    )..layout();
-    return textPainter.width.clamp(0.0, MediaQuery.of(context).size.width * 0.25);
+  @override
+  void dispose() {
+    super.dispose();
   }
 }
 
-// ============================================================================
-// 源切换弹窗内部组件
-// ============================================================================
+// ===== 源切换弹窗内部组件 =====
 
 class _SourceSwitchDialogContent extends StatefulWidget {
   final List<Map<String, dynamic>> sites;
@@ -1359,27 +1185,20 @@ class _SourceSwitchDialogContentState extends State<_SourceSwitchDialogContent> 
   bool _isGridView = true;
   late ScrollController _scrollController;
 
-  // ---- 存储键 ----
   String get _scrollOffsetKey => 'source_switch_scroll_${_isGridView ? 'grid' : 'list'}';
-  String get _viewModeKey => 'source_switch_view_mode'; // 新增
+  String get _viewModeKey => 'source_switch_view_mode';
 
   @override
   void initState() {
     super.initState();
-    // 读取保存的视图模式
     _isGridView = GStorage.getSetting<bool>(_viewModeKey) ?? true;
-
     _scrollController = ScrollController();
-
-    // 滚动监听
     _scrollController.addListener(() {
       if (_scrollController.hasClients) {
         final offset = _scrollController.position.pixels;
         GStorage.setSetting(_scrollOffsetKey, offset);
       }
     });
-
-    // 恢复滚动位置
     final savedOffset = GStorage.getSetting<double>(_scrollOffsetKey) ?? 0.0;
     if (savedOffset > 0) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1399,9 +1218,7 @@ class _SourceSwitchDialogContentState extends State<_SourceSwitchDialogContent> 
   void _switchView() {
     setState(() {
       _isGridView = !_isGridView;
-      GStorage.setSetting(_viewModeKey, _isGridView); // 保存视图模式
-
-      // 重建控制器（保持滚动监听和恢复逻辑）
+      GStorage.setSetting(_viewModeKey, _isGridView);
       final oldController = _scrollController;
       _scrollController = ScrollController();
       _scrollController.addListener(() {
@@ -1411,8 +1228,6 @@ class _SourceSwitchDialogContentState extends State<_SourceSwitchDialogContent> 
         }
       });
       oldController.dispose();
-
-      // 恢复新视图的滚动位置
       final savedOffset = GStorage.getSetting<double>(_scrollOffsetKey) ?? 0.0;
       if (savedOffset > 0) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1448,7 +1263,7 @@ class _SourceSwitchDialogContentState extends State<_SourceSwitchDialogContent> 
 
     return Column(
       children: [
-        // ---------- 顶部区域：搜索框 + 视图切换 ----------
+        // ---------- 搜索框 ----------
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
           child: Row(
@@ -1491,7 +1306,6 @@ class _SourceSwitchDialogContentState extends State<_SourceSwitchDialogContent> 
                 ),
               ),
               const SizedBox(width: 12),
-              // 视图切换按钮（圆形）
               GestureDetector(
                 onTap: _switchView,
                 child: Container(
@@ -1502,7 +1316,6 @@ class _SourceSwitchDialogContentState extends State<_SourceSwitchDialogContent> 
                     shape: BoxShape.circle,
                   ),
                   child: Icon(
-                    // 图标与当前视图对应：网格视图显示列表图标，列表视图显示网格图标
                     _isGridView ? Icons.list : Icons.grid_view,
                     size: 24,
                     color: colorScheme.primary,
@@ -1513,7 +1326,7 @@ class _SourceSwitchDialogContentState extends State<_SourceSwitchDialogContent> 
           ),
         ),
 
-        // ---------- 中部区域：筛选标签（水平滚动，默认无背景） ----------
+        // ---------- 筛选标签 ----------
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           child: SingleChildScrollView(
@@ -1550,19 +1363,18 @@ class _SourceSwitchDialogContentState extends State<_SourceSwitchDialogContent> 
           ),
         ),
 
-        // ---------- 底部区域：列表 ----------
+        // ---------- 列表区域（移除顶部 padding） ----------
         Expanded(
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+            padding: const EdgeInsets.only(left: 16, right: 16, bottom: 16), // 移除顶部 padding
             child: _isGridView
                 ? GridView.builder(
                     controller: _scrollController,
                     gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                       crossAxisCount: 2,
                       crossAxisSpacing: 12,
-                      mainAxisSpacing: 12,
-                      childAspectRatio: 3.8,
-                      // mainAxisExtent: 50,
+                      mainAxisSpacing: 8,
+                      childAspectRatio: 3.2, // 调整宽高比，让卡片更高一些
                     ),
                     itemCount: _filteredSites.length,
                     itemBuilder: (context, index) {
@@ -1573,7 +1385,8 @@ class _SourceSwitchDialogContentState extends State<_SourceSwitchDialogContent> 
                 : ListView.separated(
                     controller: _scrollController,
                     itemCount: _filteredSites.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    padding: EdgeInsets.zero, // 移除列表自身 padding
+                    separatorBuilder: (_, __) => const SizedBox(height: 6),
                     itemBuilder: (context, index) {
                       final site = _filteredSites[index];
                       return _buildSiteTile(site);
@@ -1585,7 +1398,6 @@ class _SourceSwitchDialogContentState extends State<_SourceSwitchDialogContent> 
     );
   }
 
-  // 构建标签芯片（大圆角胶囊，默认无背景）
   Widget _buildTagChip({
     required String label,
     required bool isSelected,
@@ -1600,7 +1412,7 @@ class _SourceSwitchDialogContentState extends State<_SourceSwitchDialogContent> 
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
         decoration: BoxDecoration(
           color: isSelected ? colorScheme.primaryContainer : Colors.transparent,
-          borderRadius: BorderRadius.circular(20), // 大圆角胶囊
+          borderRadius: BorderRadius.circular(20),
           border: Border.all(
             color: isSelected ? colorScheme.primary : Colors.transparent,
             width: 1.5,
@@ -1617,7 +1429,6 @@ class _SourceSwitchDialogContentState extends State<_SourceSwitchDialogContent> 
     );
   }
 
-  // 构建单个站点列表项
   Widget _buildSiteTile(Map<String, dynamic> site) {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
@@ -1630,6 +1441,9 @@ class _SourceSwitchDialogContentState extends State<_SourceSwitchDialogContent> 
     final isSearchEnabled = searchFilterService.isSourceEnabled(siteKey);
 
     final isGrid = _isGridView;
+
+    // 统一高度：单栏和双栏视觉一致
+    final verticalPadding = isGrid ? 10.0 : 8.0;
 
     Color? backgroundColor;
     if (isGrid) {
@@ -1660,7 +1474,7 @@ class _SourceSwitchDialogContentState extends State<_SourceSwitchDialogContent> 
       child: Container(
         padding: EdgeInsets.symmetric(
           horizontal: 12,
-          vertical: isGrid ? 6 : 10,   // 修改此处
+          vertical: verticalPadding, // 统一高度
         ),
         decoration: BoxDecoration(
           color: backgroundColor,

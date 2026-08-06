@@ -198,6 +198,9 @@ abstract class IPlayerEngine {
   void toggleFlipX();
   void toggleFlipY();
 
+  /// 设置屏幕方向（仅移动端）
+  Future<void> setOrientation(List<DeviceOrientation> orientations);
+
   // ============================================================
   // 15. 音频模式 / 后台播放
   // ============================================================

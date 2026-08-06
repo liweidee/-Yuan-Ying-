@@ -36,13 +36,18 @@ class NodeJSSpiderService implements ISpiderService {
     }
 
     // 从 siteKey 中提取 spider key 和 type
-    // 格式：nodejs_{key}_{type}
     final parts = siteKey.split('_');
     if (parts.length >= 2) {
       final key = parts[1];
       final type = parts.length > 2 ? int.tryParse(parts[2]) ?? 3 : 3;
-      _nodejs.setCurrentSpider(key, type);
+      // 将 apiUrl 作为 apiBase 传入
+      _nodejs.setCurrentSpider(key, type, apiBase: apiUrl);
     }
+  }
+
+  /// 初始化 Node.js 蜘蛛（调用 /init 接口）
+  Future<void> initSpider() async {
+    await _nodejs.initSpider();
   }
 
   @override

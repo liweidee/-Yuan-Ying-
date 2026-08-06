@@ -576,7 +576,29 @@ class FvpEngine implements IPlayerEngine {
   }) async {
     if (isFullScreen.value == status) return;
 
-    if (PlatformUtils.isDesktop) {
+    if (PlatformUtils.isMobile) {
+      if (status) {
+        // 隐藏导航栏 + 强制横屏
+        SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+        SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+          systemNavigationBarColor: Colors.transparent,
+          systemNavigationBarDividerColor: Colors.transparent,
+        ));
+        await SystemChrome.setPreferredOrientations([
+          DeviceOrientation.landscapeLeft,
+          DeviceOrientation.landscapeRight,
+        ]);
+      } else {
+        if (!removeSafeArea) {
+          SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+          SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.light);
+        }
+        await SystemChrome.setPreferredOrientations([
+          DeviceOrientation.portraitUp,
+          DeviceOrientation.portraitDown,
+        ]);
+      }
+    } else if (PlatformUtils.isDesktop) {
       try {
         if (status) {
           await enterDesktopFullScreen(inAppFullScreen: inAppFullScreen);
@@ -590,6 +612,12 @@ class FvpEngine implements IPlayerEngine {
 
     _isFullscreen = status;
     isFullScreen.value = status;
+  }
+
+  @override
+  Future<void> setOrientation(List<DeviceOrientation> orientations) async {
+    if (!PlatformUtils.isMobile) return;
+    await SystemChrome.setPreferredOrientations(orientations);
   }
 
   // ============================================================

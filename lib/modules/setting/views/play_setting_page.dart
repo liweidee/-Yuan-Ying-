@@ -80,7 +80,7 @@ class _PlaySettingPageState extends State<PlaySettingPage> {
           ),
           const SizedBox(height: 8),
 
-          // ===== 新增：推送模式 =====
+          // ===== 推送模式 =====
           _buildSettingItem(
             icon: Icons.send,
             title: '推送模式',
