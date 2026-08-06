@@ -138,7 +138,7 @@ class _HomePageState extends State<HomePage>
     final colorScheme = theme.colorScheme;
     return Column(
       children: [
-        _buildTopBar(theme),
+        _buildSafeTopBar(theme),
         Expanded(
           child: Center(
             child: Padding(
@@ -198,7 +198,7 @@ class _HomePageState extends State<HomePage>
     final colorScheme = theme.colorScheme;
     return Column(
       children: [
-        _buildTopBar(theme),
+        _buildSafeTopBar(theme),
         Expanded(
           child: Center(
             child: Padding(
@@ -249,7 +249,19 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  Widget _buildTopBar(ThemeData theme) {
+  Widget _buildSafeTopBar(ThemeData theme) {
+    final topPadding = MediaQuery.of(context).padding.top;
+    final topBarHeight = 52 + topPadding;
+
+    return Container(
+      height: topBarHeight,
+      padding: EdgeInsets.only(top: topPadding),
+      color: theme.colorScheme.surface,
+      child: _buildTopBarContent(theme),  // 内部内容 52px
+    );
+  }
+
+  Widget _buildTopBarContent(ThemeData theme) {
     return Container(
       height: 52,
       padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
@@ -611,7 +623,7 @@ class _HomePageState extends State<HomePage>
   //     height: topBarHeight,
   //     padding: EdgeInsets.only(top: topPadding),
   //     color: theme.colorScheme.surface,
-  //     child: _buildTopBar(theme),
+  //     child: _buildSafeTopBar(theme),
   //   );
 
   //   if (hideTopBar) {
@@ -785,35 +797,17 @@ class _HomePageState extends State<HomePage>
     final topBarHeight = 52 + topPadding;
 
     // 构建顶部栏
-    Widget topBar = Container(
-      height: topBarHeight,
-      padding: EdgeInsets.only(top: topPadding),
-      color: theme.colorScheme.surface,
-      child: _buildTopBar(theme),
-    );
+    Widget topBar = _buildSafeTopBar(theme);
 
     if (hideTopBar) {
       final offset = mainController.topBarOffset.value;
-      final maxOffset = topBarHeight;
-      if (mainController.barHideType == BarHideType.instant) {
-        final show = offset < maxOffset * 0.5;
-        topBar = AnimatedOpacity(
-          opacity: show ? 1 : 0,
-          duration: const Duration(milliseconds: 300),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 300),
-            height: show ? topBarHeight : 0,
-            child: topBar,
-          ),
-        );
-      } else {
-        final visibleHeight = (topBarHeight - offset).clamp(0.0, topBarHeight);
-        topBar = CustomHeightWidget(
-          height: visibleHeight,
-          offset: Offset(0, -offset),
-          child: topBar,
-        );
-      }
+      final maxOffset = topBarHeight; // 52 + topPadding
+      final visibleHeight = (maxOffset - offset).clamp(0.0, maxOffset);
+      topBar = CustomHeightWidget(
+        height: visibleHeight,
+        offset: Offset(0, -offset),
+        child: topBar,
+      );
     }
 
     // ===== 分类 TabBar（参考详情页布局） =====
@@ -887,7 +881,7 @@ class _HomePageState extends State<HomePage>
                     splashRadius: 20,
                   );
                 }),
-                const SizedBox(width: 4),
+                // const SizedBox(width: 4),
                 // 布局切换
                 Obx(() {
                   final mode = controller.cardLayoutMode.value;
@@ -900,7 +894,7 @@ class _HomePageState extends State<HomePage>
                     splashRadius: 20,
                   );
                 }),
-                const SizedBox(width: 4),
+                // const SizedBox(width: 4),
                 // 全部分类展开
                 IconButton(
                   padding: EdgeInsets.zero,
@@ -1063,7 +1057,7 @@ class _HomePageState extends State<HomePage>
           if (sourceManager.isConfigLoading.value) {
             return Column(
               children: [
-                _buildTopBar(theme),
+                _buildSafeTopBar(theme),
                 Expanded(
                   child: Center(
                     child: SizedBox(
@@ -1087,7 +1081,7 @@ class _HomePageState extends State<HomePage>
           if (controller.isHomeLoading.value) {
             return Column(
               children: [
-                _buildTopBar(theme),
+                _buildSafeTopBar(theme),
                 Expanded(
                   child: Center(
                     child: SizedBox(
@@ -1107,7 +1101,7 @@ class _HomePageState extends State<HomePage>
           if (controller.isSwitchingSource.value) {
             return Column(
               children: [
-                _buildTopBar(theme),
+                _buildSafeTopBar(theme),
                 Expanded(
                   child: Center(
                     child: SizedBox(
@@ -1124,10 +1118,14 @@ class _HomePageState extends State<HomePage>
             );
           }
 
+          if (sourceManager.sites.isEmpty) {
+            return _buildEmptyConfig(theme);
+          }
+
           if (controller.isHomeError.value) {
             return Column(
               children: [
-                _buildTopBar(theme),
+                _buildSafeTopBar(theme),
                 Expanded(
                   child: Center(
                     child: Text(
@@ -1141,10 +1139,6 @@ class _HomePageState extends State<HomePage>
                 ),
               ],
             );
-          }
-
-          if (sourceManager.sites.isEmpty) {
-            return _buildEmptyConfig(theme);
           }
 
           return _buildNormalContent(theme);
@@ -1363,29 +1357,35 @@ class _SourceSwitchDialogContentState extends State<_SourceSwitchDialogContent> 
           ),
         ),
 
-        // ---------- 列表区域（移除顶部 padding） ----------
+        // ---------- 列表区域 ----------
         Expanded(
           child: Padding(
-            padding: const EdgeInsets.only(left: 16, right: 16, bottom: 16), // 移除顶部 padding
+            padding: const EdgeInsets.only(left: 16, right: 16, bottom: 16),
             child: _isGridView
-                ? GridView.builder(
+                ? CustomScrollView(
                     controller: _scrollController,
-                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 2,
-                      crossAxisSpacing: 12,
-                      mainAxisSpacing: 8,
-                      childAspectRatio: 3.2, // 调整宽高比，让卡片更高一些
-                    ),
-                    itemCount: _filteredSites.length,
-                    itemBuilder: (context, index) {
-                      final site = _filteredSites[index];
-                      return _buildSiteTile(site);
-                    },
+                    slivers: [
+                      SliverGrid(
+                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 2,
+                          crossAxisSpacing: 12,
+                          mainAxisSpacing: 8,
+                          childAspectRatio: 3.2,
+                        ),
+                        delegate: SliverChildBuilderDelegate(
+                          (context, index) {
+                            final site = _filteredSites[index];
+                            return _buildSiteTile(site);
+                          },
+                          childCount: _filteredSites.length,
+                        ),
+                      ),
+                    ],
                   )
                 : ListView.separated(
                     controller: _scrollController,
                     itemCount: _filteredSites.length,
-                    padding: EdgeInsets.zero, // 移除列表自身 padding
+                    padding: EdgeInsets.zero,
                     separatorBuilder: (_, __) => const SizedBox(height: 6),
                     itemBuilder: (context, index) {
                       final site = _filteredSites[index];

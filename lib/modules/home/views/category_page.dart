@@ -30,8 +30,7 @@ class _CategoryPageState extends State<CategoryPage>
   final MainController mainController = Get.find<MainController>();
   final HomeController homeController = Get.find<HomeController>();
 
-  double _lastScrollOffset = 0;
-  bool _isScrollingDown = false;
+  // ===== 移除 _lastScrollOffset 和 _isScrollingDown =====
 
   @override
   bool get wantKeepAlive => true;
@@ -43,32 +42,14 @@ class _CategoryPageState extends State<CategoryPage>
     ctrl.scrollController.addListener(_onScrollUpdate);
   }
 
+  // ===== 简化后的滚动监听 =====
   void _onScrollUpdate() {
     final offset = ctrl.scrollController.position.pixels;
-    final delta = offset - _lastScrollOffset;
-    _lastScrollOffset = offset;
 
-    if (delta.abs() > 2) {
-      _isScrollingDown = delta > 0;
-    }
-
-    // 更新底部栏偏移
     mainController.updateBottomBarOffset(offset);
+    mainController.updateTopBarOffset(offset);
 
-    // 更新顶部栏偏移
-    if (mainController.hideTopBar.value) {
-      final maxOffset = 52.0 + MediaQuery.of(context).padding.top;
-      if (_isScrollingDown && offset > 20) {
-        mainController.updateTopBarOffset(maxOffset);
-      } else if (!_isScrollingDown && offset > 20) {
-        final newOffset = (maxOffset - offset).clamp(0.0, maxOffset);
-        mainController.updateTopBarOffset(newOffset);
-      } else {
-        mainController.updateTopBarOffset(0);
-      }
-    }
-
-    // ===== 触发加载更多 =====
+    // 触发加载更多
     if (ctrl.scrollController.position.pixels >=
         ctrl.scrollController.position.maxScrollExtent - 200) {
       ctrl.loadMore();
@@ -104,7 +85,6 @@ class _CategoryPageState extends State<CategoryPage>
 
       Widget content;
 
-      // ===== 1. 尚未加载完成 或 正在加载（首次加载） → 显示加载圈 =====
       if (!hasLoaded || (isLoading && videoList.isEmpty)) {
         content = Center(
           child: SizedBox(
@@ -116,9 +96,7 @@ class _CategoryPageState extends State<CategoryPage>
             ),
           ),
         );
-      }
-      // ===== 2. 加载完成，有错误 → 显示错误页 =====
-      else if (isError && videoList.isEmpty) {
+      } else if (isError && videoList.isEmpty) {
         content = Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -135,18 +113,14 @@ class _CategoryPageState extends State<CategoryPage>
             ],
           ),
         );
-      }
-      // ===== 3. 加载完成，无数据 → 显示"暂无数据" =====
-      else if (videoList.isEmpty) {
+      } else if (videoList.isEmpty) {
         content = Center(
           child: Text(
             '暂无数据',
             style: TextStyle(color: theme.colorScheme.outline),
           ),
         );
-      }
-      // ===== 4. 加载完成，有数据 → 正常列表 =====
-      else {
+      } else {
         if (Grid.isListMode(mode)) {
           content = ListView.builder(
             controller: ctrl.scrollController,
@@ -195,7 +169,6 @@ class _CategoryPageState extends State<CategoryPage>
         }
       }
 
-      // 非推荐分类才允许下拉刷新
       Widget contentWithRefresh = content;
       if (!isRecommend) {
         contentWithRefresh = custom.RefreshIndicator(
@@ -208,8 +181,14 @@ class _CategoryPageState extends State<CategoryPage>
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (shouldShowFilter) _buildFilterBar(theme, filterGroups!),
+          // 固定间距
+          if (shouldShowFilter) const SizedBox(height: 4),
           Expanded(
-            child: contentWithRefresh,
+            child: MediaQuery.removePadding(
+              context: context,
+              removeTop: true,
+              child: contentWithRefresh,
+            ),
           ),
         ],
       );

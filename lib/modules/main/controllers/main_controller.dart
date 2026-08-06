@@ -105,19 +105,13 @@ class MainController extends GetxController {
     }
   }
 
-  // ===== 顶部栏偏移更新（由 CategoryPage 调用，传入具体偏移量） =====
   void updateTopBarOffset(double offset) {
     if (!hideTopBar.value) {
       topBarOffset.value = 0.0;
       return;
     }
-    const maxOffset = 52.0 + 44.0; // 顶部栏 + 状态栏
-    final clamped = offset.clamp(0.0, maxOffset);
-    if (isInstantMode) {
-      topBarOffset.value = clamped > maxOffset * 0.5 ? maxOffset : 0.0;
-    } else {
-      topBarOffset.value = clamped;
-    }
+    // 直接传递原始偏移量，由 home_page 自己限制最大偏移
+    topBarOffset.value = offset;
   }
 
   void refreshHideBottomBar() {

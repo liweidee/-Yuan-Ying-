@@ -1056,6 +1056,10 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
       fontSize: 12,
     );
 
+    final bool bottomRemoveSafeArea = (Platform.isIOS && isFullScreen && !plPlayerController.removeSafeArea)
+        ? true
+        : plPlayerController.removeSafeArea;
+
     final child = Stack(
       fit: StackFit.passthrough,
       key: _playerKey,
@@ -1312,7 +1316,7 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
                         isTop: false,
                         controller: _animationController,
                         isFullScreen: isFullScreen,
-                        removeSafeArea: plPlayerController.removeSafeArea,
+                        removeSafeArea: bottomRemoveSafeArea,
                         child: widget.bottomControl ??
                             BottomControl(
                               maxWidth: maxWidth,
@@ -1352,7 +1356,7 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
                       isTop: false,
                       controller: _animationController,
                       isFullScreen: isFullScreen,
-                      removeSafeArea: plPlayerController.removeSafeArea,
+                      removeSafeArea: bottomRemoveSafeArea,
                       child: widget.bottomControl ??
                           BottomControl(
                             maxWidth: maxWidth,
@@ -1564,79 +1568,70 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
               ),
             ),
 
-          // 向切换按钮
-          if (PlatformUtils.isMobile)
+          // 截图和旋转按钮
+          if (plPlayerController.showFsScreenshotBtn)
+            // 方向切换按钮 + 截图按钮 组合（右侧垂直排列）
             ViewSafeArea(
               left: false,
               right: !plPlayerController.removeSafeArea,
               child: Align(
                 alignment: Alignment.centerRight,
                 child: FractionalTranslation(
-                  translation: const Offset(-1, -0.7),
+                  translation: const Offset(-1, 0), // 水平左移一个单位，垂直不偏移
                   child: Obx(
                     () => Offstage(
                       offstage: !plPlayerController.showControls.value,
-                      child: DecoratedBox(
-                        decoration: const BoxDecoration(
-                          color: Color(0x45000000),
-                          borderRadius: BorderRadius.all(Radius.circular(8)),
-                        ),
-                        child: ComBtn(
-                          tooltip: '旋转屏幕',
-                          icon: const Icon(
-                            Icons.screen_rotation,
-                            size: 20,
-                            color: Colors.white,
-                          ),
-                          onTap: () {
-                            // 通过 MediaQuery 获取当前屏幕方向
-                            final orientation = MediaQuery.of(context).orientation;
-                            if (orientation == Orientation.portrait) {
-                              plPlayerController.setOrientation([
-                                DeviceOrientation.landscapeLeft,
-                                DeviceOrientation.landscapeRight,
-                              ]);
-                            } else {
-                              plPlayerController.setOrientation([
-                                DeviceOrientation.portraitUp,
-                                DeviceOrientation.portraitDown,
-                              ]);
-                            }
-                          },
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-
-          // 截图按钮
-          if (plPlayerController.showFsScreenshotBtn)
-            ViewSafeArea(
-              left: false,
-              right: !plPlayerController.removeSafeArea,
-              child: Obx(
-                () => Align(
-                  alignment: Alignment.centerRight,
-                  child: FractionalTranslation(
-                    translation: const Offset(-1, -0.4),
-                    child: Offstage(
-                      offstage: !plPlayerController.showControls.value,
-                      child: DecoratedBox(
-                        decoration: const BoxDecoration(
-                          color: Color(0x45000000),
-                          borderRadius: BorderRadius.all(Radius.circular(8)),
-                        ),
-                        child: ComBtn(
-                          tooltip: '截图',
-                          icon: const Icon(
-                            Icons.photo_camera,
-                            size: 20,
-                            color: Colors.white,
-                          ),
-                          onTap: plPlayerController.takeScreenshot,
-                        ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // 方向切换按钮
+                          if (PlatformUtils.isMobile)
+                            DecoratedBox(
+                              decoration: const BoxDecoration(
+                                color: Color(0x45000000),
+                                borderRadius: BorderRadius.all(Radius.circular(8)),
+                              ),
+                              child: ComBtn(
+                                tooltip: '旋转屏幕',
+                                icon: const Icon(
+                                  Icons.screen_rotation,
+                                  size: 20,
+                                  color: Colors.white,
+                                ),
+                                onTap: () {
+                                  final orientation = MediaQuery.of(context).orientation;
+                                  if (orientation == Orientation.portrait) {
+                                    plPlayerController.setOrientation([
+                                      DeviceOrientation.landscapeLeft,
+                                      DeviceOrientation.landscapeRight,
+                                    ]);
+                                  } else {
+                                    plPlayerController.setOrientation([
+                                      DeviceOrientation.portraitUp,
+                                      DeviceOrientation.portraitDown,
+                                    ]);
+                                  }
+                                },
+                              ),
+                            ),
+                          // 截图按钮
+                          if (plPlayerController.showFsScreenshotBtn)
+                            DecoratedBox(
+                              decoration: const BoxDecoration(
+                                color: Color(0x45000000),
+                                borderRadius: BorderRadius.all(Radius.circular(8)),
+                              ),
+                              child: ComBtn(
+                                tooltip: '截图',
+                                icon: const Icon(
+                                  Icons.photo_camera,
+                                  size: 20,
+                                  color: Colors.white,
+                                ),
+                                onTap: plPlayerController.takeScreenshot,
+                              ),
+                            ),
+                        ],
                       ),
                     ),
                   ),
