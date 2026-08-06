@@ -73,7 +73,14 @@ class RenderCustomHeightWidget extends RenderProxyBox {
 
   @override
   void paint(PaintingContext context, Offset offset) {
-    context.paintChild(child!, offset + _offset);
+    context.pushClipRect(
+      needsCompositing,
+      offset,
+      Offset.zero & size,
+      (PaintingContext innerContext, Offset innerOffset) {
+        innerContext.paintChild(child!, innerOffset + _offset);
+      },
+    );
   }
 
   @override

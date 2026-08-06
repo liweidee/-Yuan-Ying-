@@ -12,6 +12,7 @@ import 'package:yuanying/modules/setting/controllers/site_config_controller.dart
 import 'package:yuanying/t4/models/site.dart';
 import 'package:yuanying/t4/services/source_manager.dart';
 import 'package:yuanying/utils/storage.dart';
+import 'package:yuanying/utils/permission_handler.dart';
 import 'package:yuanying/utils/platform_utils.dart';
 
 class SiteConfigPage extends StatelessWidget {
@@ -267,11 +268,29 @@ class SiteConfigPage extends StatelessWidget {
     return key;
   }
 
+  /// 检查存储权限（仅移动端），返回 true 表示已授权
+  Future<bool> _checkStoragePermission(BuildContext context) async {
+    if (!PlatformUtils.isMobile) return true;
+    final status = await Permission.storage.request();
+    if (status.isDenied) {
+      SmartDialog.showToast('需要存储权限才能操作文件');
+      return false;
+    }
+    if (status.isPermanentlyDenied) {
+      SmartDialog.showToast('请在系统设置中授予存储权限');
+      await openAppSettings();
+      return false;
+    }
+    return status.isGranted;
+  }
+
   Future<void> _pickConfigFile(
     BuildContext context,
     TextEditingController nameController,
     TextEditingController apiController,
   ) async {
+    if (!await _checkStoragePermission(context)) return;
+
     try {
       final result = await FilePicker.pickFile(
         type: FileType.custom,
@@ -673,14 +692,17 @@ class SiteConfigPage extends StatelessWidget {
   }
 
   void _exportToFile(BuildContext context, SiteConfigController controller) {
-    showImportExportDialog<List<Map<String, dynamic>>>(
-      context,
-      title: '导出配置',
-      onExport: () => jsonEncode(GStorage.getCustomSites()),
-      onImport: (_) {},
-      localFileName: () => 'site_config',
-      importExtensions: const [],
-    );
+    _checkStoragePermission(context).then((granted) {
+      if (!granted) return;
+      showImportExportDialog<List<Map<String, dynamic>>>(
+        context,
+        title: '导出配置',
+        onExport: () => jsonEncode(GStorage.getCustomSites()),
+        onImport: (_) {},
+        localFileName: () => 'site_config',
+        importExtensions: const [],
+      );
+    });
   }
 
   void _showManualImportDialog(BuildContext context, SiteConfigController controller) {
@@ -865,6 +887,7 @@ class SiteConfigPage extends StatelessWidget {
   }
 
   void _importFromLocalFile(BuildContext context, SiteConfigController controller) async {
+    if (!await _checkStoragePermission(context)) return;
     try {
       final result = await FilePicker.pickFile(
         type: FileType.custom,

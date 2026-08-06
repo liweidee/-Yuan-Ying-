@@ -873,6 +873,9 @@ class _HomePageState extends State<HomePage>
                   return IconButton(
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(),
+                    style: IconButton.styleFrom(
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
                     icon: Icon(
                       showFilter ? Icons.filter_alt : Icons.filter_alt_off,
                       size: 20,
@@ -881,24 +884,30 @@ class _HomePageState extends State<HomePage>
                     splashRadius: 20,
                   );
                 }),
-                // const SizedBox(width: 4),
+                const SizedBox(width: 4),
                 // 布局切换
                 Obx(() {
                   final mode = controller.cardLayoutMode.value;
                   return IconButton(
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(),
+                    style: IconButton.styleFrom(
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
                     icon: Icon(mode.icon, size: 20),
                     onPressed: controller.toggleCardLayout,
                     tooltip: mode.label,
                     splashRadius: 20,
                   );
                 }),
-                // const SizedBox(width: 4),
+                const SizedBox(width: 4),
                 // 全部分类展开
                 IconButton(
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(),
+                  style: IconButton.styleFrom(
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
                   icon: const Icon(Icons.expand_more, size: 20),
                   onPressed: () => _showAllCategoriesDialog(context),
                   splashRadius: 20,

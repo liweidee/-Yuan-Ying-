@@ -1,5 +1,5 @@
+// lib/modules/local_file/widgets/path_management_dialog.dart
 import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:get/get.dart';
@@ -7,6 +7,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:yuanying/modules/local_file/controllers/local_file_controller.dart';
 import 'package:yuanying/modules/local_file/models/scan_path.dart';
 import 'package:yuanying/utils/platform_utils.dart';
+import 'package:yuanying/utils/permission_handler.dart';  // 新增导入
 
 class PathManagementDialog extends StatefulWidget {
   const PathManagementDialog({super.key});
@@ -17,18 +18,11 @@ class PathManagementDialog extends StatefulWidget {
 
 class _PathManagementDialogState extends State<PathManagementDialog> {
   late final LocalFileController controller;
-  final TextEditingController _pathController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
     controller = Get.find<LocalFileController>();
-  }
-
-  @override
-  void dispose() {
-    _pathController.dispose();
-    super.dispose();
   }
 
   @override
@@ -109,7 +103,7 @@ class _PathManagementDialogState extends State<PathManagementDialog> {
 
               const SizedBox(height: 16),
 
-              // ===== 底部按钮行 - Wrap 自适应，不使用 Flexible =====
+              // 底部按钮
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
@@ -132,18 +126,16 @@ class _PathManagementDialogState extends State<PathManagementDialog> {
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                     ),
                   ),
-                  // Flexible 已移除，TextButton 直接放置
                   TextButton(
-                    onPressed: controller.scanPaths.isEmpty ? null : () {
-                      controller.clearAllPaths();
-                      Navigator.pop(context);
-                    },
+                    onPressed: controller.scanPaths.isEmpty
+                        ? null
+                        : () {
+                            controller.clearAllPaths();
+                            Navigator.pop(context);
+                          },
                     child: Text(
                       '清空所有',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: colorScheme.error,
-                      ),
+                      style: TextStyle(fontSize: 13, color: colorScheme.error),
                     ),
                   ),
                 ],
@@ -157,10 +149,7 @@ class _PathManagementDialogState extends State<PathManagementDialog> {
                 final videos = controller.scanPaths.fold(0, (sum, p) => sum + p.videoCount);
                 return Text(
                   '共 $total 个路径  •  已扫描 $scanned 个  •  发现 $videos 个视频',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: colorScheme.onSurfaceVariant,
-                  ),
+                  style: TextStyle(fontSize: 11, color: colorScheme.onSurfaceVariant),
                 );
               }),
             ],
@@ -199,10 +188,7 @@ class _PathManagementDialogState extends State<PathManagementDialog> {
                 path.lastScanTime != null
                     ? '最后扫描: ${_formatTime(path.lastScanTime!)}  →  ${path.videoCount} 个视频'
                     : '未扫描',
-                style: TextStyle(
-                  fontSize: 11,
-                  color: colorScheme.onSurfaceVariant,
-                ),
+                style: TextStyle(fontSize: 11, color: colorScheme.onSurfaceVariant),
               ),
             ],
           ),
@@ -228,54 +214,36 @@ class _PathManagementDialogState extends State<PathManagementDialog> {
   }
 
   Future<void> _pickDirectory() async {
-    String? selectedPath;
-
-    if (PlatformUtils.isDesktop) {
-      // 使用静态方法，不加 platform
-      final result = await FilePicker.getDirectoryPath();
-      selectedPath = result;
-    } else {
-      final result = await showDialog<String>(
-        context: context,
-        builder: (ctx) {
-          final localController = TextEditingController();
-          return AlertDialog(
-            title: const Text('输入路径'),
-            content: TextField(
-              controller: localController,
-              decoration: const InputDecoration(
-                hintText: '/storage/emulated/0/Movies',
-              ),
-              autofocus: true,
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('取消'),
-              ),
-              TextButton(
-                onPressed: () {
-                  final text = localController.text.trim();
-                  if (text.isNotEmpty) {
-                    Navigator.pop(ctx, text);
-                  }
-                },
-                child: const Text('确定'),
-              ),
-            ],
-          );
-        },
-      );
-      selectedPath = result;
+    // 1. 移动端先请求存储权限
+    if (PlatformUtils.isMobile) {
+      final status = await Permission.storage.request();
+      if (status.isDenied) {
+        SmartDialog.showToast('需要存储权限才能选择文件夹');
+        return;
+      }
+      if (status.isPermanentlyDenied) {
+        SmartDialog.showToast('请在系统设置中授予存储权限');
+        await openAppSettings();
+        return;
+      }
+      if (!status.isGranted) {
+        SmartDialog.showToast('权限被拒绝，无法选择文件夹');
+        return;
+      }
     }
 
-    if (selectedPath != null && selectedPath!.isNotEmpty) {
-      final dir = Directory(selectedPath!);
-      if (await dir.exists()) {
-        controller.addScanPath(selectedPath!);
-      } else {
-        SmartDialog.showToast('目录不存在，请检查路径');
-      }
+    // 2. 调用系统文件夹选择器（Android 使用 SAF，iOS 使用 DocumentPicker）
+    String? selectedPath = await FilePicker.getDirectoryPath(
+      dialogTitle: '选择视频文件夹',
+    );
+
+    if (selectedPath == null || selectedPath.isEmpty) return;
+
+    final dir = Directory(selectedPath);
+    if (await dir.exists()) {
+      controller.addScanPath(selectedPath);
+    } else {
+      SmartDialog.showToast('目录不存在，请检查路径');
     }
   }
 

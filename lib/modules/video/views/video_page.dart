@@ -508,6 +508,15 @@ class _DetailPageState extends State<DetailPage>
       );
     }
 
+    // ===== 全屏时移除底部安全区域（iOS） =====
+    if (Platform.isIOS && controller.playerController.isFullScreen.value && !removeSafeArea) {
+      playerContent = MediaQuery.removePadding(
+        context: context,
+        removeBottom: true,
+        child: playerContent,
+      );
+    }
+
     // ===== iOS 非全屏竖屏时，添加顶部安全区域避开刘海 =====
     final bool needSafeArea = Platform.isIOS &&
         !controller.playerController.isFullScreen.value &&

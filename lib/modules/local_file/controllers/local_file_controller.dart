@@ -1,5 +1,5 @@
+// lib/modules/local_file/controllers/local_file_controller.dart
 import 'dart:io';
-
 import 'package:get/get.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:yuanying/core/constants/storage_keys.dart';
@@ -8,25 +8,21 @@ import 'package:yuanying/modules/local_file/models/scan_path.dart';
 import 'package:yuanying/modules/local_file/models/video_file.dart';
 import 'package:yuanying/modules/local_file/services/file_scanner_service.dart';
 import 'package:yuanying/utils/storage_manager.dart';
+import 'package:yuanying/utils/platform_utils.dart';        // 新增
+import 'package:yuanying/utils/permission_handler.dart';    // 新增
 
 /// 文件夹数据（用于混合列表）
 class FolderItemData {
   final String path;
   final String name;
   final bool isFolder;
-
-  const FolderItemData({
-    required this.path,
-    required this.name,
-    this.isFolder = true,
-  });
+  const FolderItemData({required this.path, required this.name, this.isFolder = true});
 }
 
 /// 面包屑节点
 class BreadcrumbItem {
   final String name;
   final String path;
-
   const BreadcrumbItem({required this.name, required this.path});
 }
 
@@ -49,38 +45,27 @@ class LocalFileController extends GetxController {
   final RxString selectedPathId = ''.obs;
   final RxString scanStatus = ''.obs;
 
-  // 文件夹模式 - 当前所在路径
   final RxString currentFolderPath = ''.obs;
   final RxList<dynamic> _mixedList = <dynamic>[].obs;
 
-  // ============================================================
-  // Getters
-  // ============================================================
-
+  // ===== Getters =====
   int get totalVideoCount => videoFiles.length;
   int get totalSize => videoFiles.fold<int>(0, (sum, f) => sum + f.size);
   String get totalSizeFormatted => _formatSize(totalSize);
   int get enabledPathCount => scanPaths.where((p) => p.enabled).length;
   List<dynamic> get mixedList => _mixedList;
 
-  // 面包屑列表（仅从扫描根目录开始）
   List<BreadcrumbItem> get breadcrumbs {
     if (currentFolderPath.value.isEmpty) return [];
-
     final rootPath = scanPaths.isNotEmpty
         ? scanPaths.firstWhere((p) => p.enabled, orElse: () => scanPaths.first).path
         : '';
-
     if (rootPath.isEmpty || currentFolderPath.value == rootPath) return [];
-
     String relativePath = currentFolderPath.value;
     if (relativePath.startsWith(rootPath)) {
       var subPath = relativePath.substring(rootPath.length);
-      while (subPath.startsWith(Platform.pathSeparator)) {
-        subPath = subPath.substring(1);
-      }
+      while (subPath.startsWith(Platform.pathSeparator)) subPath = subPath.substring(1);
       if (subPath.isEmpty) return [];
-
       final parts = subPath.split(Platform.pathSeparator);
       final items = <BreadcrumbItem>[];
       String accumulated = rootPath;
@@ -102,10 +87,7 @@ class LocalFileController extends GetxController {
     return rootPath.isEmpty || currentFolderPath.value == rootPath;
   }
 
-  // ============================================================
-  // 生命周期
-  // ============================================================
-
+  // ===== 生命周期 =====
   @override
   void onInit() {
     super.onInit();
@@ -113,18 +95,35 @@ class LocalFileController extends GetxController {
     if (scanPaths.isNotEmpty) {
       final first = scanPaths.firstWhere((p) => p.enabled, orElse: () => scanPaths.first);
       currentFolderPath.value = first.path;
-      scanDirectory(first.path);
+      _ensurePermissionAndScan(first.path); // 替换原 scanDirectory
     }
   }
 
-  // ============================================================
-  // 路径管理
-  // ============================================================
+  // ===== 权限 + 扫描封装 =====
+  Future<void> _ensurePermissionAndScan(String path) async {
+    if (PlatformUtils.isMobile) {
+      final status = await Permission.storage.request();
+      if (status.isDenied) {
+        SmartDialog.showToast('无法扫描，存储权限被拒绝');
+        return;
+      }
+      if (status.isPermanentlyDenied) {
+        SmartDialog.showToast('请在系统设置中授予存储权限后重试');
+        await openAppSettings();
+        return;
+      }
+      if (!status.isGranted) {
+        SmartDialog.showToast('权限不足，无法扫描');
+        return;
+      }
+    }
+    await scanDirectory(path);
+  }
 
+  // ===== 路径管理 =====
   void _loadScanPaths() {
     final data = StorageManager.getSetting<List<dynamic>>(SettingBoxKey.localFileScanPaths);
     if (data != null && data.isNotEmpty) {
-      // 使用 Map.from 将 Map<dynamic, dynamic> 转换为 Map<String, dynamic>
       final paths = data.map((e) {
         final map = Map<String, dynamic>.from(e as Map);
         return ScanPath.fromJson(map);
@@ -149,15 +148,13 @@ class LocalFileController extends GetxController {
     scanPaths.add(scanPath);
     _saveScanPaths();
     currentFolderPath.value = path;
-    scanDirectory(path);
+    _ensurePermissionAndScan(path); // 添加路径后扫描
   }
 
   void removeScanPath(String id) {
     scanPaths.removeWhere((p) => p.id == id);
     _saveScanPaths();
-    if (selectedPathId.value == id) {
-      selectedPathId.value = '';
-    }
+    if (selectedPathId.value == id) selectedPathId.value = '';
   }
 
   void toggleScanPath(String id) {
@@ -178,10 +175,7 @@ class LocalFileController extends GetxController {
     _saveScanPaths();
   }
 
-  // ============================================================
-  // 文件夹导航
-  // ============================================================
-
+  // ===== 文件夹导航 =====
   void enterFolder(String folderPath) {
     if (folderPath.isEmpty) return;
     currentFolderPath.value = folderPath;
@@ -214,12 +208,10 @@ class LocalFileController extends GetxController {
 
   Future<void> _loadFolderContent(String path) async {
     if (path.isEmpty || isLoading.value) return;
-
     isLoading.value = true;
     try {
       final subDirs = await _scanner.getSubDirectories(path);
       final files = await _scanner.scanDirectory(path, recursive: false);
-
       final mixedList = <dynamic>[];
       for (final dir in subDirs) {
         mixedList.add(FolderItemData(
@@ -227,10 +219,7 @@ class LocalFileController extends GetxController {
           name: dir.split(Platform.pathSeparator).last,
         ));
       }
-      for (final file in files) {
-        mixedList.add(file);
-      }
-
+      for (final file in files) mixedList.add(file);
       _mixedList.value = mixedList;
       videoFiles.value = files;
       _applyFilters();
@@ -241,12 +230,18 @@ class LocalFileController extends GetxController {
     }
   }
 
-  // ============================================================
-  // 扫描
-  // ============================================================
-
+  // ===== 扫描（添加权限前置检查） =====
   Future<void> scanDirectory(String path, {bool silent = false}) async {
     if (path.isEmpty || isScanning.value) return;
+
+    // 权限检查（防御）
+    if (PlatformUtils.isMobile) {
+      final status = await Permission.storage.status;
+      if (!status.isGranted) {
+        SmartDialog.showToast('没有存储权限，请在设置中授予');
+        return;
+      }
+    }
 
     isScanning.value = true;
     if (!silent) isLoading.value = true;
@@ -313,10 +308,7 @@ class LocalFileController extends GetxController {
     SmartDialog.showToast('全部扫描完成，共发现 $totalCount 个视频');
   }
 
-  // ============================================================
-  // 搜索 & 排序 & 过滤
-  // ============================================================
-
+  // ===== 搜索 & 排序 & 过滤 =====
   void updateSearch(String keyword) {
     searchKeyword.value = keyword;
     _applyFilters();
@@ -352,19 +344,17 @@ class LocalFileController extends GetxController {
       if (scanPaths.isNotEmpty) {
         final first = scanPaths.firstWhere((p) => p.enabled, orElse: () => scanPaths.first);
         currentFolderPath.value = first.path;
-        scanDirectory(first.path);
+        _ensurePermissionAndScan(first.path);
       }
     }
   }
 
   void _applyFilters() {
     var list = List<VideoFile>.from(videoFiles);
-
     if (searchKeyword.value.isNotEmpty) {
       final keyword = searchKeyword.value.toLowerCase();
       list = list.where((f) => f.name.toLowerCase().contains(keyword)).toList();
     }
-
     list.sort((a, b) {
       int result;
       switch (sortBy.value) {
@@ -380,14 +370,10 @@ class LocalFileController extends GetxController {
       }
       return sortOrder.value == SortOrder.ascending ? result : -result;
     });
-
     filteredFiles.value = list;
   }
 
-  // ============================================================
-  // 播放
-  // ============================================================
-
+  // ===== 播放 =====
   void playVideo(VideoFile video) {
     final file = File(video.path);
     if (!file.existsSync()) {
@@ -401,10 +387,7 @@ class LocalFileController extends GetxController {
     });
   }
 
-  // ============================================================
-  // 工具方法
-  // ============================================================
-
+  // ===== 工具方法 =====
   String _formatSize(int bytes) {
     if (bytes < 1024) return '$bytes B';
     if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
