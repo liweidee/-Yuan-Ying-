@@ -251,7 +251,7 @@ class _EpisodePanelDialogState extends State<EpisodePanelDialog>
                         isScrollable: true,
                         padding: EdgeInsets.zero,
                         labelPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
-                        labelStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600), // 13→11
+                        labelStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600), 
                         unselectedLabelStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.normal),
                         labelColor: colorScheme.primary,
                         unselectedLabelColor: colorScheme.onSurfaceVariant,
@@ -427,7 +427,7 @@ class _EpisodePanelDialogState extends State<EpisodePanelDialog>
         ),
       );
     } else {
-      // 移动端改为3列网格垂直滚动（原为水平滚动）
+      // 移动端改为3列网格垂直滚动
       return GridView.builder(
         controller: _itemScrollControllers[tabIndex],
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),

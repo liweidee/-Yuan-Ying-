@@ -110,7 +110,7 @@ class MainController extends GetxController {
       topBarOffset.value = 0.0;
       return;
     }
-    // 钳制最小值，防止下拉刷新负偏移导致顶部栏下坠
+    // 钳制最小值为 0，防止下拉刷新产生负偏移
     final clamped = offset.clamp(0.0, double.infinity);
     topBarOffset.value = clamped;
   }

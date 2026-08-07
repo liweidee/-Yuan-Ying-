@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:flutter/services.dart';
 import 'package:yuanying/common/assets.dart';
 import 'package:yuanying/models/common/nav_bar_config.dart';
 import 'package:yuanying/modules/main/controllers/main_controller.dart';
@@ -56,6 +57,17 @@ class _MainPageState extends State<MainPage> {
           return Scaffold(
             extendBody: true,
             resizeToAvoidBottomInset: false,
+            appBar: AppBar(
+              toolbarHeight: 0,
+              backgroundColor: Colors.transparent,
+              elevation: 0,
+              systemOverlayStyle: SystemUiOverlayStyle(
+                statusBarColor: Colors.transparent,
+                statusBarIconBrightness: Theme.of(context).brightness == Brightness.light
+                    ? Brightness.dark
+                    : Brightness.light,
+              ),
+            ),
             body: navigationBars[selectedIndex].page,
             bottomNavigationBar: _buildMobileBottomBar(
               colorScheme: colorScheme,
@@ -66,6 +78,17 @@ class _MainPageState extends State<MainPage> {
         } else {
           return Scaffold(
             resizeToAvoidBottomInset: false,
+            appBar: AppBar(
+              toolbarHeight: 0,
+              backgroundColor: Colors.transparent,
+              elevation: 0,
+              systemOverlayStyle: SystemUiOverlayStyle(
+                statusBarColor: Colors.transparent,
+                statusBarIconBrightness: Theme.of(context).brightness == Brightness.light
+                    ? Brightness.dark
+                    : Brightness.light,
+              ),
+            ),
             body: Row(
               children: [
                 Container(

@@ -138,7 +138,7 @@ class _HomePageState extends State<HomePage>
     final colorScheme = theme.colorScheme;
     return Column(
       children: [
-        _buildTopBar(theme),
+        _buildNormalTopBar(theme),
         Expanded(
           child: Center(
             child: Padding(
@@ -198,7 +198,7 @@ class _HomePageState extends State<HomePage>
     final colorScheme = theme.colorScheme;
     return Column(
       children: [
-        _buildTopBar(theme),
+        _buildNormalTopBar(theme),
         Expanded(
           child: Center(
             child: Padding(
@@ -600,17 +600,16 @@ class _HomePageState extends State<HomePage>
   Widget _buildNormalContent(ThemeData theme) {
     final mainController = Get.find<MainController>();
     final hideTopBar = controller.hideTopBar.value;
-    const topBarHeight = 52.0;   
+    const double topBarHeight = 52.0; // 固定内容高度
 
-    // ===== 1. 构建顶部栏 =====
+    // -------- 顶部栏（不包含任何安全区填充） --------
     Widget topBar = Container(
       height: topBarHeight,
       padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
       color: theme.colorScheme.surface,
-      child: _buildTopBarContent(theme), // 原有的 Row 内容
+      child: _buildTopBarContent(theme), // 纯 Row
     );
 
-    // ===== 2. 如果启用隐藏，应用裁剪偏移 =====
     if (hideTopBar) {
       final offset = mainController.topBarOffset.value.clamp(0.0, topBarHeight);
       topBar = CustomHeightWidget(
@@ -620,7 +619,7 @@ class _HomePageState extends State<HomePage>
       );
     }
 
-    // ===== 3. TabBar（分类栏） =====
+    // -------- TabBar（分类栏） --------
     final categories = controller.categories;
     final siteKey = sourceManager.currentSite.value?['key'] ?? '';
     final showFilter = controller.getFilterVisibility(siteKey);
@@ -699,13 +698,13 @@ class _HomePageState extends State<HomePage>
       ),
     );
 
-    // 判断当前分类是否有筛选（用于间距）
+    // 判断当前分类是否有筛选
     final currentCategory = controller.currentCategory.value;
     final hasFilter = currentCategory != null &&
         controller.filters.containsKey(currentCategory.typeId) &&
         controller.filters[currentCategory.typeId]!.isNotEmpty;
 
-    // ===== 4. TabBarView 内容 =====
+    // -------- TabBarView --------
     Widget tabView = TabBarView(
       controller: controller.tabController!,
       children: categories.map((category) {
@@ -723,7 +722,6 @@ class _HomePageState extends State<HomePage>
       }).toList(),
     );
 
-    // ===== 5. 组合布局 =====
     return Column(
       children: [
         topBar,
@@ -832,7 +830,7 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  Widget _buildTopBar(ThemeData theme) {
+  Widget _buildNormalTopBar(ThemeData theme) {
     return Container(
       height: 52,
       padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
@@ -855,7 +853,7 @@ class _HomePageState extends State<HomePage>
           if (sourceManager.isConfigLoading.value) {
             return Column(
               children: [
-                _buildTopBar(theme),
+                _buildNormalTopBar(theme),
                 Expanded(
                   child: Center(
                     child: SizedBox(
@@ -879,7 +877,7 @@ class _HomePageState extends State<HomePage>
           if (controller.isHomeLoading.value) {
             return Column(
               children: [
-                _buildTopBar(theme),
+                _buildNormalTopBar(theme),
                 Expanded(
                   child: Center(
                     child: SizedBox(
@@ -899,7 +897,7 @@ class _HomePageState extends State<HomePage>
           if (controller.isSwitchingSource.value) {
             return Column(
               children: [
-                _buildTopBar(theme),
+                _buildNormalTopBar(theme),
                 Expanded(
                   child: Center(
                     child: SizedBox(
@@ -923,7 +921,7 @@ class _HomePageState extends State<HomePage>
           if (controller.isHomeError.value) {
             return Column(
               children: [
-                _buildTopBar(theme),
+                _buildNormalTopBar(theme),
                 Expanded(
                   child: Center(
                     child: Text(

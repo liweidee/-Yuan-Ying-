@@ -546,7 +546,7 @@ class IntroView extends StatelessWidget {
                   ),
           ),
           child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start, // ← 改为 start，从顶部开始
+            crossAxisAlignment: CrossAxisAlignment.start, // 从顶部开始
             children: [
               if (isActive)
                 Padding(
