@@ -138,7 +138,7 @@ class _HomePageState extends State<HomePage>
     final colorScheme = theme.colorScheme;
     return Column(
       children: [
-        _buildSafeTopBar(theme),
+        _buildTopBar(theme),
         Expanded(
           child: Center(
             child: Padding(
@@ -198,7 +198,7 @@ class _HomePageState extends State<HomePage>
     final colorScheme = theme.colorScheme;
     return Column(
       children: [
-        _buildSafeTopBar(theme),
+        _buildTopBar(theme),
         Expanded(
           child: Center(
             child: Padding(
@@ -249,51 +249,36 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  Widget _buildSafeTopBar(ThemeData theme) {
-    final topPadding = MediaQuery.of(context).padding.top;
-    final topBarHeight = 52 + topPadding;
-
-    return Container(
-      height: topBarHeight,
-      padding: EdgeInsets.only(top: topPadding),
-      color: theme.colorScheme.surface,
-      child: _buildTopBarContent(theme),  // 内部内容 52px
-    );
-  }
-
   Widget _buildTopBarContent(ThemeData theme) {
-    return Container(
-      height: 52,
-      padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
-      color: theme.colorScheme.surface,
-      child: Row(
-        children: [
-          Expanded(
-            child: _buildSourceInfo(theme),
-          ),
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              IconButton(
-                  icon: const Icon(Icons.search, size: 22),
-                  onPressed: () => Get.toNamed(AppPages.search),
-                  splashRadius: 22),
-              IconButton(
-                  icon: const Icon(Icons.send, size: 20),
-                  onPressed: _showPushDialog,
-                  splashRadius: 20),
-              IconButton(
-                  icon: const Icon(Icons.history, size: 22),
-                  onPressed: () => Get.toNamed(AppPages.history),
-                  splashRadius: 22),
-              IconButton(
-                  icon: const Icon(Icons.star_border, size: 22),
-                  onPressed: () => Get.toNamed(AppPages.favorite),
-                  splashRadius: 22),
-            ],
-          ),
-        ],
-      ),
+    return Row(
+      children: [
+        Expanded(child: _buildSourceInfo(theme)),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              icon: const Icon(Icons.search, size: 22),
+              onPressed: () => Get.toNamed(AppPages.search),
+              splashRadius: 22,
+            ),
+            IconButton(
+              icon: const Icon(Icons.send, size: 20),
+              onPressed: _showPushDialog,
+              splashRadius: 20,
+            ),
+            IconButton(
+              icon: const Icon(Icons.history, size: 22),
+              onPressed: () => Get.toNamed(AppPages.history),
+              splashRadius: 22,
+            ),
+            IconButton(
+              icon: const Icon(Icons.star_border, size: 22),
+              onPressed: () => Get.toNamed(AppPages.favorite),
+              splashRadius: 22,
+            ),
+          ],
+        ),
+      ],
     );
   }
 
@@ -612,205 +597,30 @@ class _HomePageState extends State<HomePage>
     return textPainter.width.clamp(0.0, MediaQuery.of(context).size.width * 0.25);
   }
 
-  // Widget _buildNormalContent(ThemeData theme) {
-  //   final mainController = Get.find<MainController>();
-  //   final hideTopBar = controller.hideTopBar.value;
-  //   final topPadding = MediaQuery.of(context).padding.top;
-  //   final topBarHeight = 52 + topPadding;
-
-  //   // 构建顶部栏
-  //   Widget topBar = Container(
-  //     height: topBarHeight,
-  //     padding: EdgeInsets.only(top: topPadding),
-  //     color: theme.colorScheme.surface,
-  //     child: _buildSafeTopBar(theme),
-  //   );
-
-  //   if (hideTopBar) {
-  //     final offset = mainController.topBarOffset.value;
-  //     final maxOffset = topBarHeight;
-  //     if (mainController.barHideType == BarHideType.instant) {
-  //       final show = offset < maxOffset * 0.5;
-  //       topBar = AnimatedOpacity(
-  //         opacity: show ? 1 : 0,
-  //         duration: const Duration(milliseconds: 300),
-  //         child: AnimatedContainer(
-  //           duration: const Duration(milliseconds: 300),
-  //           height: show ? topBarHeight : 0,
-  //           child: topBar,
-  //         ),
-  //       );
-  //     } else {
-  //       final visibleHeight = (topBarHeight - offset).clamp(0.0, topBarHeight);
-  //       topBar = CustomHeightWidget(
-  //         height: visibleHeight,
-  //         offset: Offset(0, -offset),
-  //         child: topBar,
-  //       );
-  //     }
-  //   }
-
-  //   // 分类 TabBar
-  //   final categories = controller.categories;
-  //   final siteKey = sourceManager.currentSite.value?['key'] ?? '';
-  //   final showFilter = controller.getFilterVisibility(siteKey);
-
-  //   Widget tabBar = Container(
-  //     height: 46,
-  //     color: theme.colorScheme.surface,
-  //     child: Row(
-  //       crossAxisAlignment: CrossAxisAlignment.stretch,
-  //       children: [
-  //         Expanded(
-  //           child: SingleChildScrollView(
-  //             scrollDirection: Axis.horizontal,
-  //             physics: const BouncingScrollPhysics(),
-  //             child: Row(
-  //               children: categories.map((item) {
-  //                 final isSelected = controller.currentCategory.value?.typeId == item.typeId;
-  //                 final textStyle = TextStyle(
-  //                   fontSize: 14,
-  //                   color: isSelected
-  //                       ? theme.colorScheme.primary
-  //                       : theme.colorScheme.onSurface,
-  //                   fontWeight: isSelected ? FontWeight.w500 : FontWeight.normal,
-  //                 );
-  //                 return GestureDetector(
-  //                   onTap: () => controller.switchCategory(item),
-  //                   child: Container(
-  //                     height: 46,
-  //                     padding: const EdgeInsets.symmetric(horizontal: 16),
-  //                     child: Stack(
-  //                       alignment: Alignment.center,
-  //                       children: [
-  //                         Text(item.typeName, style: textStyle),
-  //                         if (isSelected)
-  //                           Positioned(
-  //                             bottom: 6,
-  //                             child: Container(
-  //                               width: _getTextWidth(context, item.typeName, textStyle),
-  //                               height: 2,
-  //                               decoration: BoxDecoration(
-  //                                 color: theme.colorScheme.primary,
-  //                                 borderRadius: BorderRadius.circular(1),
-  //                               ),
-  //                             ),
-  //                           ),
-  //                       ],
-  //                     ),
-  //                   ),
-  //                 );
-  //               }).toList(),
-  //             ),
-  //           ),
-  //         ),
-  //         Container(
-  //           color: theme.colorScheme.surface,
-  //           child: Row(
-  //             children: [
-  //               Obx(() {
-  //                 final cid = controller.currentCategory.value?.typeId;
-  //                 final hasFilter = cid != null &&
-  //                     controller.filters.containsKey(cid) &&
-  //                     controller.filters[cid]!.isNotEmpty;
-  //                 if (!hasFilter) return const SizedBox.shrink();
-  //                 return IconButton(
-  //                   padding: EdgeInsets.zero,
-  //                   constraints: const BoxConstraints(),
-  //                   icon: Icon(
-  //                     showFilter ? Icons.filter_alt : Icons.filter_alt_off,
-  //                     size: 20,
-  //                   ),
-  //                   onPressed: () => controller.toggleFilterBar(siteKey),
-  //                   splashRadius: 20,
-  //                 );
-  //               }),
-  //               const SizedBox(width: 4),
-  //               Obx(() {
-  //                 final mode = controller.cardLayoutMode.value;
-  //                 return IconButton(
-  //                   padding: EdgeInsets.zero,
-  //                   constraints: const BoxConstraints(),
-  //                   icon: Icon(mode.icon, size: 20),
-  //                   onPressed: controller.toggleCardLayout,
-  //                   tooltip: mode.label,
-  //                   splashRadius: 20,
-  //                 );
-  //               }),
-  //               const SizedBox(width: 4),
-  //               IconButton(
-  //                 padding: EdgeInsets.zero,
-  //                 constraints: const BoxConstraints(),
-  //                 icon: const Icon(Icons.expand_more, size: 20),
-  //                 onPressed: () => _showAllCategoriesDialog(context),
-  //                 splashRadius: 20,
-  //               ),
-  //             ],
-  //           ),
-  //         ),
-  //       ],
-  //     ),
-  //   );
-
-  //   // 判断当前分类是否有筛选
-  //   final currentCategory = controller.currentCategory.value;
-  //   final hasFilter = currentCategory != null &&
-  //       controller.filters.containsKey(currentCategory.typeId) &&
-  //       controller.filters[currentCategory.typeId]!.isNotEmpty;
-
-  //   // ===== TabBarView 内容：推荐分类单独渲染 =====
-  //   Widget tabView = TabBarView(
-  //     controller: controller.tabController!,
-  //     children: categories.map((category) {
-  //       // ===== 推荐分类使用 RecommendPage =====
-  //       if (category.typeId == 'recommend') {
-  //         return RecommendPage(
-  //           data: controller.recommendList,
-  //           onVideoTap: _navigateToDetail,
-  //         );
-  //       }
-
-  //       // ===== 非推荐分类使用 CategoryPage =====
-  //       final ctrl = controller.getOrCreateController(category.typeId);
-  //       return CategoryPage(
-  //         controller: ctrl!,
-  //         onVideoTap: _navigateToDetail,
-  //       );
-  //     }).toList(),
-  //   );
-
-  //   return Column(
-  //     children: [
-  //       topBar,
-  //       tabBar,
-  //       // 只有无筛选时才添加间距（有筛选时由筛选栏自身提供）
-  //       // if (!hasFilter) const SizedBox(height: 8),
-  //       Expanded(child: tabView),
-  //     ],
-  //   );
-  // }
-
   Widget _buildNormalContent(ThemeData theme) {
     final mainController = Get.find<MainController>();
     final hideTopBar = controller.hideTopBar.value;
-    final topPadding = MediaQuery.of(context).padding.top;
-    final topBarHeight = 52 + topPadding;
+    const topBarHeight = 52.0;   
 
-    // 构建顶部栏
-    Widget topBar = _buildSafeTopBar(theme);
+    // ===== 1. 构建顶部栏 =====
+    Widget topBar = Container(
+      height: topBarHeight,
+      padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
+      color: theme.colorScheme.surface,
+      child: _buildTopBarContent(theme), // 原有的 Row 内容
+    );
 
+    // ===== 2. 如果启用隐藏，应用裁剪偏移 =====
     if (hideTopBar) {
-      final offset = mainController.topBarOffset.value;
-      final maxOffset = topBarHeight; // 52 + topPadding
-      final visibleHeight = (maxOffset - offset).clamp(0.0, maxOffset);
+      final offset = mainController.topBarOffset.value.clamp(0.0, topBarHeight);
       topBar = CustomHeightWidget(
-        height: visibleHeight,
+        height: topBarHeight - offset,
         offset: Offset(0, -offset),
         child: topBar,
       );
     }
 
-    // ===== 分类 TabBar（参考详情页布局） =====
+    // ===== 3. TabBar（分类栏） =====
     final categories = controller.categories;
     final siteKey = sourceManager.currentSite.value?['key'] ?? '';
     final showFilter = controller.getFilterVisibility(siteKey);
@@ -820,7 +630,6 @@ class _HomePageState extends State<HomePage>
       color: theme.colorScheme.surface,
       child: Row(
         children: [
-          // 左侧：原生 TabBar
           Expanded(
             flex: 3,
             child: TabBar(
@@ -830,40 +639,22 @@ class _HomePageState extends State<HomePage>
               dividerColor: Colors.transparent,
               dividerHeight: 0,
               indicatorColor: theme.colorScheme.primary,
-              // ===== 长度：label 与文字等宽，tab 与整个 Tab 等宽 =====
               indicatorSize: TabBarIndicatorSize.label,
-              // ===== 粗细：2.0 是默认，可调大调小 =====
               indicatorWeight: 0.1,
-              // 下划线左右各缩进大小
-              // indicatorPadding: EdgeInsets.zero,
-              // indicatorPadding: EdgeInsets.symmetric(horizontal: 4),
               labelColor: theme.colorScheme.primary,
               unselectedLabelColor: theme.colorScheme.onSurface,
-              labelStyle: const TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
-              ),
-              unselectedLabelStyle: const TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.normal,
-              ),
-              // ===== 去除 hover/点击/长按背景层效果 =====
+              labelStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+              unselectedLabelStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.normal),
               overlayColor: WidgetStateProperty.all(Colors.transparent),
               splashFactory: NoSplash.splashFactory,
-              tabs: categories.map((item) {
-                return Tab(text: item.typeName);
-              }).toList(),
-              onTap: (index) {
-                controller.switchCategory(categories[index]);
-              },
+              tabs: categories.map((item) => Tab(text: item.typeName)).toList(),
+              onTap: (index) => controller.switchCategory(categories[index]),
             ),
           ),
-          // 右侧：固定按钮区
           Container(
             color: theme.colorScheme.surface,
             child: Row(
               children: [
-                // 筛选开关（只有当前分类有筛选时才显示）
                 Obx(() {
                   final cid = controller.currentCategory.value?.typeId;
                   final hasFilter = cid != null &&
@@ -873,27 +664,19 @@ class _HomePageState extends State<HomePage>
                   return IconButton(
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(),
-                    style: IconButton.styleFrom(
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
-                    icon: Icon(
-                      showFilter ? Icons.filter_alt : Icons.filter_alt_off,
-                      size: 20,
-                    ),
+                    style: IconButton.styleFrom(tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                    icon: Icon(showFilter ? Icons.filter_alt : Icons.filter_alt_off, size: 20),
                     onPressed: () => controller.toggleFilterBar(siteKey),
                     splashRadius: 20,
                   );
                 }),
                 const SizedBox(width: 4),
-                // 布局切换
                 Obx(() {
                   final mode = controller.cardLayoutMode.value;
                   return IconButton(
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(),
-                    style: IconButton.styleFrom(
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
+                    style: IconButton.styleFrom(tapTargetSize: MaterialTapTargetSize.shrinkWrap),
                     icon: Icon(mode.icon, size: 20),
                     onPressed: controller.toggleCardLayout,
                     tooltip: mode.label,
@@ -901,13 +684,10 @@ class _HomePageState extends State<HomePage>
                   );
                 }),
                 const SizedBox(width: 4),
-                // 全部分类展开
                 IconButton(
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(),
-                  style: IconButton.styleFrom(
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
+                  style: IconButton.styleFrom(tapTargetSize: MaterialTapTargetSize.shrinkWrap),
                   icon: const Icon(Icons.expand_more, size: 20),
                   onPressed: () => _showAllCategoriesDialog(context),
                   splashRadius: 20,
@@ -919,13 +699,13 @@ class _HomePageState extends State<HomePage>
       ),
     );
 
-    // 判断当前分类是否有筛选
+    // 判断当前分类是否有筛选（用于间距）
     final currentCategory = controller.currentCategory.value;
     final hasFilter = currentCategory != null &&
         controller.filters.containsKey(currentCategory.typeId) &&
         controller.filters[currentCategory.typeId]!.isNotEmpty;
 
-    // ===== TabBarView 内容 =====
+    // ===== 4. TabBarView 内容 =====
     Widget tabView = TabBarView(
       controller: controller.tabController!,
       children: categories.map((category) {
@@ -943,11 +723,11 @@ class _HomePageState extends State<HomePage>
       }).toList(),
     );
 
+    // ===== 5. 组合布局 =====
     return Column(
       children: [
         topBar,
         tabBar,
-        // 只有无筛选时才添加间距（有筛选时由筛选栏自身提供）
         if (!hasFilter) const SizedBox(height: 8),
         Expanded(child: tabView),
       ],
@@ -1052,6 +832,15 @@ class _HomePageState extends State<HomePage>
     );
   }
 
+  Widget _buildTopBar(ThemeData theme) {
+    return Container(
+      height: 52,
+      padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
+      color: theme.colorScheme.surface,
+      child: _buildTopBarContent(theme),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     super.build(context);
@@ -1066,7 +855,7 @@ class _HomePageState extends State<HomePage>
           if (sourceManager.isConfigLoading.value) {
             return Column(
               children: [
-                _buildSafeTopBar(theme),
+                _buildTopBar(theme),
                 Expanded(
                   child: Center(
                     child: SizedBox(
@@ -1090,7 +879,7 @@ class _HomePageState extends State<HomePage>
           if (controller.isHomeLoading.value) {
             return Column(
               children: [
-                _buildSafeTopBar(theme),
+                _buildTopBar(theme),
                 Expanded(
                   child: Center(
                     child: SizedBox(
@@ -1110,7 +899,7 @@ class _HomePageState extends State<HomePage>
           if (controller.isSwitchingSource.value) {
             return Column(
               children: [
-                _buildSafeTopBar(theme),
+                _buildTopBar(theme),
                 Expanded(
                   child: Center(
                     child: SizedBox(
@@ -1134,7 +923,7 @@ class _HomePageState extends State<HomePage>
           if (controller.isHomeError.value) {
             return Column(
               children: [
-                _buildSafeTopBar(theme),
+                _buildTopBar(theme),
                 Expanded(
                   child: Center(
                     child: Text(

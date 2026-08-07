@@ -101,7 +101,8 @@ class _SettingSheetState extends State<SettingSheet> {
         ),
       );
     } else {
-      // 移动端：DraggableScrollableSheet
+      // 移动端：固定高度，不可拖拽，底部安全区域
+      final bottomPadding = MediaQuery.of(context).padding.bottom;
       return Container(
         margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
@@ -112,21 +113,18 @@ class _SettingSheetState extends State<SettingSheet> {
           borderRadius: const BorderRadius.all(Radius.circular(12)),
           child: Material(
             color: colorScheme.surface,
-            child: DraggableScrollableSheet(
-              initialChildSize: 0.65,
-              minChildSize: 0.4,
-              maxChildSize: 0.85,
-              expand: false,
-              builder: (context, scrollController) {
-                return ScrollConfiguration(
-                  behavior: const NoScrollbarBehavior(),
-                  child: ListView(
-                    controller: scrollController,
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    children: _buildContent(theme),
+            child: SizedBox(
+              height: MediaQuery.of(context).size.height * 0.65,
+              child: ScrollConfiguration(
+                behavior: const NoScrollbarBehavior(),
+                child: ListView(
+                  padding: EdgeInsets.only(
+                    top: 8,
+                    bottom: bottomPadding + 8, // 底部安全区域 + 额外间距
                   ),
-                );
-              },
+                  children: _buildContent(theme),
+                ),
+              ),
             ),
           ),
         ),

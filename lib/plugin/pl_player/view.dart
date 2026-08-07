@@ -1056,10 +1056,6 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
       fontSize: 12,
     );
 
-    final bool bottomRemoveSafeArea = (Platform.isIOS && isFullScreen && !plPlayerController.removeSafeArea)
-        ? true
-        : plPlayerController.removeSafeArea;
-
     final child = Stack(
       fit: StackFit.passthrough,
       key: _playerKey,
@@ -1316,7 +1312,7 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
                         isTop: false,
                         controller: _animationController,
                         isFullScreen: isFullScreen,
-                        removeSafeArea: bottomRemoveSafeArea,
+                        removeSafeArea: plPlayerController.removeSafeArea,
                         child: widget.bottomControl ??
                             BottomControl(
                               maxWidth: maxWidth,
@@ -1356,7 +1352,7 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
                       isTop: false,
                       controller: _animationController,
                       isFullScreen: isFullScreen,
-                      removeSafeArea: bottomRemoveSafeArea,
+                      removeSafeArea: plPlayerController.removeSafeArea,
                       child: widget.bottomControl ??
                           BottomControl(
                             maxWidth: maxWidth,

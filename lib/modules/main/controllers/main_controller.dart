@@ -110,8 +110,9 @@ class MainController extends GetxController {
       topBarOffset.value = 0.0;
       return;
     }
-    // 直接传递原始偏移量，由 home_page 自己限制最大偏移
-    topBarOffset.value = offset;
+    // 钳制最小值，防止下拉刷新负偏移导致顶部栏下坠
+    final clamped = offset.clamp(0.0, double.infinity);
+    topBarOffset.value = clamped;
   }
 
   void refreshHideBottomBar() {

@@ -96,48 +96,60 @@ class _RecommendTabState extends State<RecommendTab> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              Icons.video_library,
-              size: 48,
-              color: colorScheme.outline,
-            ),
+            Icon(Icons.video_library, size: 48, color: colorScheme.outline),
             const SizedBox(height: 12),
-            Text(
-              '暂无推荐内容',
-              style: TextStyle(
-                fontSize: 14,
-                color: colorScheme.outline,
-              ),
-            ),
+            Text('暂无推荐内容', style: TextStyle(fontSize: 14, color: colorScheme.outline)),
           ],
         ),
       );
     }
 
-    final screenWidth = MediaQuery.of(context).size.width;
-    double maxCrossAxisExtent;
-    if (screenWidth < 600) {
-      maxCrossAxisExtent = 180.0;
-    } else if (screenWidth < 900) {
-      maxCrossAxisExtent = 200.0;
-    } else {
-      maxCrossAxisExtent = 200.0;
-    }
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final availableWidth = constraints.maxWidth;
 
-    return GridView.builder(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-      gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
-        maxCrossAxisExtent: maxCrossAxisExtent,
-        crossAxisSpacing: 10,
-        mainAxisSpacing: 12,
-        childAspectRatio: 0.65,
-      ),
-      itemCount: _recommendList.length,
-      itemBuilder: (context, index) {
-        final item = _recommendList[index];
-        return VideoCardV(
-          videoItem: item,
-          onTap: () => _navigateToDetail(item),
+        // 移动端（包括 400px）：固定 3 列
+        if (availableWidth < 600) {
+          return GridView.builder(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 3,
+              crossAxisSpacing: 10,
+              mainAxisSpacing: 12,
+              childAspectRatio: 0.65,
+            ),
+            itemCount: _recommendList.length,
+            itemBuilder: (context, index) {
+              final item = _recommendList[index];
+              return VideoCardV(
+                videoItem: item,
+                onTap: () => _navigateToDetail(item),
+              );
+            },
+          );
+        }
+
+        // 桌面端：自适应列数，卡片宽度 180~220
+        double maxCrossAxisExtent = (availableWidth - 30) / 4;
+        if (maxCrossAxisExtent > 220) maxCrossAxisExtent = 220;
+        if (maxCrossAxisExtent < 180) maxCrossAxisExtent = 180;
+
+        return GridView.builder(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+          gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+            maxCrossAxisExtent: maxCrossAxisExtent,
+            crossAxisSpacing: 10,
+            mainAxisSpacing: 12,
+            childAspectRatio: 0.65,
+          ),
+          itemCount: _recommendList.length,
+          itemBuilder: (context, index) {
+            final item = _recommendList[index];
+            return VideoCardV(
+              videoItem: item,
+              onTap: () => _navigateToDetail(item),
+            );
+          },
         );
       },
     );

@@ -258,35 +258,62 @@ class _SearchTabState extends State<SearchTab> {
               Icon(Icons.error_outline, size: 48, color: colorScheme.outline),
               const SizedBox(height: 12),
               Text(controller.errorMsg.value, style: TextStyle(color: colorScheme.outline)),
-              TextButton(
-                onPressed: controller.refreshCurrent,
-                child: const Text('重试'),
-              ),
+              TextButton(onPressed: controller.refreshCurrent, child: const Text('重试')),
             ],
           ),
         );
       }
 
       if (controller.currentItems.isEmpty) {
-        return Center(
-          child: Text('暂无搜索结果', style: TextStyle(color: colorScheme.outline)),
-        );
+        return Center(child: Text('暂无搜索结果', style: TextStyle(color: colorScheme.outline)));
       }
 
-      return GridView.builder(
-        padding: const EdgeInsets.all(8),
-        gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-          maxCrossAxisExtent: 180,
-          crossAxisSpacing: 10,
-          mainAxisSpacing: 12,
-          childAspectRatio: 0.65,
-        ),
-        itemCount: controller.currentItems.length,
-        itemBuilder: (context, index) {
-          final item = controller.currentItems[index];
-          return VideoCardV(
-            videoItem: item,
-            onTap: () => _navigateToDetail(item),
+      return LayoutBuilder(
+        builder: (context, constraints) {
+          final availableWidth = constraints.maxWidth;
+
+          // 移动端（包括 400px）：固定 3 列
+          if (availableWidth < 600) {
+            return GridView.builder(
+              padding: const EdgeInsets.all(8),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 3,
+                crossAxisSpacing: 10,
+                mainAxisSpacing: 12,
+                childAspectRatio: 0.65,
+              ),
+              itemCount: controller.currentItems.length,
+              itemBuilder: (context, index) {
+                final item = controller.currentItems[index];
+                return VideoCardV(
+                  videoItem: item,
+                  onTap: () => _navigateToDetail(item),
+                );
+              },
+            );
+          }
+
+          // 桌面端：自适应列数
+          double maxCrossAxisExtent = (availableWidth - 30) / 4;
+          if (maxCrossAxisExtent > 220) maxCrossAxisExtent = 220;
+          if (maxCrossAxisExtent < 180) maxCrossAxisExtent = 180;
+
+          return GridView.builder(
+            padding: const EdgeInsets.all(8),
+            gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+              maxCrossAxisExtent: maxCrossAxisExtent,
+              crossAxisSpacing: 10,
+              mainAxisSpacing: 12,
+              childAspectRatio: 0.65,
+            ),
+            itemCount: controller.currentItems.length,
+            itemBuilder: (context, index) {
+              final item = controller.currentItems[index];
+              return VideoCardV(
+                videoItem: item,
+                onTap: () => _navigateToDetail(item),
+              );
+            },
           );
         },
       );

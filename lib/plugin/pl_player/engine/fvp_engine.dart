@@ -578,20 +578,14 @@ class FvpEngine implements IPlayerEngine {
 
     if (PlatformUtils.isMobile) {
       if (status) {
-        // 隐藏导航栏 + 强制横屏
-        SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-        SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-          systemNavigationBarColor: Colors.transparent,
-          systemNavigationBarDividerColor: Colors.transparent,
-        ));
+        hideSystemBar();
         await SystemChrome.setPreferredOrientations([
           DeviceOrientation.landscapeLeft,
           DeviceOrientation.landscapeRight,
         ]);
       } else {
         if (!removeSafeArea) {
-          SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-          SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.light);
+          showSystemBar();
         }
         await SystemChrome.setPreferredOrientations([
           DeviceOrientation.portraitUp,

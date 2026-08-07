@@ -12,13 +12,13 @@ import 'package:yuanying/common/widgets/image_viewer/hero.dart';
 
 /// 简介区域
 class IntroView extends StatelessWidget {
-  // ===== 与 PiliPlus 一致：通过构造函数接收 controllerTag =====
+  // ===== 通过构造函数接收 controllerTag =====
   final String controllerTag;
   const IntroView({super.key, required this.controllerTag});
 
   @override
   Widget build(BuildContext context) {
-    // ===== 带 tag 查找 DetailController（与 PiliPlus 的 Get.find<XXX>(tag: heroTag) 一致） =====
+    // ===== 带 tag 查找 DetailController =====
     final detailController = Get.find<DetailController>(tag: controllerTag);
     final introController = detailController.introController;
 
@@ -521,45 +521,69 @@ class IntroView extends StatelessWidget {
     final isPlayingLine = displayIndex == playIndex;
     final isWide = MediaQuery.sizeOf(context).width > 800;
 
-    // ===== 统一的按钮构建函数 =====
     Widget buildEpisodeButton(int index) {
       final episode = episodes[index];
       final isActive = isPlayingLine && index == episodeIndex;
-      return SizedBox(
-        width: 64,
-        height: 32,  // ← 固定高度
-        child: GestureDetector(
-          onTap: () => detailController.switchEpisode(index),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-            decoration: BoxDecoration(
-              color: isActive
-                  ? colorScheme.primary
-                  : colorScheme.onInverseSurface,
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: Center(
-              child: Text(
-                episode.name,
-                style: TextStyle(
-                  fontSize: 13,
-                  color: isActive ? Colors.white : colorScheme.onSurface,
-                  fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+      return GestureDetector(
+        onTap: () => detailController.switchEpisode(index),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+          constraints: const BoxConstraints(
+            minWidth: 70,
+            maxWidth: 88,
+          ),
+          height: 48,
+          decoration: BoxDecoration(
+            color: isActive
+                ? colorScheme.primary
+                : colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(6),
+            border: isActive
+                ? null
+                : Border.all(
+                    color: colorScheme.outline.withValues(alpha: 0.15),
+                    width: 0.5,
+                  ),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start, // ← 改为 start，从顶部开始
+            children: [
+              if (isActive)
+                Padding(
+                  padding: const EdgeInsets.only(top: 1), // 微调图标与文字第一行对齐
+                  child: Icon(
+                    Icons.play_circle_outline,
+                    size: 14,
+                    color: Colors.white,
+                  ),
                 ),
-                maxLines: 1,  // ← 强制单行
-                overflow: TextOverflow.ellipsis,  // ← 超出省略
-                textAlign: TextAlign.center,
+              if (isActive) const SizedBox(width: 3),
+              Expanded(
+                child: Text(
+                  episode.name,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: isActive ? Colors.white : colorScheme.onSurface,
+                    fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+                    height: 1.2,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.left,
+                ),
               ),
-            ),
+            ],
           ),
         ),
       );
     }
 
     if (isWide) {
+      // 桌面端：使用 Wrap 布局，整体居中，一行正好 4 个
       return Padding(
-        padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+        padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
         child: Wrap(
+          alignment: WrapAlignment.center, // 整体居中
           spacing: 8,
           runSpacing: 8,
           children: episodes.asMap().entries.map((entry) {
@@ -568,10 +592,11 @@ class IntroView extends StatelessWidget {
         ),
       );
     } else {
+      // 移动端：水平滚动，高度与桌面保持一致
       return Padding(
-        padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+        padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
         child: SizedBox(
-          height: 36,
+          height: 52, // 48 + 上下间距
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
             itemCount: episodes.length,

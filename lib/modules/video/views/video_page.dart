@@ -17,6 +17,7 @@ import 'package:yuanying/modules/setting/models/setting_pref.dart';
 import 'package:yuanying/modules/common/mixins/common_slide_mixin.dart';
 import 'package:yuanying/modules/video/widgets/recommend_tab.dart';
 import 'package:yuanying/modules/video/widgets/search_tab.dart';
+import 'package:yuanying/plugin/pl_player/utils/fullscreen.dart';
 
 class DetailPage extends CommonSlidePage {
   const DetailPage({super.key, super.enableSlide = true});
@@ -45,6 +46,11 @@ class _DetailPageState extends State<DetailPage>
       controller = Get.find<DetailController>(tag: _controllerTag);
     } else {
       controller = Get.put(DetailController(tag: _controllerTag), tag: _controllerTag);
+    }
+
+    // 如果全局设置了移除安全区域，则进入页面时即隐藏系统栏
+    if (SettingPref.removeSafeArea) {
+      hideSystemBar();
     }
   }
 
@@ -230,43 +236,62 @@ class _DetailPageState extends State<DetailPage>
     final size = MediaQuery.sizeOf(context);
     final padding = MediaQuery.viewPaddingOf(context);
     final availableHeight = size.height - padding.top - padding.bottom;
-    final playerWidth = isFullScreen
-        ? size.width
-        : (size.width * 0.6).clamp(400.0, 800.0);
+
+    if (isFullScreen) {
+      return SizedBox(
+        width: size.width,
+        height: availableHeight,
+        child: _buildPlayer(
+          context,
+          controller,
+          size.width,
+          availableHeight,
+          colorScheme,
+          theme,
+        ),
+      );
+    }
+
+    // ===== 右侧固定宽度 =====
+    const double rightWidth = 400.0;  // 3列卡片 + 间距 + padding
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        SizedBox(
-          width: playerWidth,
-          height: availableHeight,
-          child: _buildPlayer(
-            context,
-            controller,
-            playerWidth,
-            availableHeight,
-            colorScheme,
-            theme,
-          ),
-        ),
-        if (!isFullScreen)
-          Expanded(
-            child: Column(
-              children: [
-                _buildTabBar(
-                  context,
-                  controller,
-                  tabBarKey,
-                  colorScheme,
-                  theme,
-                  isLandscape: true,
-                ),
-                Expanded(
-                  child: _buildTabBarView(context, controller, colorScheme, theme),
-                ),
-              ],
+        // 左侧播放器：自适应填充剩余空间
+        Expanded(
+          child: SizedBox(
+            height: availableHeight,
+            child: _buildPlayer(
+              context,
+              controller,
+              double.infinity,
+              availableHeight,
+              colorScheme,
+              theme,
             ),
           ),
+        ),
+        // 右侧内容区：固定宽度
+        SizedBox(
+          width: rightWidth,
+          height: availableHeight,
+          child: Column(
+            children: [
+              _buildTabBar(
+                context,
+                controller,
+                tabBarKey,
+                colorScheme,
+                theme,
+                isLandscape: true,
+              ),
+              Expanded(
+                child: _buildTabBarView(context, controller, colorScheme, theme),
+              ),
+            ],
+          ),
+        ),
       ],
     );
   }

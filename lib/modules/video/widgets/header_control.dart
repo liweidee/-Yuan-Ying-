@@ -489,6 +489,9 @@ class _HeaderControlState extends State<HeaderControl> {
     final isWide = size.width > 800;
 
     if (isWide) {
+      // 固定右侧宽度 400px（与内容区一致）
+      const double rightWidth = 400.0;
+
       showGeneralDialog(
         context: context,
         barrierDismissible: true,
@@ -497,8 +500,6 @@ class _HeaderControlState extends State<HeaderControl> {
         pageBuilder: (context, animation, secondaryAnimation) {
           final padding = MediaQuery.viewPaddingOf(context);
           final availableHeight = size.height - padding.top - padding.bottom;
-          final playerWidth = (size.width * 0.6).clamp(400.0, 800.0);
-          final rightWidth = size.width - playerWidth;
 
           return Align(
             alignment: Alignment.centerRight,
@@ -530,6 +531,7 @@ class _HeaderControlState extends State<HeaderControl> {
         },
       );
     } else {
+      // 移动端保持不变
       showModalBottomSheet(
         context: context,
         isScrollControlled: true,

@@ -1330,17 +1330,17 @@ class DetailController extends GetxController {
     final isWide = size.width > 800;
 
     if (isWide) {
+      // 固定右侧宽度 400px（与内容区一致）
+      const double rightWidth = 400.0;
+      final padding = MediaQuery.viewPaddingOf(context);
+      final availableHeight = size.height - padding.top - padding.bottom;
+
       showGeneralDialog(
         context: context,
         barrierDismissible: true,
         barrierLabel: '关闭剧集列表',
         transitionDuration: const Duration(milliseconds: 300),
         pageBuilder: (context, animation, secondaryAnimation) {
-          final padding = MediaQuery.viewPaddingOf(context);
-          final availableHeight = size.height - padding.top - padding.bottom;
-          final playerWidth = (size.width * 0.6).clamp(400.0, 800.0);
-          final rightWidth = size.width - playerWidth;
-
           return Align(
             alignment: Alignment.centerRight,
             child: Material(
@@ -1355,7 +1355,6 @@ class DetailController extends GetxController {
                     bottomLeft: Radius.circular(12),
                   ),
                 ),
-                // ===== 修改：传递 controllerTag =====
                 child: EpisodePanelDialog(
                   isWide: true,
                   controllerTag: _tag ?? '',
@@ -1652,7 +1651,7 @@ class DetailController extends GetxController {
     }
   }
 
-  /// 显示简介详情弹窗（PiliPlus 风格）
+  /// 显示简介详情弹窗
   void showIntroDetailPanel(BuildContext context) {
     final detail = introController.videoDetail.value;
     if (detail == null) return;
@@ -1662,18 +1661,17 @@ class DetailController extends GetxController {
     final videoHeight = size.width * 9 / 16;
 
     if (isWide) {
-      // 桌面端：右侧滑出
+      // 固定右侧宽度 400px（与内容区一致）
+      const double rightWidth = 400.0;
+      final padding = MediaQuery.viewPaddingOf(context);
+      final availableHeight = size.height - padding.top - padding.bottom;
+
       showGeneralDialog(
         context: context,
         barrierDismissible: true,
         barrierLabel: '关闭详情',
         transitionDuration: const Duration(milliseconds: 300),
         pageBuilder: (context, animation, secondaryAnimation) {
-          final padding = MediaQuery.viewPaddingOf(context);
-          final availableHeight = size.height - padding.top - padding.bottom;
-          final playerWidth = (size.width * 0.6).clamp(400.0, 800.0);
-          final rightWidth = size.width - playerWidth;
-
           return Align(
             alignment: Alignment.centerRight,
             child: Material(

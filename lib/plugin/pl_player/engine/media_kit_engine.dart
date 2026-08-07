@@ -1032,12 +1032,7 @@ class MediaKitEngine implements IPlayerEngine {
     try {
       if (status) {
         if (PlatformUtils.isMobile) {
-          // 隐藏系统导航栏（沉浸式）
-          SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-          SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-            systemNavigationBarColor: Colors.transparent,
-            systemNavigationBarDividerColor: Colors.transparent,
-          ));
+          hideSystemBar(); // 先隐藏系统栏
           await changeOrientation(
             isVertical: isVertical,
             orientation: orientation,
@@ -1048,9 +1043,7 @@ class MediaKitEngine implements IPlayerEngine {
       } else {
         if (PlatformUtils.isMobile) {
           if (!removeSafeArea) {
-            // 恢复系统栏（但保留边缘到边缘，以便状态栏透明）
-            SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-            SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.light);
+            showSystemBar();
           }
           if (orientation == null && mode == FullScreenMode.none) {
             return;
