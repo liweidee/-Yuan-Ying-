@@ -5,7 +5,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:yuanying/utils/platform_utils.dart';
 
-/// 存储工具类 - 移植自 PiliPlus
+/// 存储工具类
 abstract final class StorageUtils {
   /// 保存字节数据到本地文件
   /// [name] 文件名

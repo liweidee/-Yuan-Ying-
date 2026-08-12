@@ -4,7 +4,7 @@ import 'package:yuanying/common/widgets/search_text.dart';
 import 'package:yuanying/t4/models/video_detail.dart';
 import 'package:yuanying/utils/utils.dart';
 
-/// 简介详情弹窗 - PiliPlus 风格（只保留详情 Tab）
+/// 简介详情弹窗
 class IntroDetailPanel extends StatefulWidget {
   final VideoDetail detail;
   final String sourceName;
@@ -50,7 +50,6 @@ class _IntroDetailPanelState extends State<IntroDetailPanel>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ===== PiliPlus 风格顶部栏：TabBar + 关闭按钮 =====
           Row(
             children: [
               // 左侧：TabBar（只有一个"详情"Tab）

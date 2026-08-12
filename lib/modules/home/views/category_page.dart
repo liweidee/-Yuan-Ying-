@@ -199,7 +199,7 @@ class _CategoryPageState extends State<CategoryPage>
     return Container(
       width: double.infinity,
       color: theme.colorScheme.surface,
-      padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 0),
+      padding: const EdgeInsets.symmetric(vertical: 0, horizontal: 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,

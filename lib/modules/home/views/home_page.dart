@@ -294,7 +294,8 @@ class _HomePageState extends State<HomePage>
           GestureDetector(
             onTap: _showSwitchInterfaceDialog,
             child: ClipRRect(
-              borderRadius: Style.mdRadius,
+              // borderRadius: Style.mdRadius,
+              borderRadius: BorderRadius.circular(6.0),
               child: Container(
                 width: 28,
                 height: 28,
@@ -651,6 +652,7 @@ class _HomePageState extends State<HomePage>
             ),
           ),
           Container(
+            padding: const EdgeInsets.only(left: 6.0),
             color: theme.colorScheme.surface,
             child: Row(
               children: [
@@ -726,7 +728,8 @@ class _HomePageState extends State<HomePage>
       children: [
         topBar,
         tabBar,
-        if (!hasFilter) const SizedBox(height: 8),
+        // if (!hasFilter) const SizedBox(height: 8),
+        const SizedBox(height: 8),
         Expanded(child: tabView),
       ],
     );

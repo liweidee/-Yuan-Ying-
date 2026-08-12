@@ -60,8 +60,8 @@ jobs:
               content = f.read()
           # 替换为你的实际 iOS Bundle ID
           content = content.replace(
-              'PRODUCT_BUNDLE_IDENTIFIER = com.example.piliplus;',
-              'PRODUCT_BUNDLE_IDENTIFIER = com.example.piliplus;\n\t\t\t\tDEVELOPMENT_TEAM = 0000000000;'
+              'PRODUCT_BUNDLE_IDENTIFIER = com.example.yuanying;',
+              'PRODUCT_BUNDLE_IDENTIFIER = com.example.yuanying;\n\t\t\t\tDEVELOPMENT_TEAM = 0000000000;'
           )
           content = content.replace('CODE_SIGN_STYLE = Automatic;', 'CODE_SIGN_STYLE = Manual;')
           with open('Runner.xcodeproj/project.pbxproj', 'w') as f:

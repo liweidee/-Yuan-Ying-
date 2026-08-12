@@ -62,7 +62,7 @@ abstract final class PageUtils {
     return RelativeRect.fromLTRB(offset.dx, offset.dy, offset.dx, 0);
   }
 
-  /// 显示视频底部弹窗（PiliPlus 风格）
+  /// 显示视频底部弹窗
   static Future<void> showVideoBottomSheet({
     required BuildContext context,
     required Widget child,

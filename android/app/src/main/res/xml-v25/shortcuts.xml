@@ -6,7 +6,7 @@
         android:shortcutShortLabel="@string/search">
         <intent
             android:action="com.example.yuanying.SHORTCUT"
-            android:data="bilibili://search" />
+            android:data="yuanying://search" />
     </shortcut>
     <shortcut
         android:icon="@drawable/ic_shortcut_download"
@@ -15,6 +15,6 @@
         android:shortcutShortLabel="@string/offline_video">
         <intent
             android:action="com.example.yuanying.SHORTCUT"
-            android:data="bilibili://download" />
+            android:data="yuanying://download" />
     </shortcut>
 </shortcuts>

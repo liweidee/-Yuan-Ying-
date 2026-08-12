@@ -22,6 +22,8 @@ class HomeController extends GetxController with GetTickerProviderStateMixin {
   final filters = <String, List<FilterGroup>>{}.obs;
   final filterBarVisibility = <String, bool>{}.obs;
 
+  final Rx<Category?> selectedMainCategory = Rx<Category?>(null);
+
   // ===== 推荐数据缓存 =====
   final RxList<VideoItem> _recommendList = <VideoItem>[].obs;
   List<VideoItem> get recommendList => _recommendList;
@@ -155,6 +157,7 @@ class HomeController extends GetxController with GetTickerProviderStateMixin {
     _recommendList.clear();
     categories.clear();
     currentCategory.value = null;
+    selectedMainCategory.value = null;
     filters.clear();
     hasFilter.value = false;
     isSwitchingSource.value = true;
@@ -237,6 +240,7 @@ class HomeController extends GetxController with GetTickerProviderStateMixin {
 
       // 默认选中第一个分类
       currentCategory.value = categories.first;
+      selectedMainCategory.value = categories.first;
 
       // 为所有非推荐分类创建控制器
       for (int i = 0; i < categories.length; i++) {
@@ -266,25 +270,32 @@ class HomeController extends GetxController with GetTickerProviderStateMixin {
   // ===== TabController 监听（侧滑切换） =====
   void _onTabIndexChanged() {
     if (_tabController == null) return;
-    final index = _tabController!.index;
+    final int index = _tabController!.index;
     if (index < 0 || index >= categories.length) return;
-    final category = categories[index];
-
-    // 推荐分类不需要加载
+    final Category category = categories[index];
     if (category.typeId == 'recommend') return;
 
-    final ctrl = _getOrCreateController(category.typeId);
-    if (ctrl != null && ctrl.videoList.isEmpty && !ctrl.isLoading.value) {
+    // 更新当前分类和选中的主分类
+    currentCategory.value = category;
+    selectedMainCategory.value = category;
+
+    // 获取控制器
+    CategoryController? ctrl = _categoryControllers[category.typeId];
+    if (ctrl == null) {
+      ctrl = _getOrCreateController(category.typeId);
+    }
+    if (ctrl == null) return;
+
+    // 侧滑切换：不恢复 ID，保留当前状态（子目录或主分类）
+    // 仅当数据为空时才加载（首次进入）
+    if (ctrl.videoList.isEmpty && !ctrl.isLoading.value) {
       ctrl.loadData(refresh: true);
     }
   }
 
   // ===== 获取或创建分类控制器（内部使用，推荐返回 null） =====
   CategoryController? _getOrCreateController(String typeId) {
-    // ===== 推荐分类不创建 CategoryController =====
-    if (typeId == 'recommend') {
-      return null;
-    }
+    if (typeId == 'recommend') return null;
 
     if (_categoryControllers.containsKey(typeId)) {
       return _categoryControllers[typeId]!;
@@ -311,10 +322,59 @@ class HomeController extends GetxController with GetTickerProviderStateMixin {
 
   // ===== 切换分类（点击） =====
   void switchCategory(Category category) {
-    if (currentCategory.value?.typeId == category.typeId) return;
-    final index = categories.indexOf(category);
-    if (index == -1 || _tabController == null) return;
-    _tabController!.animateTo(index);
+    // 如果点击的是当前分类
+    if (currentCategory.value?.typeId == category.typeId) {
+      // 如果控制器处于子目录模式，需要强制刷新恢复主分类
+      final ctrl = _categoryControllers[category.typeId];
+      if (ctrl != null && ctrl.isSubCategoryMode) {
+        ctrl.ensureOwnCategory();
+        ctrl.loadData(refresh: true);
+      }
+      // 否则（非子目录模式）不做任何操作，保留缓存
+      return;
+    }
+
+    currentCategory.value = category;
+    _updateFilterStatus();
+
+    final int index = categories.indexOf(category);
+    if (index != -1 && _tabController != null) {
+      _tabController!.animateTo(index);
+      selectedMainCategory.value = category;
+    }
+
+    if (index != -1) {
+      // 主分类点击（切换到另一个主分类）
+      CategoryController? ctrl = _categoryControllers[category.typeId];
+      if (ctrl == null) {
+        ctrl = _getOrCreateController(category.typeId);
+      }
+      if (ctrl != null) {
+        final bool needRefresh = ctrl.isSubCategoryMode || ctrl.videoList.isEmpty;
+        ctrl.ensureOwnCategory();
+        if (needRefresh) {
+          ctrl.loadData(refresh: true);
+        }
+      }
+      return;
+    }
+
+    // 子目录分支
+    Category? mainCategory = selectedMainCategory.value;
+    if (mainCategory == null || !categories.contains(mainCategory)) {
+      mainCategory = categories.isNotEmpty ? categories.first : null;
+      if (mainCategory == null) return;
+      selectedMainCategory.value = mainCategory;
+    }
+
+    CategoryController? mainCtrl = _categoryControllers[mainCategory.typeId];
+    if (mainCtrl == null) {
+      mainCtrl = _getOrCreateController(mainCategory.typeId);
+    }
+
+    if (mainCtrl != null) {
+      mainCtrl.switchToSubCategory(category.typeId);
+    }
   }
 
   // ===== 获取分类控制器 =====

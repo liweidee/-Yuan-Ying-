@@ -1521,33 +1521,27 @@ class MediaKitEngine implements IPlayerEngine {
     required bool flipX,
     required bool flipY,
   }) {
-    return Obx(() {
-      // 监听 duration 和 position 的变化，确保在视频信息加载后重建
-      final _ = duration.value;
-      final __ = positionSeconds.value;
-      final width = _videoPlayerController?.state.width ?? 0;
-      final height = _videoPlayerController?.state.height ?? 0;
-      if (width <= 0 || height <= 0) {
-        // 视频尺寸未就绪时显示黑色占位
-        return const ColoredBox(color: Colors.black);
-      }
-      return Transform.flip(
-        flipX: flipX,
-        flipY: flipY,
-        child: Video(
-          controller: videoController!,
-          fit: fit,
-          controls: (_) => const SizedBox.shrink(),
-          subtitleViewConfiguration: const SubtitleViewConfiguration(
-            style: TextStyle(
-              color: Colors.transparent,
-              backgroundColor: Colors.transparent,
-              fontSize: 0.1,
-            ),
+    final controller = videoController;
+    if (controller == null) {
+      return const ColoredBox(color: Colors.black);
+    }
+    // 直接返回 Video，不包裹 Obx，不依赖任何 Rx 变量
+    return Transform.flip(
+      flipX: flipX,
+      flipY: flipY,
+      child: Video(
+        controller: controller,
+        fit: fit,
+        controls: (_) => const SizedBox.shrink(),
+        subtitleViewConfiguration: const SubtitleViewConfiguration(
+          style: TextStyle(
+            color: Colors.transparent,
+            backgroundColor: Colors.transparent,
+            fontSize: 0.1,
           ),
         ),
-      );
-    });
+      ),
+    );
   }
 
   // ============================================================

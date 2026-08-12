@@ -251,7 +251,7 @@ class _EpisodePanelDialogState extends State<EpisodePanelDialog>
                         isScrollable: true,
                         padding: EdgeInsets.zero,
                         labelPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
-                        labelStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600), 
+                        labelStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
                         unselectedLabelStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.normal),
                         labelColor: colorScheme.primary,
                         unselectedLabelColor: colorScheme.onSurfaceVariant,
@@ -298,14 +298,14 @@ class _EpisodePanelDialogState extends State<EpisodePanelDialog>
               if (isWide) {
                 return Expanded(child: buildGroupedContent());
               } else {
-                // 移动端分组：固定高度，内部垂直滚动网格
                 return SizedBox(
                   height: MediaQuery.of(context).size.height * 0.5,
                   child: buildGroupedContent(),
                 );
               }
             } else {
-              return buildDirectContent();
+              // 桌面端和移动端均使用 Expanded 撑满高度
+              return Expanded(child: buildDirectContent());
             }
           }),
         ],

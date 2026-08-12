@@ -81,7 +81,7 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <intent-filter android:label="PiliPlus">
+            <intent-filter android:label="源影">
                 <action android:name="android.intent.action.VIEW" />
 
                 <category android:name="android.intent.category.DEFAULT" />
@@ -107,7 +107,7 @@
                 <!--<data android:host="bangumi.bilibili.com"/>-->
                 <!--<data android:host="space.bilibili.com"/>-->
             </intent-filter>
-            <intent-filter android:label="PiliPlus">
+            <intent-filter android:label="源影">
                 <action android:name="android.intent.action.VIEW" />
                 <action android:name="android.intent.action.SEARCH" />
                 <action android:name="com.example.yuanying.SHORTCUT" />
@@ -115,7 +115,7 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
 
-                <data android:scheme="bilibili" />
+                <data android:scheme="yuanying" />
                 <data android:host="download" />
                 <data android:host="forward" />
                 <data

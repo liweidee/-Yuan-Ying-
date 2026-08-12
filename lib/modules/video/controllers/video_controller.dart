@@ -36,7 +36,7 @@ import 'package:yuanying/t4/services/i_spider_service.dart';
 import 'package:yuanying/t4/services/drpy2_api_service.dart';
 import 'package:yuanying/modules/video/widgets/introduction/intro_detail_panel.dart';
 
-class DetailController extends GetxController {
+class DetailController extends GetxController with GetTickerProviderStateMixin {
   // ===== tag 用于隔离控制器 =====
   final String? _tag;
 
@@ -116,6 +116,9 @@ class DetailController extends GetxController {
   final RxList<ParserSource> parserSources = <ParserSource>[].obs;
   final Rxn<ParserSource> currentParser = Rxn<ParserSource>();
   final RxBool showParserButton = false.obs;
+
+  /// 自动播放状态（用于控制封面显示）
+  final RxBool autoPlay = false.obs;
 
   /// 当前播放的请求头
   final RxMap<String, String> currentHeaders = <String, String>{}.obs;
@@ -291,6 +294,8 @@ class DetailController extends GetxController {
 
   final RxBool isManualParser = false.obs;
 
+  late final TabController tabCtr;
+
   @override
   void onInit() {
     super.onInit();
@@ -359,6 +364,12 @@ class DetailController extends GetxController {
       isLoadingDetail.value = false;
       return;
     }
+
+    tabCtr = TabController(
+      length: 3,
+      vsync: this,
+      initialIndex: 0,
+    );
 
     loadVideoDetail();
   }
@@ -432,6 +443,13 @@ class DetailController extends GetxController {
       }
       showParserButton.value = true;
     }
+
+    // 推送直链模式也需要 TabBar，所以必须初始化 tabCtr
+    tabCtr = TabController(
+      length: 3,
+      vsync: this,
+      initialIndex: 0,
+    );
 
     _playDirect(url);
   }
@@ -569,6 +587,11 @@ class DetailController extends GetxController {
   void checkAndHandlePushEpisode(Episode episode) {
     final url = episode.url;
     if (url.startsWith('push://')) {
+       // 先暂停当前播放
+        if (playerController.playerStatus.value.isPlaying) {
+          playerController.pause();
+        }
+    
       String rawVodId = url.substring(7);
       try {
         final decoded = Uri.decodeComponent(rawVodId);
@@ -875,6 +898,8 @@ class DetailController extends GetxController {
   Future<void> _startPlay(PlayUrl playUrl, bool autoPlay) async {
     // 确保所有残留弹窗被关闭
     SmartDialog.dismiss(force: true);
+
+    this.autoPlay.value = autoPlay;
 
     final defaultUrl = playUrl.defaultUrl;
     if (defaultUrl == null) {
@@ -1496,11 +1521,20 @@ class DetailController extends GetxController {
   void onClose() {
     _updateHistoryProgress();
     _stopProgressUpdater();
-    // 重置跳过设置（仅当次有效）
+
+    // 重置当前详情页的跳过设置（仅当次有效）
     skipStartDuration.value = 0;
     skipEndDuration.value = 0;
+
+    // 重置播放器引擎中的全局跳过值，避免残留影响后续详情页
+    playerController.skipStartDuration.value = 0;
+    playerController.skipEndDuration.value = 0;
+
+    autoPlay.value = false;
+
     playerController.dispose();
     // _cleanTempSubtitleFiles();
+    tabCtr.dispose();
     super.onClose();
   }
 

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 import 'dart:ui';
 import 'package:canvas_danmaku/canvas_danmaku.dart' as canvas;
@@ -8,6 +9,7 @@ import 'package:yuanying/modules/danmaku/models/danmaku_model.dart';
 import 'package:yuanying/plugin/pl_player/controller.dart';
 import 'package:yuanying/plugin/pl_player/models/play_status.dart';
 import 'package:yuanying/plugin/pl_player/player_pref.dart';
+import 'package:yuanying/plugin/pl_player/utils/danmaku_options.dart';
 
 class DanmakuView extends StatefulWidget {
   final PlPlayerController playerController;
@@ -32,7 +34,6 @@ class DanmakuView extends StatefulWidget {
 class _DanmakuViewState extends State<DanmakuView> {
   canvas.DanmakuController<DanmakuItem>? _canvasController;
   int _lastPosition = -1;
-  late Widget _danmakuScreen;
 
   bool get _notFullscreen => !widget.isFullScreen || widget.isPipMode;
   bool get _enabled => widget.playerController.enableShowDanmaku.value;
@@ -45,15 +46,13 @@ class _DanmakuViewState extends State<DanmakuView> {
     _statusListener = _onStatus;
     widget.playerController.addPositionListener(_onPosition);
     widget.playerController.addStatusLister(_statusListener);
-
-    _danmakuScreen = _buildDanmakuScreen();
   }
 
   @override
   void dispose() {
     widget.playerController.removePositionListener(_onPosition);
     widget.playerController.removeStatusLister(_statusListener);
-    _canvasController?.clear();
+    // 不调用 clear，让 DanmakuScreen 自行清理
     _canvasController = null;
     _lastPosition = -1;
     super.dispose();
@@ -86,16 +85,12 @@ class _DanmakuViewState extends State<DanmakuView> {
       for (final item in items) {
         Color textColor;
         if (colorMode == 1) {
-          // 随机彩色：每条弹幕随机色相
           textColor = HSLColor.fromAHSL(1.0, Random().nextDouble() * 360, 1.0, 0.5).toColor();
         } else if (colorMode == 2) {
-          // 渐变彩色：基于进度计算色相，每秒变化 12 度（30 秒一个完整周期）
-          // 让颜色变化更快更明显
           final seconds = progress / 1000;
           final hue = (seconds * 12) % 360;
           textColor = HSLColor.fromAHSL(1.0, hue, 1.0, 0.5).toColor();
         } else {
-          // 默认：使用原始颜色（修复 Alpha）
           textColor = Color(item.opaqueColor);
         }
         _canvasController!.addDanmaku(
@@ -111,9 +106,12 @@ class _DanmakuViewState extends State<DanmakuView> {
 
   canvas.DanmakuItemType _toDanmakuItemType(int mode) {
     switch (mode) {
-      case 4: return canvas.DanmakuItemType.bottom;
-      case 5: return canvas.DanmakuItemType.top;
-      default: return canvas.DanmakuItemType.scroll;
+      case 4:
+        return canvas.DanmakuItemType.bottom;
+      case 5:
+        return canvas.DanmakuItemType.top;
+      default:
+        return canvas.DanmakuItemType.scroll;
     }
   }
 
@@ -149,43 +147,36 @@ class _DanmakuViewState extends State<DanmakuView> {
     );
   }
 
-  Widget _buildDanmakuScreen() {
-    return canvas.DanmakuScreen<DanmakuItem>(
-      createdController: (e) {
-        _canvasController = e;
-        e.updateOption(_buildOption());
-      },
-      option: _buildOption(),
-      size: widget.size,
-    );
-  }
-
   @override
   void didUpdateWidget(DanmakuView oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // 尺寸或全屏状态变化时，重建 DanmakuScreen（重新创建控制器）
-    if (oldWidget.size != widget.size ||
-        oldWidget.isFullScreen != widget.isFullScreen ||
-        oldWidget.isPipMode != widget.isPipMode) {
-      setState(() {
-        _danmakuScreen = _buildDanmakuScreen();
-      });
+    // 当全屏态或尺寸变化时，更新 Option（DanmakuScreen 内部会处理尺寸变化）
+    if (oldWidget.isFullScreen != widget.isFullScreen ||
+        oldWidget.isPipMode != widget.isPipMode ||
+        oldWidget.size != widget.size) {
+      _canvasController?.updateOption(_buildOption());
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    // 关键：不设 Key，不包裹 RepaintBoundary，让 DanmakuScreen 只创建一次并自然更新
     return Obx(
       () {
-        // 监听 configVersion，设置变化时更新弹幕选项
-        widget.danmakuController.configVersion.value;
-        if (_canvasController != null) {
-          _canvasController!.updateOption(_buildOption());
-        }
+        final enabled = _enabled;
+        final opacity = widget.playerController.danmakuOpacity.value;
         return AnimatedOpacity(
-          opacity: _enabled ? widget.playerController.danmakuOpacity.value : 0,
+          opacity: enabled ? opacity : 0,
           duration: const Duration(milliseconds: 100),
-          child: _danmakuScreen,
+          child: canvas.DanmakuScreen<DanmakuItem>(
+            // 无 Key，让 Flutter 复用
+            createdController: (e) {
+              _canvasController = e;
+              e.updateOption(_buildOption());
+            },
+            option: _buildOption(),
+            size: widget.size,
+          ),
         );
       },
     );

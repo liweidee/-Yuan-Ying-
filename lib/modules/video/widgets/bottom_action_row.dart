@@ -6,7 +6,7 @@ import 'package:yuanying/plugin/pl_player/controller.dart';
 
 /// 底部操作按钮区（左右翻转、上下翻转、听视频、后台播放）
 class BottomActionRow extends StatelessWidget {
-  // ===== 与 PiliPlus 一致：通过构造函数接收 controllerTag =====
+  // ===== 通过构造函数接收 controllerTag =====
   final String controllerTag;
   const BottomActionRow({super.key, required this.controllerTag});
 

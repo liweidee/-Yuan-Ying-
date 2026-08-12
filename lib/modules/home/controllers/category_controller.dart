@@ -14,6 +14,9 @@ class CategoryController extends GetxController {
   final SourceManager sourceManager = Get.find<SourceManager>();
   final List<VideoItem>? initialData;
 
+  // 当前实际请求的 ID（可变）
+  String _currentRequestCategoryId;
+
   final RxList<VideoItem> videoList = <VideoItem>[].obs;
 
   int _page = 1;
@@ -24,7 +27,6 @@ class CategoryController extends GetxController {
   final RxBool isError = false.obs;
   final RxString errorMsg = ''.obs;
 
-  // ===== 新增：表示是否已完成首次加载 =====
   final RxBool hasLoaded = false.obs;
 
   final RxMap<String, String> filterValues = <String, String>{}.obs;
@@ -39,26 +41,23 @@ class CategoryController extends GetxController {
     required this.categoryName,
     required this.apiService,
     this.initialData,
-  });
+  }) : _currentRequestCategoryId = categoryId;
 
   @override
   void onInit() {
     super.onInit();
     scrollController.addListener(_onScroll);
 
-    // ===== 推荐分类：直接使用 initialData，绝不发起网络请求 =====
     if (categoryId == 'recommend') {
       videoList.value = initialData ?? [];
       hasLoaded.value = true;
       return;
     }
 
-    // ===== 非推荐分类 =====
     if (initialData != null && initialData!.isNotEmpty) {
       videoList.value = initialData!;
       hasLoaded.value = true;
     } else {
-      // 先设置加载状态，再加载数据
       isLoading.value = true;
       loadData(refresh: true);
     }
@@ -78,9 +77,32 @@ class CategoryController extends GetxController {
     }
   }
 
-  /// 加载数据（非推荐分类使用）
+  // 判断是否处于子目录模式
+  bool get isSubCategoryMode => _currentRequestCategoryId != categoryId;
+
+  // 切换子目录（强制刷新）
+  void switchToSubCategory(String subId) {
+    _currentRequestCategoryId = subId;
+    _page = 1;
+    _isEnd = false;
+    isLoading.value = true;
+    isError.value = false;
+    errorMsg.value = '';
+    _lastItem = null;
+    _lastCount = 0;
+    videoList.clear();
+    hasLoaded.value = false;
+    loadData(refresh: true);
+  }
+
+  // 恢复自身 ID（不清除数据）
+  void ensureOwnCategory() {
+    if (_currentRequestCategoryId != categoryId) {
+      _currentRequestCategoryId = categoryId;
+    }
+  }
+
   Future<void> loadData({bool refresh = true}) async {
-    // 推荐分类禁止加载
     if (categoryId == 'recommend') return;
 
     if (isLoading.value && !refresh) return;
@@ -105,7 +127,6 @@ class CategoryController extends GetxController {
         isError.value = true;
         isLoading.value = false;
         isLoadingMore.value = false;
-        // ===== 标记加载完成，即使失败也要标记 =====
         hasLoaded.value = true;
         return;
       }
@@ -116,10 +137,10 @@ class CategoryController extends GetxController {
         ext = base64Encode(utf8.encode(jsonStr));
       }
 
-      print('[CategoryController] 请求: $categoryId, page: $_page, filter: $filterValues');
+      print('[CategoryController] 请求: $_currentRequestCategoryId, page: $_page, filter: $filterValues');
 
       final result = await apiService.fetchCate(
-        categoryId,
+        _currentRequestCategoryId,
         _page,
         ext: ext,
       );
@@ -139,7 +160,6 @@ class CategoryController extends GetxController {
         }
         isLoading.value = false;
         isLoadingMore.value = false;
-        // ===== 标记加载完成 =====
         hasLoaded.value = true;
         return;
       }
@@ -152,7 +172,6 @@ class CategoryController extends GetxController {
           if (last.vodId == _lastItem!.vodId && last.vodName == _lastItem!.vodName) {
             _isEnd = true;
             isLoadingMore.value = false;
-            // ===== 标记加载完成 =====
             hasLoaded.value = true;
             return;
           }
@@ -175,14 +194,12 @@ class CategoryController extends GetxController {
     } finally {
       isLoading.value = false;
       isLoadingMore.value = false;
-      // ===== 无论成功或失败，都标记加载完成 =====
       hasLoaded.value = true;
     }
   }
 
   Future<void> refreshData() async {
     if (categoryId == 'recommend') return;
-    // 刷新时重置加载完成标志，以便显示加载圈
     hasLoaded.value = false;
     await loadData(refresh: true);
   }
@@ -201,7 +218,6 @@ class CategoryController extends GetxController {
     } else {
       filterValues[groupKey] = value;
     }
-    // 清空列表，显示全屏加载
     videoList.clear();
     hasLoaded.value = false;
     isLoading.value = true;

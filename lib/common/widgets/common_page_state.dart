@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:yuanying/modules/main/controllers/main_controller.dart';
 
-/// 滚动监听基类（与 PiliPlus 完全一致）
+/// 滚动监听基类
 abstract class CommonPageState<T extends StatefulWidget> extends State<T> {
   RxDouble? _barOffset;
   final _mainController = Get.find<MainController>();

@@ -224,8 +224,8 @@ void main() async {
   Get.put(T4ApiService(), permanent: true);
   Get.put(Drpy2ApiService(), permanent: true);
   Get.put(CatvodOpenService(), permanent: true);
-  Get.put(NodeJSService(), permanent: true);
-  Get.put(NodeJSSpiderService(), permanent: true);
+  // Get.put(NodeJSService(), permanent: true);
+  // Get.put(NodeJSSpiderService(), permanent: true);
   Get.put(SourceManager(), permanent: true);
   Get.put(DanmakuController(), permanent: true);
   Get.put(ActionService(), permanent: true);

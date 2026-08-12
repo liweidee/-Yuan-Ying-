@@ -43,7 +43,7 @@ enum SourceType {
   livePhoto,
 }
 
-/// 大图查看器（PiliPlus 风格）
+/// 大图查看器
 class GalleryViewer extends StatefulWidget {
   const GalleryViewer({
     super.key,

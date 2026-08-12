@@ -163,7 +163,7 @@ class _EpisodeNavButton extends StatelessWidget {
 class _PLVideoPlayerState extends State<PLVideoPlayer>
     with WidgetsBindingObserver, TickerProviderStateMixin {
   late AnimationController _animationController;
-  VideoController? videoController;
+  // VideoController? videoController;
 
   final _playerKey = GlobalKey();
   final _videoKey = GlobalKey();
@@ -248,6 +248,7 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
   @override
   void initState() {
     super.initState();
+    print('🔵 PLVideoPlayer initState, engine=${PlayerPref.playerEngine}');
     addObserverMobile(this);
 
     _controlsListener = plPlayerController.showControls.listen(
@@ -264,7 +265,7 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
       vsync: this,
       duration: const Duration(milliseconds: 100),
     );
-    videoController = plPlayerController.videoController;
+    // videoController = plPlayerController.videoController;
 
     if (PlatformUtils.isMobile) {
       Future.microtask(() {
@@ -356,6 +357,7 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
 
   @override
   void dispose() {
+    print('🔴 PLVideoPlayer dispose');
     removeObserverMobile(this);
     _tapGestureRecognizer.dispose();
     _longPressRecognizer?.dispose();
@@ -1068,17 +1070,32 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
           Positioned.fill(top: 4, child: danmaku),
 
         // ----- 字幕层 -----
-        if (!isFvpEngine && videoController != null)
-          Positioned.fill(
-            child: IgnorePointer(
-              child: Obx(
-                () => SubtitleView(
-                  controller: videoController!,
-                  configuration: plPlayerController.subtitleConfig.value,
-                ),
-              ),
-            ),
+        // if (!isFvpEngine && videoController != null)
+        //   Positioned.fill(
+        //     child: IgnorePointer(
+        //       child: Obx(
+        //         () => SubtitleView(
+        //           controller: videoController!,
+        //           configuration: plPlayerController.subtitleConfig.value,
+        //         ),
+        //       ),
+        //     ),
+        //   ),
+        Positioned.fill(
+          child: IgnorePointer(
+            child: Obx(() {
+              // 当 dataStatus 变化时会重建
+              final status = plPlayerController.dataStatus.value;
+              if (status != DataStatus.loaded) return const SizedBox.shrink();
+              final vc = plPlayerController.videoController;
+              if (vc == null) return const SizedBox.shrink();
+              return SubtitleView(
+                controller: vc,
+                configuration: plPlayerController.subtitleConfig.value,
+              );
+            }),
           ),
+        ),
 
         // ----- 长按倍速 Toast -----
         IgnorePointer(

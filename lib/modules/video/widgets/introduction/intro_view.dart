@@ -521,18 +521,23 @@ class IntroView extends StatelessWidget {
     final isPlayingLine = displayIndex == playIndex;
     final isWide = MediaQuery.sizeOf(context).width > 800;
 
+    // ---- 按钮构建函数 ----
     Widget buildEpisodeButton(int index) {
       final episode = episodes[index];
       final isActive = isPlayingLine && index == episodeIndex;
+      final padding = isWide
+          ? const EdgeInsets.symmetric(horizontal: 10, vertical: 10)
+          : const EdgeInsets.symmetric(horizontal: 10, vertical: 10);
+
       return GestureDetector(
         onTap: () => detailController.switchEpisode(index),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+          padding: padding,
           constraints: const BoxConstraints(
             minWidth: 70,
             maxWidth: 88,
           ),
-          height: 48,
+          height: 48, // 固定两行高度
           decoration: BoxDecoration(
             color: isActive
                 ? colorScheme.primary
@@ -546,30 +551,35 @@ class IntroView extends StatelessWidget {
                   ),
           ),
           child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start, // 从顶部开始
+            crossAxisAlignment: CrossAxisAlignment.start, // 从左上开始
             children: [
-              if (isActive)
-                Padding(
-                  padding: const EdgeInsets.only(top: 1), // 微调图标与文字第一行对齐
-                  child: Icon(
-                    Icons.play_circle_outline,
-                    size: 14,
-                    color: Colors.white,
-                  ),
-                ),
-              if (isActive) const SizedBox(width: 3),
               Expanded(
-                child: Text(
-                  episode.name,
+                child: Text.rich(
+                  TextSpan(
+                    children: [
+                      if (isActive) ...[
+                        WidgetSpan(
+                          child: Icon(
+                            Icons.play_circle_outline,
+                            size: 14,
+                            color: Colors.white,
+                          ),
+                          alignment: PlaceholderAlignment.middle, // 与文字基线对齐
+                        ),
+                        const TextSpan(text: ' '), // 图标和文字之间加空格
+                      ],
+                      TextSpan(text: episode.name),
+                    ],
+                  ),
+                  maxLines: 2,              // 固定两行
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.left, // 左对齐
                   style: TextStyle(
                     fontSize: 11,
                     color: isActive ? Colors.white : colorScheme.onSurface,
                     fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
                     height: 1.2,
                   ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.left,
                 ),
               ),
             ],
@@ -578,35 +588,46 @@ class IntroView extends StatelessWidget {
       );
     }
 
+    // ---- 桌面端：左对齐，换行，行间距生效 ----
     if (isWide) {
-      // 桌面端：使用 Wrap 布局，整体居中，一行正好 4 个
-      return Padding(
-        padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
-        child: Wrap(
-          alignment: WrapAlignment.center, // 整体居中
-          spacing: 8,
-          runSpacing: 8,
-          children: episodes.asMap().entries.map((entry) {
-            return buildEpisodeButton(entry.key);
-          }).toList(),
-        ),
-      );
-    } else {
-      // 移动端：水平滚动，高度与桌面保持一致
-      return Padding(
-        padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
-        child: SizedBox(
-          height: 52, // 48 + 上下间距
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            itemCount: episodes.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 8),
-            itemBuilder: (context, index) {
-              return buildEpisodeButton(index);
+      return Container(
+        width: double.infinity,
+        alignment: Alignment.topLeft,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              return SizedBox(
+                width: constraints.maxWidth,
+                child: Wrap(
+                  alignment: WrapAlignment.start,
+                  spacing: 6,
+                  runSpacing: 8,
+                  children: episodes.asMap().entries.map((entry) {
+                    return buildEpisodeButton(entry.key);
+                  }).toList(),
+                ),
+              );
             },
           ),
         ),
       );
     }
+
+    // ---- 移动端：水平滚动 ----
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
+      child: SizedBox(
+        height: 52,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          itemCount: episodes.length,
+          separatorBuilder: (_, __) => const SizedBox(width: 8),
+          itemBuilder: (context, index) {
+            return buildEpisodeButton(index);
+          },
+        ),
+      ),
+    );
   }
 }
