@@ -14,7 +14,9 @@ class MainController extends GetxController {
 
   // ===== 顶部栏 Instant 模式专用状态 =====
   final RxBool showTopBar = true.obs;   // 用于 instant 模式
-  double _lastTopScrollOffset = 0;      // 用于方向回退
+
+  // ===== 底部栏 Instant 模式专用状态 =====
+  final RxBool showBottomBar = true.obs;   // 用于 instant 模式
 
   // ===== 底栏收齐 =====
   final RxDouble barOffset = 0.0.obs;
@@ -61,6 +63,7 @@ class MainController extends GetxController {
     _updateUseBottomNav();
     barOffset.value = 0.0;
     topBarOffset.value = 0.0;
+    showBottomBar.value = true;
   }
 
   void updateUseBottomNav({double? width, double? height}) {
@@ -100,22 +103,19 @@ class MainController extends GetxController {
   void updateBottomBarOffset(double offset, {bool? isScrollingDown}) {
     if (!hideBottomBar.value || !useBottomNav.value) {
       barOffset.value = 0.0;
+      showBottomBar.value = true;
       return;
     }
-    final maxOffset = bottomBarHeight.value; // 使用动态高度
 
     if (isInstantMode) {
-      // ---- 即时模式：根据方向控制 ----
+      // 即时模式：只更新 showBottomBar
       if (isScrollingDown != null) {
-        // 向下滚动 → 显示 (barOffset=0)，向上滚动 → 隐藏 (barOffset=maxOffset)
-        barOffset.value = isScrollingDown ? maxOffset : 0.0;   // 反转
-      } else {
-        // 回退：使用阈值（保持兼容）
-        final clamped = offset.clamp(0.0, maxOffset);
-        barOffset.value = clamped > maxOffset * 0.5 ? maxOffset : 0.0;
+        showBottomBar.value = !isScrollingDown; // 根据你的方向映射调整
       }
+      // 不更新 barOffset
     } else {
-      // ---- 同步模式：线性偏移 ----
+      // 同步模式：更新 barOffset
+      final maxOffset = bottomBarHeight.value;
       final clamped = offset.clamp(0.0, maxOffset);
       barOffset.value = clamped;
     }
@@ -123,27 +123,18 @@ class MainController extends GetxController {
 
   void updateTopBarOffset(double offset, {bool? isScrollingDown}) {
     if (!hideTopBar.value) {
-      // 如果未启用隐藏，重置所有状态
       topBarOffset.value = 0.0;
       showTopBar.value = true;
       return;
     }
 
-    // 钳制偏移量非负（与 PiliPlus 相同）
-    final safeOffset = offset.clamp(0.0, double.infinity);
-
     if (isInstantMode) {
-      bool down;
       if (isScrollingDown != null) {
-        down = isScrollingDown;
-      } else {
-        down = safeOffset > _lastTopScrollOffset;
-        _lastTopScrollOffset = safeOffset;
+        showTopBar.value = !isScrollingDown;
       }
-      showTopBar.value = !down;   // 反转
     } else {
-      // ---- Sync 模式：线性偏移 ----
-      const double maxOffset = 52.0; // 必须与顶部栏高度一致
+      final safeOffset = offset.clamp(0.0, double.infinity);
+      const double maxOffset = 52.0;
       topBarOffset.value = safeOffset.clamp(0.0, maxOffset);
     }
   }

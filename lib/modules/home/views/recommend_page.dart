@@ -45,6 +45,7 @@ class _RecommendPageState extends State<RecommendPage> {
 
   void _onScrollUpdate() {
     final offset = _scrollController.position.pixels;
+    if (offset == _lastScrollOffset) return;
     final isDown = offset > _lastScrollOffset;
     _lastScrollOffset = offset;
 

@@ -45,14 +45,13 @@ class _CategoryPageState extends State<CategoryPage>
   // ===== 滚动监听 =====
   void _onScrollUpdate() {
     final offset = ctrl.scrollController.position.pixels;
+    if (offset == _lastScrollOffset) return; // 滚动停止时不更新
     final isDown = offset > _lastScrollOffset;
     _lastScrollOffset = offset;
 
-    // 更新顶部栏和底部栏，都传入方向
     mainController.updateTopBarOffset(offset, isScrollingDown: isDown);
     mainController.updateBottomBarOffset(offset, isScrollingDown: isDown);
 
-    // 加载更多
     if (offset >= ctrl.scrollController.position.maxScrollExtent - 200) {
       ctrl.loadMore();
     }

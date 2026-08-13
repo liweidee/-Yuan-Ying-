@@ -31,14 +31,21 @@ class _MainPageState extends State<MainPage> {
   }
 
   double _getBottomBarHeight(NavigationBarStyle style) {
+    double baseHeight;
     switch (style) {
       case NavigationBarStyle.default_:
-        return 56.0;
+        baseHeight = 56.0;
+        break;
       case NavigationBarStyle.capsule:
-        return 70.0;
+        baseHeight = 70.0;
+        break;
       case NavigationBarStyle.floating:
-        return 56.0;
+        baseHeight = 56.0;
+        break;
     }
+    // 移动端底部安全区域的高度
+    final bottomPadding = MediaQuery.viewPaddingOf(context).bottom;
+    return baseHeight + bottomPadding;
   }
 
   @override
@@ -290,23 +297,23 @@ class _MainPageState extends State<MainPage> {
       if (!_controller.hideBottomBar.value) {
         return bottomBar;
       }
-      final offset = _controller.barOffset.value;
-      final double height = _controller.bottomBarHeight.value;
-      final double clampedOffset = offset.clamp(0.0, height);
-      final double slideFactor = clampedOffset / height;
 
       if (_controller.isInstantMode) {
-        // 即时模式：平滑动画
+        // 即时模式：使用 showBottomBar + AnimatedSlide
+        final bool show = _controller.showBottomBar.value;
         return AnimatedSlide(
-          offset: Offset(0, slideFactor),
+          offset: Offset(0, show ? 0 : 1),
           duration: const Duration(milliseconds: 250),
           curve: Curves.easeInOut,
           child: bottomBar,
         );
       } else {
-        // 同步模式：瞬时跟随，确保跟手
-        return Transform.translate(
-          offset: Offset(0, clampedOffset),
+        // 同步模式：使用 barOffset + FractionalTranslation
+        final offset = _controller.barOffset.value;
+        final double height = _controller.bottomBarHeight.value;
+        final double slideFactor = (offset / height).clamp(0.0, 1.0);
+        return FractionalTranslation(
+          translation: Offset(0, slideFactor),
           child: bottomBar,
         );
       }
