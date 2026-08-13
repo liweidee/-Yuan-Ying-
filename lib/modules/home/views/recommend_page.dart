@@ -34,6 +34,8 @@ class _RecommendPageState extends State<RecommendPage> {
   late final ScrollController _scrollController;
   final MainController _mainController = Get.find<MainController>();
 
+  double _lastScrollOffset = 0;
+
   @override
   void initState() {
     super.initState();
@@ -43,8 +45,11 @@ class _RecommendPageState extends State<RecommendPage> {
 
   void _onScrollUpdate() {
     final offset = _scrollController.position.pixels;
-    _mainController.updateBottomBarOffset(offset);
-    _mainController.updateTopBarOffset(offset);
+    final isDown = offset > _lastScrollOffset;
+    _lastScrollOffset = offset;
+
+    _mainController.updateTopBarOffset(offset, isScrollingDown: isDown);
+    _mainController.updateBottomBarOffset(offset, isScrollingDown: isDown);
   }
 
   @override

@@ -12,6 +12,10 @@ class MainController extends GetxController {
   final RxInt selectedIndex = 0.obs;
   final RxBool useBottomNav = true.obs;
 
+  // ===== 顶部栏 Instant 模式专用状态 =====
+  final RxBool showTopBar = true.obs;   // 用于 instant 模式
+  double _lastTopScrollOffset = 0;      // 用于方向回退
+
   // ===== 底栏收齐 =====
   final RxDouble barOffset = 0.0.obs;
   final RxBool hideBottomBar = SettingPref.hideBottomBar.obs;
@@ -27,6 +31,8 @@ class MainController extends GetxController {
   bool get isInstantMode => barHideType == BarHideType.instant;
 
   final RxInt navStyleVersion = 0.obs;
+
+  final RxDouble bottomBarHeight = 56.0.obs;
 
   // ============================================================
 
@@ -91,28 +97,55 @@ class MainController extends GetxController {
   }
 
   // ===== 底栏偏移更新 =====
-  void updateBottomBarOffset(double offset) {
+  void updateBottomBarOffset(double offset, {bool? isScrollingDown}) {
     if (!hideBottomBar.value || !useBottomNav.value) {
       barOffset.value = 0.0;
       return;
     }
-    const maxOffset = 56.0;
-    final clamped = offset.clamp(0.0, maxOffset);
+    final maxOffset = bottomBarHeight.value; // 使用动态高度
+
     if (isInstantMode) {
-      barOffset.value = clamped > maxOffset * 0.5 ? maxOffset : 0.0;
+      // ---- 即时模式：根据方向控制 ----
+      if (isScrollingDown != null) {
+        // 向下滚动 → 显示 (barOffset=0)，向上滚动 → 隐藏 (barOffset=maxOffset)
+        barOffset.value = isScrollingDown ? maxOffset : 0.0;   // 反转
+      } else {
+        // 回退：使用阈值（保持兼容）
+        final clamped = offset.clamp(0.0, maxOffset);
+        barOffset.value = clamped > maxOffset * 0.5 ? maxOffset : 0.0;
+      }
     } else {
+      // ---- 同步模式：线性偏移 ----
+      final clamped = offset.clamp(0.0, maxOffset);
       barOffset.value = clamped;
     }
   }
 
-  void updateTopBarOffset(double offset) {
+  void updateTopBarOffset(double offset, {bool? isScrollingDown}) {
     if (!hideTopBar.value) {
+      // 如果未启用隐藏，重置所有状态
       topBarOffset.value = 0.0;
+      showTopBar.value = true;
       return;
     }
-    // 钳制最小值为 0，防止下拉刷新产生负偏移
-    final clamped = offset.clamp(0.0, double.infinity);
-    topBarOffset.value = clamped;
+
+    // 钳制偏移量非负（与 PiliPlus 相同）
+    final safeOffset = offset.clamp(0.0, double.infinity);
+
+    if (isInstantMode) {
+      bool down;
+      if (isScrollingDown != null) {
+        down = isScrollingDown;
+      } else {
+        down = safeOffset > _lastTopScrollOffset;
+        _lastTopScrollOffset = safeOffset;
+      }
+      showTopBar.value = !down;   // 反转
+    } else {
+      // ---- Sync 模式：线性偏移 ----
+      const double maxOffset = 52.0; // 必须与顶部栏高度一致
+      topBarOffset.value = safeOffset.clamp(0.0, maxOffset);
+    }
   }
 
   void refreshHideBottomBar() {

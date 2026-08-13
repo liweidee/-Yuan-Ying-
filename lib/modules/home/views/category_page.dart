@@ -30,7 +30,7 @@ class _CategoryPageState extends State<CategoryPage>
   final MainController mainController = Get.find<MainController>();
   final HomeController homeController = Get.find<HomeController>();
 
-  // ===== 移除 _lastScrollOffset 和 _isScrollingDown =====
+  double _lastScrollOffset = 0;
 
   @override
   bool get wantKeepAlive => true;
@@ -42,16 +42,18 @@ class _CategoryPageState extends State<CategoryPage>
     ctrl.scrollController.addListener(_onScrollUpdate);
   }
 
-  // ===== 简化后的滚动监听 =====
+  // ===== 滚动监听 =====
   void _onScrollUpdate() {
     final offset = ctrl.scrollController.position.pixels;
+    final isDown = offset > _lastScrollOffset;
+    _lastScrollOffset = offset;
 
-    mainController.updateBottomBarOffset(offset);
-    mainController.updateTopBarOffset(offset);
+    // 更新顶部栏和底部栏，都传入方向
+    mainController.updateTopBarOffset(offset, isScrollingDown: isDown);
+    mainController.updateBottomBarOffset(offset, isScrollingDown: isDown);
 
-    // 触发加载更多
-    if (ctrl.scrollController.position.pixels >=
-        ctrl.scrollController.position.maxScrollExtent - 200) {
+    // 加载更多
+    if (offset >= ctrl.scrollController.position.maxScrollExtent - 200) {
       ctrl.loadMore();
     }
   }

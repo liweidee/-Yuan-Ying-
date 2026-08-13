@@ -1599,32 +1599,35 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
                         children: [
                           // 方向切换按钮
                           if (PlatformUtils.isMobile)
-                            DecoratedBox(
-                              decoration: const BoxDecoration(
-                                color: Color(0x45000000),
-                                borderRadius: BorderRadius.all(Radius.circular(8)),
-                              ),
-                              child: ComBtn(
-                                tooltip: '旋转屏幕',
-                                icon: const Icon(
-                                  Icons.screen_rotation,
-                                  size: 20,
-                                  color: Colors.white,
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 8.0),
+                              child: DecoratedBox(
+                                decoration: const BoxDecoration(
+                                  color: Color(0x45000000),
+                                  borderRadius: BorderRadius.all(Radius.circular(8)),
                                 ),
-                                onTap: () {
-                                  final orientation = MediaQuery.of(context).orientation;
-                                  if (orientation == Orientation.portrait) {
-                                    plPlayerController.setOrientation([
-                                      DeviceOrientation.landscapeLeft,
-                                      DeviceOrientation.landscapeRight,
-                                    ]);
-                                  } else {
-                                    plPlayerController.setOrientation([
-                                      DeviceOrientation.portraitUp,
-                                      DeviceOrientation.portraitDown,
-                                    ]);
-                                  }
-                                },
+                                child: ComBtn(
+                                  tooltip: '旋转屏幕',
+                                  icon: const Icon(
+                                    Icons.screen_rotation,
+                                    size: 20,
+                                    color: Colors.white,
+                                  ),
+                                  onTap: () {
+                                    final orientation = MediaQuery.of(context).orientation;
+                                    if (orientation == Orientation.portrait) {
+                                      plPlayerController.setOrientation([
+                                        DeviceOrientation.landscapeLeft,
+                                        DeviceOrientation.landscapeRight,
+                                      ]);
+                                    } else {
+                                      plPlayerController.setOrientation([
+                                        DeviceOrientation.portraitUp,
+                                        DeviceOrientation.portraitDown,
+                                      ]);
+                                    }
+                                  },
+                                ),
                               ),
                             ),
                           // 截图按钮

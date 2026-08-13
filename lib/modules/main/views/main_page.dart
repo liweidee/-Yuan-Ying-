@@ -30,6 +30,17 @@ class _MainPageState extends State<MainPage> {
     _controller.updateUseBottomNav(width: size.width, height: size.height);
   }
 
+  double _getBottomBarHeight(NavigationBarStyle style) {
+    switch (style) {
+      case NavigationBarStyle.default_:
+        return 56.0;
+      case NavigationBarStyle.capsule:
+        return 70.0;
+      case NavigationBarStyle.floating:
+        return 56.0;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -271,19 +282,34 @@ class _MainPageState extends State<MainPage> {
     // ============================================================
     // 4. 底栏收齐逻辑
     // ============================================================
+    // 在构建完 bottomBar 后，更新控制器中的高度
+    final double actualHeight = _getBottomBarHeight(style);
+    _controller.bottomBarHeight.value = actualHeight;
+
     return Obx(() {
       if (!_controller.hideBottomBar.value) {
         return bottomBar;
       }
       final offset = _controller.barOffset.value;
-      const maxOffset = 56.0;
-      if (offset >= maxOffset) {
-        return const SizedBox.shrink();
+      final double height = _controller.bottomBarHeight.value;
+      final double clampedOffset = offset.clamp(0.0, height);
+      final double slideFactor = clampedOffset / height;
+
+      if (_controller.isInstantMode) {
+        // 即时模式：平滑动画
+        return AnimatedSlide(
+          offset: Offset(0, slideFactor),
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeInOut,
+          child: bottomBar,
+        );
+      } else {
+        // 同步模式：瞬时跟随，确保跟手
+        return Transform.translate(
+          offset: Offset(0, clampedOffset),
+          child: bottomBar,
+        );
       }
-      return Transform.translate(
-        offset: Offset(0, offset),
-        child: bottomBar,
-      );
     });
   }
 

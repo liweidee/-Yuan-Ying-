@@ -243,26 +243,39 @@ class _DetailPageState extends State<DetailPage>
     final EdgeInsets padding = MediaQuery.viewPaddingOf(context);
     final bool removeSafeArea = SettingPref.removeSafeArea;
 
-    final double playerHeight = isFullScreen
-        ? size.height - (removeSafeArea ? 0 : padding.top)
-        : size.width * 9 / 16;
+    // 视频实际高度（16:9）
+    final double videoHeight = size.width * 9 / 16;
+    // 非全屏时顶部需要留出状态栏高度
+    final double topPadding = isFullScreen ? 0 : (removeSafeArea ? 0 : padding.top);
+    // Sliver 头部总高度 = 视频高度 + 顶部安全区域（非全屏时）
+    final double headerHeight = isFullScreen ? size.height : videoHeight + topPadding;
 
     return ExtendedNestedScrollView(
       key: _scrollKey,
       physics: isFullScreen ? const NeverScrollableScrollPhysics() : null,
       onlyOneScrollInBody: true,
-      pinnedHeaderSliverHeightBuilder: () => playerHeight,
+      pinnedHeaderSliverHeightBuilder: () => headerHeight,
       headerSliverBuilder: (context, innerBoxIsScrolled) {
         return [
           SliverPinnedDynamicHeader(
             key: const Key('sliver_header'),
             minExtent: kToolbarHeight,
-            maxExtent: playerHeight,
-            child: SizedBox(
-              width: size.width,
-              height: playerHeight,
-              child: videoPlayer(width: size.width, height: playerHeight),
-            ),
+            maxExtent: headerHeight,
+            child: isFullScreen
+                ? SizedBox(
+                    width: size.width,
+                    height: headerHeight,
+                    child: videoPlayer(width: size.width, height: videoHeight),
+                  )
+                : Padding(
+                    // 关键：顶部留出状态栏高度
+                    padding: EdgeInsets.only(top: topPadding),
+                    child: SizedBox(
+                      width: size.width,
+                      height: videoHeight,
+                      child: videoPlayer(width: size.width, height: videoHeight),
+                    ),
+                  ),
           ),
         ];
       },
@@ -286,10 +299,13 @@ class _DetailPageState extends State<DetailPage>
     final bool isFullScreen = controller.playerController.isFullScreen.value;
     final Size size = MediaQuery.sizeOf(context);
     final EdgeInsets padding = MediaQuery.viewPaddingOf(context);
-    final double availableHeight = size.height - padding.top - padding.bottom;
+    // 全屏时可用高度为屏幕高度，非全屏时去除顶部和底部安全区域
+    final double availableHeight = isFullScreen
+        ? size.height
+        : size.height - padding.top - padding.bottom;
     const double rightWidth = 400.0;
 
-    // 全屏时视频宽度为全屏宽度，非全屏时减去右侧面板宽度
+    // 全屏时视频宽度为屏幕宽度，非全屏时减去右侧面板宽度
     final double videoWidth = isFullScreen ? size.width : size.width - rightWidth;
 
     return Row(

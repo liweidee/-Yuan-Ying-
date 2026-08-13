@@ -27,6 +27,8 @@ import 'package:yuanying/modules/setting/views/site_config_page.dart';
 import 'package:yuanying/common/widgets/custom_height_widget.dart';
 import 'package:yuanying/models/common/bar_hide_type.dart';
 
+const double _topBarHeight = 52.0;
+
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
 
@@ -603,20 +605,51 @@ class _HomePageState extends State<HomePage>
     final hideTopBar = controller.hideTopBar.value;
     const double topBarHeight = 52.0; // 固定内容高度
 
-    // -------- 顶部栏（不包含任何安全区填充） --------
-    Widget topBar = Container(
-      height: topBarHeight,
-      padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
-      color: theme.colorScheme.surface,
-      child: _buildTopBarContent(theme), // 纯 Row
-    );
+    // -------- 顶部栏 --------
+    final Widget topBarContent = _buildTopBarContent(theme); // 纯 Row
 
-    if (hideTopBar) {
-      final offset = mainController.topBarOffset.value.clamp(0.0, topBarHeight);
-      topBar = CustomHeightWidget(
-        height: topBarHeight - offset,
-        offset: Offset(0, -offset),
-        child: topBar,
+    Widget topBar;
+    if (controller.hideTopBar.value) {
+      if (mainController.isInstantMode) {
+        // ===== Instant 模式：透明度 + 高度动画 =====
+        topBar = Obx(() {
+          final bool show = mainController.showTopBar.value;
+          return AnimatedOpacity(
+            opacity: show ? 1.0 : 0.0,
+            duration: const Duration(milliseconds: 300),
+            child: AnimatedContainer(
+              curve: Curves.easeInOutCubicEmphasized,
+              duration: const Duration(milliseconds: 500),
+              height: show ? _topBarHeight : 0,
+              color: theme.colorScheme.surface,
+              padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
+              child: topBarContent,
+            ),
+          );
+        });
+      } else {
+        // ===== Sync 模式：高度裁剪 =====
+        topBar = Obx(() {
+          final offset = mainController.topBarOffset.value.clamp(0.0, _topBarHeight);
+          return CustomHeightWidget(
+            height: _topBarHeight - offset,
+            offset: Offset(0, -offset),
+            child: Container(
+              height: _topBarHeight,
+              color: theme.colorScheme.surface,
+              padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
+              child: topBarContent,
+            ),
+          );
+        });
+      }
+    } else {
+      // 不隐藏
+      topBar = Container(
+        height: _topBarHeight,
+        color: theme.colorScheme.surface,
+        padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
+        child: topBarContent,
       );
     }
 
