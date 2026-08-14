@@ -90,6 +90,10 @@ abstract class CommonPageState<T extends StatefulWidget> extends State<T> {
     if (notification is ScrollUpdateNotification) {
       // 忽略非拖拽触发的滚动（例如惯性滚动）
       // if (notification.dragDetails == null) return false;
+      // 如果是非拖拽事件（鼠标滚轮/惯性），且列表已在顶部或下拉过头，则忽略更新
+      if (notification.dragDetails == null && metrics.pixels <= 0) {
+        return false;
+      }
       final pixel = metrics.pixels;
       final scrollDelta = notification.scrollDelta ?? 0;
       if (pixel < 0.0 && scrollDelta > 0) return false;
