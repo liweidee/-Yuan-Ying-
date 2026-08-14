@@ -6,6 +6,7 @@ abstract final class Style {
   static const double paddingSmall = 4.0;
   static const double paddingMedium = 8.0;
   static const double paddingLarge = 16.0;
+  static const double topBarHeight = 52.0;
 
   static const Radius imgRadius = Radius.circular(10);
   static const BorderRadius mdRadius = BorderRadius.all(imgRadius);

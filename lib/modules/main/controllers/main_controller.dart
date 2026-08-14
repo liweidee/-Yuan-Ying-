@@ -13,18 +13,19 @@ class MainController extends GetxController {
   final RxBool useBottomNav = true.obs;
 
   // ===== 顶部栏 Instant 模式专用状态 =====
-  final RxBool showTopBar = true.obs;   // 用于 instant 模式
+  final RxBool showTopBar = true.obs;
 
   // ===== 底部栏 Instant 模式专用状态 =====
-  final RxBool showBottomBar = true.obs;   // 用于 instant 模式
+  final RxBool showBottomBar = true.obs;
 
-  // ===== 底栏收齐 =====
+  // ===== 同步模式共享偏移（顶部和底部共享） =====
   final RxDouble barOffset = 0.0.obs;
+
+  // ===== 底栏收齐设置 =====
   final RxBool hideBottomBar = SettingPref.hideBottomBar.obs;
   BarHideType get barHideType => SettingPref.barHideType;
 
-  // ===== 顶部栏收齐 =====
-  final RxDouble topBarOffset = 0.0.obs;
+  // ===== 顶部栏收齐设置 =====
   final RxBool hideTopBar = SettingPref.hideTopBar.obs;
 
   // ===== 返回时直接退出 =====
@@ -35,6 +36,9 @@ class MainController extends GetxController {
   final RxInt navStyleVersion = 0.obs;
 
   final RxDouble bottomBarHeight = 56.0.obs;
+
+  // ===== 是否需要进行滚动校正（仅当顶部栏可隐藏时） =====
+  bool get needsCorrection => hideTopBar.value;
 
   // ============================================================
 
@@ -62,8 +66,8 @@ class MainController extends GetxController {
     setNavBarConfig();
     _updateUseBottomNav();
     barOffset.value = 0.0;
-    topBarOffset.value = 0.0;
     showBottomBar.value = true;
+    showTopBar.value = true;
   }
 
   void updateUseBottomNav({double? width, double? height}) {
@@ -99,46 +103,6 @@ class MainController extends GetxController {
     navStyleVersion.value++;
   }
 
-  // ===== 底栏偏移更新 =====
-  void updateBottomBarOffset(double offset, {bool? isScrollingDown}) {
-    if (!hideBottomBar.value || !useBottomNav.value) {
-      barOffset.value = 0.0;
-      showBottomBar.value = true;
-      return;
-    }
-
-    if (isInstantMode) {
-      // 即时模式：只更新 showBottomBar
-      if (isScrollingDown != null) {
-        showBottomBar.value = !isScrollingDown; // 根据你的方向映射调整
-      }
-      // 不更新 barOffset
-    } else {
-      // 同步模式：更新 barOffset
-      final maxOffset = bottomBarHeight.value;
-      final clamped = offset.clamp(0.0, maxOffset);
-      barOffset.value = clamped;
-    }
-  }
-
-  void updateTopBarOffset(double offset, {bool? isScrollingDown}) {
-    if (!hideTopBar.value) {
-      topBarOffset.value = 0.0;
-      showTopBar.value = true;
-      return;
-    }
-
-    if (isInstantMode) {
-      if (isScrollingDown != null) {
-        showTopBar.value = !isScrollingDown;
-      }
-    } else {
-      final safeOffset = offset.clamp(0.0, double.infinity);
-      const double maxOffset = 52.0;
-      topBarOffset.value = safeOffset.clamp(0.0, maxOffset);
-    }
-  }
-
   void refreshHideBottomBar() {
     hideBottomBar.value = SettingPref.hideBottomBar;
     if (!hideBottomBar.value) {
@@ -149,7 +113,7 @@ class MainController extends GetxController {
   void refreshHideTopBar() {
     hideTopBar.value = SettingPref.hideTopBar;
     if (!hideTopBar.value) {
-      topBarOffset.value = 0.0;
+      barOffset.value = 0.0;
     }
   }
 }

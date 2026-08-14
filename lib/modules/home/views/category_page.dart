@@ -27,10 +27,7 @@ class CategoryPage extends StatefulWidget {
 class _CategoryPageState extends State<CategoryPage>
     with AutomaticKeepAliveClientMixin {
   late final CategoryController ctrl;
-  final MainController mainController = Get.find<MainController>();
   final HomeController homeController = Get.find<HomeController>();
-
-  double _lastScrollOffset = 0;
 
   @override
   bool get wantKeepAlive => true;
@@ -39,27 +36,22 @@ class _CategoryPageState extends State<CategoryPage>
   void initState() {
     super.initState();
     ctrl = widget.controller;
-    ctrl.scrollController.addListener(_onScrollUpdate);
+    // 只保留加载更多监听，不再处理顶部栏隐藏
+    ctrl.scrollController.addListener(_onScrollForLoadMore);
   }
 
-  // ===== 滚动监听 =====
-  void _onScrollUpdate() {
-    final offset = ctrl.scrollController.position.pixels;
-    if (offset == _lastScrollOffset) return; // 滚动停止时不更新
-    final isDown = offset > _lastScrollOffset;
-    _lastScrollOffset = offset;
-
-    mainController.updateTopBarOffset(offset, isScrollingDown: isDown);
-    mainController.updateBottomBarOffset(offset, isScrollingDown: isDown);
-
-    if (offset >= ctrl.scrollController.position.maxScrollExtent - 200) {
+  // 仅用于加载更多
+  void _onScrollForLoadMore() {
+    if (ctrl.isLoadingMore.value || ctrl.isLoading.value) return;
+    if (ctrl.scrollController.position.pixels >=
+        ctrl.scrollController.position.maxScrollExtent - 200) {
       ctrl.loadMore();
     }
   }
 
   @override
   void dispose() {
-    ctrl.scrollController.removeListener(_onScrollUpdate);
+    ctrl.scrollController.removeListener(_onScrollForLoadMore);
     super.dispose();
   }
 
@@ -182,7 +174,6 @@ class _CategoryPageState extends State<CategoryPage>
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (shouldShowFilter) _buildFilterBar(theme, filterGroups!),
-          // 固定间距
           if (shouldShowFilter) const SizedBox(height: 4),
           Expanded(
             child: MediaQuery.removePadding(

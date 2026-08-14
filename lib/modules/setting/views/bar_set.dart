@@ -48,21 +48,21 @@ class _BarSetPageState extends State<BarSetPage> {
         .map((e) => (e.item as Enum).index)
         .toList();
     StorageManager.setSetting(key, sorted);
-    // ===== 修复：通知 MainController 刷新导航栏 =====
+    // ===== 通知 MainController 刷新导航栏 =====
     if (Get.isRegistered<MainController>()) {
       Get.find<MainController>().setNavBarConfig();
     }
-    SmartDialog.showToast('保存成功，下次启动时生效');
+    SmartDialog.showToast('保存成功');
   }
 
   void onReset() {
     Get.back();
     StorageManager.deleteSetting(key);
-    // ===== 修复：通知 MainController 刷新导航栏 =====
+    // ===== 通知 MainController 刷新导航栏 =====
     if (Get.isRegistered<MainController>()) {
       Get.find<MainController>().setNavBarConfig();
     }
-    SmartDialog.showToast('重置成功，下次启动时生效');
+    SmartDialog.showToast('重置成功');
   }
 
   @override

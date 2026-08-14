@@ -6,6 +6,7 @@ import 'package:yuanying/models/common/nav_bar_config.dart';
 import 'package:yuanying/modules/main/controllers/main_controller.dart';
 import 'package:yuanying/modules/setting/models/setting_pref.dart';
 import 'package:yuanying/common/widgets/floating_navigation_bar.dart';
+import 'package:yuanying/core/theme/style.dart';
 
 class MainPage extends StatefulWidget {
   const MainPage({super.key});
@@ -43,7 +44,6 @@ class _MainPageState extends State<MainPage> {
         baseHeight = 56.0;
         break;
     }
-    // 移动端底部安全区域的高度
     final bottomPadding = MediaQuery.viewPaddingOf(context).bottom;
     return baseHeight + bottomPadding;
   }
@@ -194,7 +194,6 @@ class _MainPageState extends State<MainPage> {
         );
       }),
       overlayColor: WidgetStateProperty.resolveWith((states) {
-        // 只要包含 pressed、hovered、focused 中的任意一种，都返回透明
         if (states.any((state) =>
             state == WidgetState.pressed ||
             state == WidgetState.hovered ||
@@ -202,7 +201,7 @@ class _MainPageState extends State<MainPage> {
         )) {
           return Colors.transparent;
         }
-        return null; // 其他极少情况保留默认
+        return null;
       }),
       destinations: navigationBars.map((item) {
         return NavigationDestination(
@@ -222,7 +221,6 @@ class _MainPageState extends State<MainPage> {
       elevation: 0,
       selectedIndex: selectedIndex,
       onDestinationSelected: _controller.switchPage,
-      // 不设置 indicatorColor，使用默认 primary 胶囊背景
       labelTextStyle: WidgetStateProperty.resolveWith((states) {
         if (states.contains(WidgetState.selected)) {
           return TextStyle(
@@ -259,12 +257,10 @@ class _MainPageState extends State<MainPage> {
     Widget bottomBar;
     switch (style) {
       case NavigationBarStyle.default_:
-        // ===== 默认样式 =====
         bottomBar = baseNavigationBar;
         break;
 
       case NavigationBarStyle.floating:
-        // ===== 悬浮样式 =====
         bottomBar = FloatingNavigationBar(
           selectedIndex: selectedIndex,
           onDestinationSelected: _controller.switchPage,
@@ -281,15 +277,11 @@ class _MainPageState extends State<MainPage> {
         break;
 
       case NavigationBarStyle.capsule:
-        // ===== 胶囊样式 =====
         bottomBar = capsuleNavigationBar;
         break;
     }
 
-    // ============================================================
-    // 4. 底栏收齐逻辑
-    // ============================================================
-    // 在构建完 bottomBar 后，更新控制器中的高度
+    // 更新底部栏高度（用于计算偏移比例，但实际偏移由 topBarHeight 决定）
     final double actualHeight = _getBottomBarHeight(style);
     _controller.bottomBarHeight.value = actualHeight;
 
@@ -309,9 +301,8 @@ class _MainPageState extends State<MainPage> {
         );
       } else {
         // 同步模式：使用 barOffset + FractionalTranslation
-        final offset = _controller.barOffset.value;
-        final double height = _controller.bottomBarHeight.value;
-        final double slideFactor = (offset / height).clamp(0.0, 1.0);
+        // 平移比例 = barOffset / topBarHeight，确保与顶部栏同步
+        final double slideFactor = (_controller.barOffset.value / Style.topBarHeight).clamp(0.0, 1.0);
         return FractionalTranslation(
           translation: Offset(0, slideFactor),
           child: bottomBar,

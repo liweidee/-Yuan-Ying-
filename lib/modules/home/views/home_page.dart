@@ -26,8 +26,7 @@ import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:yuanying/modules/setting/views/site_config_page.dart';
 import 'package:yuanying/common/widgets/custom_height_widget.dart';
 import 'package:yuanying/models/common/bar_hide_type.dart';
-
-const double _topBarHeight = 52.0;
+import 'package:yuanying/modules/common/base/common_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -36,7 +35,7 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage>
+class _HomePageState extends CommonPageState<HomePage>
     with AutomaticKeepAliveClientMixin {
   late final HomeController controller;
   late final SourceManager sourceManager;
@@ -44,6 +43,9 @@ class _HomePageState extends State<HomePage>
 
   @override
   bool get wantKeepAlive => true;
+
+  @override
+  bool get needsCorrection => controller.hideTopBar.value; // 覆写校正开关
 
   @override
   void initState() {
@@ -296,7 +298,6 @@ class _HomePageState extends State<HomePage>
           GestureDetector(
             onTap: _showSwitchInterfaceDialog,
             child: ClipRRect(
-              // borderRadius: Style.mdRadius,
               borderRadius: BorderRadius.circular(6.0),
               child: Container(
                 width: 28,
@@ -602,16 +603,12 @@ class _HomePageState extends State<HomePage>
 
   Widget _buildNormalContent(ThemeData theme) {
     final mainController = Get.find<MainController>();
-    final hideTopBar = controller.hideTopBar.value;
-    const double topBarHeight = 52.0; // 固定内容高度
 
     // -------- 顶部栏 --------
-    final Widget topBarContent = _buildTopBarContent(theme); // 纯 Row
-
+    final Widget topBarContent = _buildTopBarContent(theme);
     Widget topBar;
     if (controller.hideTopBar.value) {
       if (mainController.isInstantMode) {
-        // ===== Instant 模式：透明度 + 高度动画 =====
         topBar = Obx(() {
           final bool show = mainController.showTopBar.value;
           return AnimatedOpacity(
@@ -620,7 +617,7 @@ class _HomePageState extends State<HomePage>
             child: AnimatedContainer(
               curve: Curves.easeInOutCubicEmphasized,
               duration: const Duration(milliseconds: 500),
-              height: show ? _topBarHeight : 0,
+              height: show ? Style.topBarHeight : 0,
               color: theme.colorScheme.surface,
               padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
               child: topBarContent,
@@ -628,14 +625,13 @@ class _HomePageState extends State<HomePage>
           );
         });
       } else {
-        // ===== Sync 模式：高度裁剪 =====
         topBar = Obx(() {
-          final offset = mainController.topBarOffset.value.clamp(0.0, _topBarHeight);
+          final offset = mainController.barOffset.value.clamp(0.0, Style.topBarHeight);
           return CustomHeightWidget(
-            height: _topBarHeight - offset,
+            height: Style.topBarHeight - offset,
             offset: Offset(0, -offset),
             child: Container(
-              height: _topBarHeight,
+              height: Style.topBarHeight,
               color: theme.colorScheme.surface,
               padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
               child: topBarContent,
@@ -644,9 +640,8 @@ class _HomePageState extends State<HomePage>
         });
       }
     } else {
-      // 不隐藏
       topBar = Container(
-        height: _topBarHeight,
+        height: Style.topBarHeight,
         color: theme.colorScheme.surface,
         padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
         child: topBarContent,
@@ -733,12 +728,6 @@ class _HomePageState extends State<HomePage>
       ),
     );
 
-    // 判断当前分类是否有筛选
-    final currentCategory = controller.currentCategory.value;
-    final hasFilter = currentCategory != null &&
-        controller.filters.containsKey(currentCategory.typeId) &&
-        controller.filters[currentCategory.typeId]!.isNotEmpty;
-
     // -------- TabBarView --------
     Widget tabView = TabBarView(
       controller: controller.tabController!,
@@ -757,13 +746,16 @@ class _HomePageState extends State<HomePage>
       }).toList(),
     );
 
+    // -------- 用 onBuild 包裹 TabBarView 以监听滚动 --------
+    Widget wrappedTabView = onBuild(tabView);
+    print('wrappedTabView 类型: ${wrappedTabView.runtimeType}');
+
     return Column(
       children: [
         topBar,
         tabBar,
-        // if (!hasFilter) const SizedBox(height: 8),
         const SizedBox(height: 8),
-        Expanded(child: tabView),
+        Expanded(child: wrappedTabView),
       ],
     );
   }
@@ -1274,7 +1266,6 @@ class _SourceSwitchDialogContentState extends State<_SourceSwitchDialogContent> 
 
     final isGrid = _isGridView;
 
-    // 统一高度：单栏和双栏视觉一致
     final verticalPadding = isGrid ? 10.0 : 8.0;
 
     Color? backgroundColor;
@@ -1306,7 +1297,7 @@ class _SourceSwitchDialogContentState extends State<_SourceSwitchDialogContent> 
       child: Container(
         padding: EdgeInsets.symmetric(
           horizontal: 12,
-          vertical: verticalPadding, // 统一高度
+          vertical: verticalPadding,
         ),
         decoration: BoxDecoration(
           color: backgroundColor,
