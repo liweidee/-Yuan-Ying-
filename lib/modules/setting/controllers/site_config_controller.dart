@@ -220,11 +220,14 @@ class SiteConfigController extends GetxController {
 
     if (currentSiteKey.value == key) {
       if (sites.isNotEmpty) {
-        // ===== 直接调用 switchSite，复用已验证的逻辑 =====
+        // 还有剩余配置，切换到第一个
         await switchSite(sites.first.key);
       } else {
+        // 没有配置了，清空选中状态并重置 SourceManager
         currentSiteKey.value = '';
         GStorage.deleteSetting('selected_config_key');
+        // 关键：重新加载配置，让 SourceManager 清空所有源列表
+        await sourceManager.loadConfig();
       }
     }
 

@@ -1978,35 +1978,37 @@ class _SettingSheetState extends State<SettingSheet> {
 
   // ===== 保存封面 =====
   void _saveCover() async {
-    try {
-      final coverUrl = controller.introController.videoDetail.value?.vodPic;
-      if (coverUrl == null || coverUrl.isEmpty) {
-        SmartDialog.showToast('当前没有封面图');
-        return;
-      }
+    // try {
+    //   final coverUrl = controller.introController.videoDetail.value?.vodPic;
+    //   if (coverUrl == null || coverUrl.isEmpty) {
+    //     SmartDialog.showToast('当前没有封面图');
+    //     return;
+    //   }
 
-      SmartDialog.showToast('正在下载封面...');
+    //   SmartDialog.showToast('正在下载封面...');
 
-      final dio = Dio();
-      final response = await dio.get(
-        coverUrl,
-        options: Options(responseType: ResponseType.bytes),
-      );
+    //   final dio = Dio();
+    //   final response = await dio.get(
+    //     coverUrl,
+    //     options: Options(responseType: ResponseType.bytes),
+    //   );
 
-      if (response.statusCode == 200 && response.data != null) {
-        final bytes = response.data as Uint8List;
-        final dir = await getTemporaryDirectory();
-        final fileName = 'cover_${DateTime.now().millisecondsSinceEpoch}.jpg';
-        final file = File('${dir.path}/$fileName');
-        await file.writeAsBytes(bytes);
+    //   if (response.statusCode == 200 && response.data != null) {
+    //     final bytes = response.data as Uint8List;
+    //     final dir = await getTemporaryDirectory();
+    //     final fileName = 'cover_${DateTime.now().millisecondsSinceEpoch}.jpg';
+    //     final file = File('${dir.path}/$fileName');
+    //     await file.writeAsBytes(bytes);
 
-        SmartDialog.showToast('封面已保存到: $fileName');
-      } else {
-        SmartDialog.showToast('下载封面失败');
-      }
-    } catch (e) {
-      SmartDialog.showToast('保存封面失败: $e');
-    }
+    //     SmartDialog.showToast('封面已保存到: $fileName');
+    //   } else {
+    //     SmartDialog.showToast('下载封面失败');
+    //   }
+    // } catch (e) {
+    //   SmartDialog.showToast('保存封面失败: $e');
+    // }
+
+    controller.saveCover();
   }
 
   // ===== 播放信息 =====

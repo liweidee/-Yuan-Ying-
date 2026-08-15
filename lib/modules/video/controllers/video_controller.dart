@@ -5,6 +5,7 @@ import 'package:dio/dio.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 import 'package:path_provider/path_provider.dart';
 import 'dart:async';
 
@@ -119,6 +120,9 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
 
   /// 自动播放状态（用于控制封面显示）
   final RxBool autoPlay = false.obs;
+
+  /// 保存离开页面时的播放进度
+  Duration? savedPosition;
 
   /// 当前播放的请求头
   final RxMap<String, String> currentHeaders = <String, String>{}.obs;
@@ -670,6 +674,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     required int sourceIndex,
     required int episodeIndex,
     bool autoPlay = true,
+    Duration? seekTo,
   }) async {
     _currentEpisode = episode;
     _currentSourceIndex = sourceIndex;
@@ -748,7 +753,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
         SmartDialog.dismiss(force: true);
 
         if (result != null) {
-          await _startPlay(result, autoPlay);
+          await _startPlay(result, autoPlay, seekTo: seekTo);
         } else {
           if (isManualParser.value && currentParser.value != null) {
             SmartDialog.showToast('${currentParser.value!.name} 解析失败');
@@ -761,7 +766,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
 
       if (playUrl.isDirect) {
         SmartDialog.dismiss();
-        await _startPlay(playUrl, autoPlay);
+        await _startPlay(playUrl, autoPlay, seekTo: seekTo);
         return;
       }
 
@@ -831,7 +836,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
             qualities: [PlayQuality(label: '嗅探', url: sniffedUrl)],
             headers: playUrl.headers,
           );
-          await _startPlay(sniffedPlayUrl, autoPlay);
+          await _startPlay(sniffedPlayUrl, autoPlay, seekTo: seekTo);
         } else {
           SmartDialog.showToast('嗅探失败，请尝试其他方式');
         }
@@ -895,7 +900,11 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     }
   }
 
-  Future<void> _startPlay(PlayUrl playUrl, bool autoPlay) async {
+  Future<void> _startPlay(
+    PlayUrl playUrl,
+    bool autoPlay, {
+    Duration? seekTo,
+  }) async {
     // 确保所有残留弹窗被关闭
     SmartDialog.dismiss(force: true);
 
@@ -954,10 +963,11 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
       headers: headers,
     );
 
+    final effectiveSeek = seekTo ?? Duration.zero;
     await playerController.setDataSource(
       dataSource,
       autoplay: autoPlay,
-      seekTo: null,
+      seekTo: effectiveSeek,
       vodId: _currentEpisode?.name ?? '',
       autoFullScreenFlag: PlayerPref.autoEnterFullScreen,
     );
@@ -1329,7 +1339,8 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
   }
 
   /// 重新加载当前剧集（重新请求播放地址）
-  Future<void> reloadCurrentEpisode() async {
+  /// [seekTo] 指定起始位置，若不传则从头开始
+  Future<void> reloadCurrentEpisode({Duration? seekTo}) async {
     final episode = introController.currentPlayEpisode;
     if (episode == null) {
       SmartDialog.showToast('当前没有播放的剧集');
@@ -1342,6 +1353,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
       sourceIndex: sourceIndex,
       episodeIndex: episodeIndex,
       autoPlay: true,
+      seekTo: seekTo ?? Duration.zero,
     );
   }
 
@@ -1786,6 +1798,39 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
           );
         },
       );
+    }
+  }
+
+  /// 保存当前视频封面图
+  Future<void> saveCover() async {
+    try {
+      final coverUrl = introController.videoDetail.value?.vodPic;
+      if (coverUrl == null || coverUrl.isEmpty) {
+        SmartDialog.showToast('当前没有封面图');
+        return;
+      }
+
+      SmartDialog.showToast('正在下载封面...');
+
+      final dio = Dio();
+      final response = await dio.get(
+        coverUrl,
+        options: Options(responseType: ResponseType.bytes),
+      );
+
+      if (response.statusCode == 200 && response.data != null) {
+        final bytes = response.data as Uint8List;
+        final dir = await getTemporaryDirectory();
+        final fileName = 'cover_${DateTime.now().millisecondsSinceEpoch}.jpg';
+        final file = File('${dir.path}/$fileName');
+        await file.writeAsBytes(bytes);
+
+        SmartDialog.showToast('封面已保存到: $fileName');
+      } else {
+        SmartDialog.showToast('下载封面失败');
+      }
+    } catch (e) {
+      SmartDialog.showToast('保存封面失败: $e');
     }
   }
 }

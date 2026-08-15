@@ -190,7 +190,8 @@ class _RecommendTabState extends State<RecommendTab> {
     // 生成唯一 tag
     final tag = DetailController.generateTag(prefix: 'detail_recommend');
 
-    Get.toNamed(
+    // 使用 Get.offNamed 替换当前详情页
+    Get.offNamed(
       '/detail',
       arguments: {
         'vodId': item.vodId,

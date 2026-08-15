@@ -4,8 +4,8 @@ import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
-import 'package:yuanying/common/widgets/dialog/export_import.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:yuanying/core/theme/style.dart';
 import 'package:yuanying/modules/setting/controllers/site_config_controller.dart';
@@ -14,6 +14,7 @@ import 'package:yuanying/t4/services/source_manager.dart';
 import 'package:yuanying/utils/storage.dart';
 import 'package:yuanying/utils/permission_handler.dart';
 import 'package:yuanying/utils/platform_utils.dart';
+import 'package:yuanying/utils/storage_utils.dart';
 
 class SiteConfigPage extends StatelessWidget {
   const SiteConfigPage({super.key});
@@ -41,29 +42,51 @@ class SiteConfigPage extends StatelessWidget {
             tooltip: '更多操作',
             onSelected: (value) {
               switch (value) {
-                case 'export_clipboard':
+                case 'backup_clipboard':
                   _exportToClipboard(context, controller);
                   break;
-                case 'export_file':
+                case 'backup_file':
                   _exportToFile(context, controller);
                   break;
-                case 'manual_input':
-                  _showManualImportDialog(context, controller);
+                case 'import_package':
+                  _showImportPackageDialog(context, controller);
                   break;
-                case 'import_clipboard':
-                  _importFromClipboard(context, controller);
+                case 'restore_manual':
+                  _showManualRestoreDialog(context, controller);
                   break;
-                case 'import_file':
-                  _importFromLocalFile(context, controller);
+                case 'restore_clipboard':
+                  _restoreFromClipboard(context, controller);
+                  break;
+                case 'restore_file':
+                  _restoreFromFile(context, controller);
                   break;
               }
             },
             itemBuilder: (context) => [
-              const PopupMenuItem(value: 'export_clipboard', child: Row(children: [Icon(Icons.copy, size: 18), SizedBox(width: 8), Text('导出到剪切板')])),
-              const PopupMenuItem(value: 'export_file', child: Row(children: [Icon(Icons.save_alt, size: 18), SizedBox(width: 8), Text('导出到本地')])),
-              const PopupMenuItem(value: 'manual_input', child: Row(children: [Icon(Icons.edit, size: 18), SizedBox(width: 8), Text('手动输入')])),
-              const PopupMenuItem(value: 'import_clipboard', child: Row(children: [Icon(Icons.content_paste, size: 18), SizedBox(width: 8), Text('从剪切板导入')])),
-              const PopupMenuItem(value: 'import_file', child: Row(children: [Icon(Icons.folder_open, size: 18), SizedBox(width: 8), Text('从本地文件导入')])),
+              const PopupMenuItem(
+                value: 'backup_clipboard',
+                child: Row(children: [Icon(Icons.copy, size: 18), SizedBox(width: 8), Text('备份所有接口（剪切板）')]),
+              ),
+              const PopupMenuItem(
+                value: 'backup_file',
+                child: Row(children: [Icon(Icons.save_alt, size: 18), SizedBox(width: 8), Text('备份所有接口（文件）')]),
+              ),
+              const PopupMenuItem(
+                value: 'import_package',
+                child: Row(children: [Icon(Icons.archive, size: 18), SizedBox(width: 8), Text('导入配置包')]),
+              ),
+              const PopupMenuItem(
+                value: 'restore_manual',
+                child: Row(children: [Icon(Icons.edit, size: 18), SizedBox(width: 8), Text('手动输入（恢复）')]),
+              ),
+              const PopupMenuItem(
+                value: 'restore_clipboard',
+                child: Row(children: [Icon(Icons.content_paste, size: 18), SizedBox(width: 8), Text('恢复所有接口（剪切板）')]),
+              ),
+              const PopupMenuItem(
+                value: 'restore_file',
+                child: Row(children: [Icon(Icons.folder_open, size: 18), SizedBox(width: 8), Text('恢复所有接口（文件）')]),
+              ),
             ],
           ),
           IconButton(
@@ -99,6 +122,7 @@ class SiteConfigPage extends StatelessWidget {
     );
   }
 
+  // ========== 空状态 & 卡片构建 ==========
   Widget _buildEmptyState(BuildContext context, ThemeData theme, SiteConfigController controller) {
     return Center(
       child: Column(
@@ -252,6 +276,7 @@ class SiteConfigPage extends StatelessWidget {
     );
   }
 
+  // ========== 通用工具方法 ==========
   void _copyApiLink(BuildContext context, String api) {
     Clipboard.setData(ClipboardData(text: api));
     SmartDialog.showToast('接口链接已复制到剪贴板');
@@ -268,7 +293,6 @@ class SiteConfigPage extends StatelessWidget {
     return key;
   }
 
-  /// 检查存储权限（仅移动端），返回 true 表示已授权
   Future<bool> _checkStoragePermission(BuildContext context) async {
     if (!PlatformUtils.isMobile) return true;
     final status = await Permission.storage.request();
@@ -284,6 +308,517 @@ class SiteConfigPage extends StatelessWidget {
     return status.isGranted;
   }
 
+  // ================================================================
+  // 恢复功能（新增）
+  // ================================================================
+  void _performRestore(List<Map<String, dynamic>> newSites, SiteConfigController controller) {
+    final existingKeys = GStorage.getCustomSites().map((s) => s['key']?.toString() ?? '').toList();
+    for (final key in existingKeys) {
+      if (key.isNotEmpty) {
+        GStorage.removeCustomSite(key);
+      }
+    }
+
+    for (final site in newSites) {
+      GStorage.addCustomSite(site);
+    }
+
+    String? currentKey = GStorage.getSetting<String>('selected_config_key');
+    if (newSites.isNotEmpty) {
+      if (currentKey == null || !newSites.any((s) => s['key'] == currentKey)) {
+        currentKey = newSites.first['key']?.toString();
+        if (currentKey != null) {
+          GStorage.setSetting('selected_config_key', currentKey);
+        }
+      }
+    } else {
+      GStorage.deleteSetting('selected_config_key');
+    }
+
+    controller.loadSites();
+    controller.sourceManager.loadConfig();
+    SmartDialog.showToast('恢复成功');
+  }
+
+  Future<void> _restoreFromClipboard(BuildContext context, SiteConfigController controller) async {
+    final clipboardData = await Clipboard.getData(Clipboard.kTextPlain);
+    if (clipboardData == null || clipboardData.text == null) {
+      SmartDialog.showToast('剪切板为空');
+      return;
+    }
+    final text = clipboardData.text!.trim();
+    if (text.isEmpty) {
+      SmartDialog.showToast('剪切板为空');
+      return;
+    }
+    try {
+      final jsonData = jsonDecode(text);
+      if (jsonData is! List) {
+        SmartDialog.showToast('剪切板内容格式错误：期望数组格式');
+        return;
+      }
+      _performRestore(jsonData.map((e) => Map<String, dynamic>.from(e)).toList(), controller);
+    } catch (e) {
+      SmartDialog.showToast('解析剪切板内容失败: $e');
+    }
+  }
+
+  Future<void> _restoreFromFile(BuildContext context, SiteConfigController controller) async {
+    if (!await _checkStoragePermission(context)) return;
+    try {
+      final result = await FilePicker.pickFile(
+        type: FileType.custom,
+        allowedExtensions: ['json', 'txt'],
+      );
+      if (result == null) return;
+      final file = result.xFile;
+      final content = await file.readAsString();
+      final jsonData = jsonDecode(content);
+      if (jsonData is! List) {
+        SmartDialog.showToast('文件内容格式错误：期望数组格式');
+        return;
+      }
+      _performRestore(jsonData.map((e) => Map<String, dynamic>.from(e)).toList(), controller);
+    } catch (e) {
+      SmartDialog.showToast('加载文件失败: $e');
+    }
+  }
+
+  void _showManualRestoreDialog(BuildContext context, SiteConfigController controller) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final TextEditingController textController = TextEditingController();
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        backgroundColor: colorScheme.surface,
+        child: Container(
+          padding: const EdgeInsets.all(24),
+          constraints: const BoxConstraints(maxWidth: 500, maxHeight: 400),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('恢复所有接口配置', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: colorScheme.onSurface)),
+              const SizedBox(height: 12),
+              Text('请粘贴完整的接口列表 JSON 数组', style: TextStyle(fontSize: 13, color: colorScheme.outline)),
+              const SizedBox(height: 12),
+              Expanded(
+                child: TextField(
+                  controller: textController,
+                  maxLines: null,
+                  expands: true,
+                  style: TextStyle(fontSize: 14, color: colorScheme.onSurface),
+                  decoration: InputDecoration(
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    contentPadding: const EdgeInsets.all(12),
+                    hintText: '粘贴 JSON 数组...',
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  GestureDetector(
+                    onTap: () => Navigator.pop(dialogContext),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      child: Text(
+                        '取消',
+                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: colorScheme.outline),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  GestureDetector(
+                    onTap: () {
+                      final text = textController.text.trim();
+                      if (text.isEmpty) {
+                        SmartDialog.showToast('请输入内容');
+                        return;
+                      }
+                      try {
+                        final jsonData = jsonDecode(text);
+                        if (jsonData is! List) {
+                          SmartDialog.showToast('格式错误：期望数组');
+                          return;
+                        }
+                        final sites = jsonData.map((e) => Map<String, dynamic>.from(e)).toList();
+                        Navigator.pop(dialogContext);
+                        _performRestore(sites, controller);
+                      } catch (e) {
+                        SmartDialog.showToast('解析失败: $e');
+                      }
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      child: Text(
+                        '恢复',
+                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: colorScheme.primary),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ================================================================
+  // 导入配置包：中央弹窗（三个选项）
+  // ================================================================
+  void _showImportPackageDialog(BuildContext context, SiteConfigController controller) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (dialogContext) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        backgroundColor: colorScheme.surface,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 20),
+          constraints: const BoxConstraints(maxWidth: 300),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('导入配置包', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: colorScheme.onSurface)),
+              const SizedBox(height: 16),
+              ListTile(
+                leading: Icon(Icons.edit, color: colorScheme.primary),
+                title: Text('手动输入', style: TextStyle(color: colorScheme.onSurface)),
+                onTap: () {
+                  Navigator.pop(dialogContext);
+                  _showManualImportDialog(context, controller);
+                },
+              ),
+              ListTile(
+                leading: Icon(Icons.content_paste, color: colorScheme.primary),
+                title: Text('从剪切板导入', style: TextStyle(color: colorScheme.onSurface)),
+                onTap: () {
+                  Navigator.pop(dialogContext);
+                  _importFromClipboard(context, controller);
+                },
+              ),
+              ListTile(
+                leading: Icon(Icons.folder_open, color: colorScheme.primary),
+                title: Text('从本地文件导入', style: TextStyle(color: colorScheme.onSurface)),
+                onTap: () {
+                  Navigator.pop(dialogContext);
+                  _importFromLocalFile(context, controller);
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ================================================================
+  // 手动输入配置包
+  // ================================================================
+  void _showManualImportDialog(BuildContext context, SiteConfigController controller) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final TextEditingController textController = TextEditingController();
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        backgroundColor: colorScheme.surface,
+        child: Container(
+          padding: const EdgeInsets.all(24),
+          constraints: const BoxConstraints(maxWidth: 500, maxHeight: 400),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('手动输入配置', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: colorScheme.onSurface)),
+              const SizedBox(height: 12),
+              Text('请粘贴完整的 JSON 配置（包含 sites 和 parses）', style: TextStyle(fontSize: 13, color: colorScheme.outline)),
+              const SizedBox(height: 12),
+              Expanded(
+                child: TextField(
+                  controller: textController,
+                  maxLines: null,
+                  expands: true,
+                  style: TextStyle(fontSize: 14, color: colorScheme.onSurface),
+                  decoration: InputDecoration(
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    contentPadding: const EdgeInsets.all(12),
+                    hintText: '粘贴 JSON 配置...',
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  GestureDetector(
+                    onTap: () => Navigator.pop(dialogContext),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      child: Text(
+                        '取消',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                          color: colorScheme.outline,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  GestureDetector(
+                    onTap: () {
+                      final text = textController.text.trim();
+                      if (text.isEmpty) {
+                        SmartDialog.showToast('请输入配置内容');
+                        return;
+                      }
+                      try {
+                        final jsonData = jsonDecode(text);
+                        if (jsonData is! Map<String, dynamic>) {
+                          SmartDialog.showToast('配置格式错误：期望对象格式');
+                          return;
+                        }
+                        if (jsonData['sites'] == null || jsonData['sites'] is! List) {
+                          SmartDialog.showToast('配置格式错误：缺少 sites 字段');
+                          return;
+                        }
+                        Navigator.pop(dialogContext);
+                        _showImportConfirmDialog(context, controller, jsonData);
+                      } catch (e) {
+                        SmartDialog.showToast('解析失败: $e');
+                      }
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      child: Text(
+                        '确定',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: colorScheme.primary,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ================================================================
+  // 从剪切板导入配置包
+  // ================================================================
+  void _importFromClipboard(BuildContext context, SiteConfigController controller) async {
+    final clipboardData = await Clipboard.getData(Clipboard.kTextPlain);
+    if (clipboardData == null || clipboardData.text == null) {
+      SmartDialog.showToast('剪切板为空');
+      return;
+    }
+    final text = clipboardData.text!.trim();
+    if (text.isEmpty) {
+      SmartDialog.showToast('剪切板为空');
+      return;
+    }
+    try {
+      final jsonData = jsonDecode(text);
+      if (jsonData is! Map<String, dynamic>) {
+        SmartDialog.showToast('剪切板内容格式错误：期望对象格式');
+        return;
+      }
+      if (jsonData['sites'] == null || jsonData['sites'] is! List) {
+        SmartDialog.showToast('剪切板内容格式错误：缺少 sites 字段');
+        return;
+      }
+      _showImportConfirmDialog(context, controller, jsonData);
+    } catch (e) {
+      SmartDialog.showToast('解析剪切板内容失败: $e');
+    }
+  }
+
+  // ================================================================
+  // 从本地文件导入配置包（恢复为最初逻辑：调用 _showAddDialog）
+  // ================================================================
+  void _importFromLocalFile(BuildContext context, SiteConfigController controller) async {
+    if (!await _checkStoragePermission(context)) return;
+    try {
+      final result = await FilePicker.pickFile(
+        type: FileType.custom,
+        allowedExtensions: ['json', 'txt'],
+      );
+      if (result == null) return;
+
+      final file = result.xFile;
+      final content = await file.readAsString();
+      final jsonData = jsonDecode(content);
+
+      if (jsonData is! Map<String, dynamic>) {
+        SmartDialog.showToast('配置格式错误：期望对象格式');
+        return;
+      }
+      if (jsonData['sites'] == null || jsonData['sites'] is! List) {
+        SmartDialog.showToast('配置格式错误：缺少 sites 字段');
+        return;
+      }
+
+      // 保存临时数据，供 _showAddDialog 使用
+      _pendingFilePath = file.path;
+      _pendingFileName = file.name;
+      _pendingConfigPackage = jsonData;
+
+      final baseName = file.name.split('.').first;
+      _showAddDialog(context, controller, initialName: baseName, initialApi: file.path);
+    } catch (e) {
+      SmartDialog.showToast('加载文件失败: $e');
+    }
+  }
+
+  // ================================================================
+  // 导入确认弹窗
+  // ================================================================
+  void _showImportConfirmDialog(
+    BuildContext context,
+    SiteConfigController controller,
+    Map<String, dynamic> configPackage,
+  ) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final now = DateTime.now();
+    final dateStr =
+        '${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}_'
+        '${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}${now.second.toString().padLeft(2, '0')}';
+    final nameController = TextEditingController(text: '导入配置_$dateStr');
+
+    final sitesCount = (configPackage['sites'] as List).length;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        backgroundColor: colorScheme.surface,
+        child: Container(
+          padding: const EdgeInsets.all(24),
+          constraints: const BoxConstraints(maxWidth: 400),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('导入配置', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: colorScheme.onSurface)),
+              const SizedBox(height: 16),
+              Text('检测到配置包，包含 $sitesCount 个站点', style: TextStyle(fontSize: 14, color: colorScheme.outline)),
+              const SizedBox(height: 16),
+              TextField(
+                controller: nameController,
+                style: TextStyle(fontSize: 14, color: colorScheme.onSurface),
+                decoration: InputDecoration(
+                  labelText: '线路名称',
+                  labelStyle: TextStyle(fontSize: 13, color: colorScheme.outline),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide(color: colorScheme.outline.withOpacity(0.2)),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide(color: colorScheme.primary, width: 1.5),
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                ),
+              ),
+              const SizedBox(height: 24),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  GestureDetector(
+                    onTap: () => Navigator.pop(dialogContext),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      child: Text(
+                        '取消',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                          color: colorScheme.outline,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  GestureDetector(
+                    onTap: () {
+                      final name = nameController.text.trim();
+                      if (name.isEmpty) {
+                        SmartDialog.showToast('请输入线路名称');
+                        return;
+                      }
+                      Navigator.pop(dialogContext);
+                      final fileName = '${name}_${DateTime.now().millisecondsSinceEpoch}.json';
+                      controller.addLocalConfig(name, fileName, configPackage);
+                      SmartDialog.showToast('配置导入成功');
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      child: Text(
+                        '导入',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: colorScheme.primary,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ================================================================
+  // 备份功能
+  // ================================================================
+  void _exportToClipboard(BuildContext context, SiteConfigController controller) {
+    final configs = GStorage.getCustomSites();
+    Clipboard.setData(ClipboardData(text: jsonEncode(configs)));
+    SmartDialog.showToast('已备份到剪切板');
+  }
+
+  void _exportToFile(BuildContext context, SiteConfigController controller) async {
+    if (!await _checkStoragePermission(context)) return;
+    final content = jsonEncode(GStorage.getCustomSites());
+    final bytes = Uint8List.fromList(utf8.encode(content));
+    await StorageUtils.saveBytes2File(
+      name: 'site_config_backup.json',
+      bytes: bytes,
+    );
+  }
+
+  // ================================================================
+  // 添加/编辑/删除
+  // ================================================================
   Future<void> _pickConfigFile(
     BuildContext context,
     TextEditingController nameController,
@@ -337,8 +872,6 @@ class SiteConfigPage extends StatelessWidget {
     final colorScheme = theme.colorScheme;
 
     String selectedConfigType = 'tvbox';
-
-    // 根据平台决定选项
     final bool isDesktop = PlatformUtils.isDesktop;
 
     if (initialApi != null && initialApi.isNotEmpty && File(initialApi).existsSync()) {
@@ -388,15 +921,11 @@ class SiteConfigPage extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 14),
-              // ----- 接口类型下拉选择 -----
               DropdownButtonFormField<String>(
                 value: selectedConfigType,
                 decoration: InputDecoration(
                   labelText: '接口类型',
-                  labelStyle: TextStyle(
-                    fontSize: 13,
-                    color: colorScheme.outline,
-                  ),
+                  labelStyle: TextStyle(fontSize: 13, color: colorScheme.outline),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(10),
                     borderSide: BorderSide(color: colorScheme.outline.withOpacity(0.2)),
@@ -411,36 +940,24 @@ class SiteConfigPage extends StatelessWidget {
                   ),
                   contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                 ),
-                // ===== 下拉菜单样式控制 =====
-                dropdownColor: colorScheme.surface,           // 下拉菜单背景色
-                menuMaxHeight: 120,                          // 限制下拉菜单高度
-                iconSize: 20,                                // 调小下拉图标
-                isExpanded: true,                           // 不让下拉菜单撑满宽度
-                style: TextStyle(
-                  fontSize: 14,                              // 选项文字大小
-                  color: colorScheme.onSurface,
-                ),
+                dropdownColor: colorScheme.surface,
+                menuMaxHeight: 120,
+                iconSize: 20,
+                isExpanded: true,
+                style: TextStyle(fontSize: 14, color: colorScheme.onSurface),
                 items: [
                   const DropdownMenuItem(
                     value: 'tvbox',
-                    child: Text(
-                      'TVBox',
-                      style: TextStyle(fontSize: 14),        // 选项文字大小
-                    ),
+                    child: Text('TVBox', style: TextStyle(fontSize: 14)),
                   ),
                   if (!PlatformUtils.isDesktop)
                     const DropdownMenuItem(
                       value: 'catvod',
-                      child: Text(
-                        'CatVod (猫影视)',
-                        style: TextStyle(fontSize: 14),
-                      ),
+                      child: Text('CatVod (猫影视)', style: TextStyle(fontSize: 14)),
                     ),
                 ],
                 onChanged: (value) {
-                  if (value != null) {
-                    selectedConfigType = value;
-                  }
+                  if (value != null) selectedConfigType = value;
                 },
               ),
               const SizedBox(height: 14),
@@ -499,10 +1016,7 @@ class SiteConfigPage extends StatelessWidget {
                     onTap: () => Navigator.pop(dialogContext),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      child: Text(
-                        '取消',
-                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: colorScheme.outline),
-                      ),
+                      child: Text('取消', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: colorScheme.outline)),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -515,11 +1029,13 @@ class SiteConfigPage extends StatelessWidget {
                       }
 
                       if (_pendingFilePath != null) {
+                        // 本地文件配置：直接添加文件路径
                         controller.addLocalFileSite(name, _pendingFilePath!);
                         _pendingFilePath = null;
                         _pendingFileName = null;
                         SmartDialog.showToast('本地文件配置添加成功');
                       } else if (_pendingConfigPackage != null) {
+                        // 从本地文件导入的配置包：作为本地缓存配置添加
                         final fileName = _pendingFileName ?? (apiController.text.trim().isEmpty ? 'config.json' : apiController.text.trim());
                         controller.addLocalConfig(name, fileName, _pendingConfigPackage!);
                         _pendingConfigPackage = null;
@@ -540,10 +1056,7 @@ class SiteConfigPage extends StatelessWidget {
                     },
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      child: Text(
-                        '确定',
-                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: colorScheme.primary),
-                      ),
+                      child: Text('确定', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: colorScheme.primary)),
                     ),
                   ),
                 ],
@@ -627,10 +1140,7 @@ class SiteConfigPage extends StatelessWidget {
                     onTap: () => Navigator.pop(dialogContext),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      child: Text(
-                        '取消',
-                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: colorScheme.outline),
-                      ),
+                      child: Text('取消', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: colorScheme.outline)),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -648,10 +1158,7 @@ class SiteConfigPage extends StatelessWidget {
                     },
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      child: Text(
-                        '保存',
-                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: colorScheme.primary),
-                      ),
+                      child: Text('保存', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: colorScheme.primary)),
                     ),
                   ),
                 ],
@@ -683,235 +1190,5 @@ class SiteConfigPage extends StatelessWidget {
         ],
       ),
     );
-  }
-
-  void _exportToClipboard(BuildContext context, SiteConfigController controller) {
-    final configs = GStorage.getCustomSites();
-    Clipboard.setData(ClipboardData(text: jsonEncode(configs)));
-    SmartDialog.showToast('已导出到剪切板');
-  }
-
-  void _exportToFile(BuildContext context, SiteConfigController controller) {
-    _checkStoragePermission(context).then((granted) {
-      if (!granted) return;
-      showImportExportDialog<List<Map<String, dynamic>>>(
-        context,
-        title: '导出配置',
-        onExport: () => jsonEncode(GStorage.getCustomSites()),
-        onImport: (_) {},
-        localFileName: () => 'site_config',
-        importExtensions: const [],
-      );
-    });
-  }
-
-  void _showManualImportDialog(BuildContext context, SiteConfigController controller) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-    final TextEditingController textController = TextEditingController();
-
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        backgroundColor: colorScheme.surface,
-        child: Container(
-          padding: const EdgeInsets.all(24),
-          constraints: const BoxConstraints(maxWidth: 500, maxHeight: 400),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('手动输入配置', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: colorScheme.onSurface)),
-              const SizedBox(height: 12),
-              Text('请粘贴完整的 JSON 配置（包含 sites 和 parses）', style: TextStyle(fontSize: 13, color: colorScheme.outline)),
-              const SizedBox(height: 12),
-              Expanded(
-                child: TextField(
-                  controller: textController,
-                  maxLines: null,
-                  expands: true,
-                  style: TextStyle(fontSize: 14, color: colorScheme.onSurface),
-                  decoration: InputDecoration(
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                    contentPadding: const EdgeInsets.all(12),
-                    hintText: '粘贴 JSON 配置...',
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('取消')),
-                  const SizedBox(width: 8),
-                  ElevatedButton(
-                    onPressed: () {
-                      final text = textController.text.trim();
-                      if (text.isEmpty) {
-                        SmartDialog.showToast('请输入配置内容');
-                        return;
-                      }
-                      try {
-                        final jsonData = jsonDecode(text);
-                        if (jsonData is! Map<String, dynamic>) {
-                          SmartDialog.showToast('配置格式错误：期望对象格式');
-                          return;
-                        }
-                        if (jsonData['sites'] == null || jsonData['sites'] is! List) {
-                          SmartDialog.showToast('配置格式错误：缺少 sites 字段');
-                          return;
-                        }
-                        Navigator.pop(dialogContext);
-                        _showImportConfirmDialog(context, controller, jsonData);
-                      } catch (e) {
-                        SmartDialog.showToast('解析失败: $e');
-                      }
-                    },
-                    child: const Text('确定'),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _importFromClipboard(BuildContext context, SiteConfigController controller) async {
-    final clipboardData = await Clipboard.getData(Clipboard.kTextPlain);
-    if (clipboardData == null || clipboardData.text == null) {
-      SmartDialog.showToast('剪切板为空');
-      return;
-    }
-    final text = clipboardData.text!.trim();
-    if (text.isEmpty) {
-      SmartDialog.showToast('剪切板为空');
-      return;
-    }
-    try {
-      final jsonData = jsonDecode(text);
-      if (jsonData is! Map<String, dynamic>) {
-        SmartDialog.showToast('剪切板内容格式错误：期望对象格式');
-        return;
-      }
-      if (jsonData['sites'] == null || jsonData['sites'] is! List) {
-        SmartDialog.showToast('剪切板内容格式错误：缺少 sites 字段');
-        return;
-      }
-      _showImportConfirmDialog(context, controller, jsonData);
-    } catch (e) {
-      SmartDialog.showToast('解析剪切板内容失败: $e');
-    }
-  }
-
-  void _showImportConfirmDialog(
-    BuildContext context,
-    SiteConfigController controller,
-    Map<String, dynamic> configPackage,
-  ) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-    final now = DateTime.now();
-    final dateStr =
-        '${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}_'
-        '${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}${now.second.toString().padLeft(2, '0')}';
-    final nameController = TextEditingController(text: '导入配置_$dateStr');
-
-    final sitesCount = (configPackage['sites'] as List).length;
-
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        backgroundColor: colorScheme.surface,
-        child: Container(
-          padding: const EdgeInsets.all(24),
-          constraints: const BoxConstraints(maxWidth: 400),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('导入配置', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: colorScheme.onSurface)),
-              const SizedBox(height: 16),
-              Text('检测到配置包，包含 $sitesCount 个站点', style: TextStyle(fontSize: 14, color: colorScheme.outline)),
-              const SizedBox(height: 16),
-              TextField(
-                controller: nameController,
-                style: TextStyle(fontSize: 14, color: colorScheme.onSurface),
-                decoration: InputDecoration(
-                  labelText: '线路名称',
-                  labelStyle: TextStyle(fontSize: 13, color: colorScheme.outline),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: BorderSide(color: colorScheme.outline.withOpacity(0.2)),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: BorderSide(color: colorScheme.primary, width: 1.5),
-                  ),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                ),
-              ),
-              const SizedBox(height: 24),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('取消')),
-                  const SizedBox(width: 8),
-                  ElevatedButton(
-                    onPressed: () {
-                      final name = nameController.text.trim();
-                      if (name.isEmpty) {
-                        SmartDialog.showToast('请输入线路名称');
-                        return;
-                      }
-                      Navigator.pop(dialogContext);
-                      final fileName = '${name}_${DateTime.now().millisecondsSinceEpoch}.json';
-                      controller.addLocalConfig(name, fileName, configPackage);
-                      SmartDialog.showToast('配置导入成功');
-                    },
-                    child: const Text('导入'),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _importFromLocalFile(BuildContext context, SiteConfigController controller) async {
-    if (!await _checkStoragePermission(context)) return;
-    try {
-      final result = await FilePicker.pickFile(
-        type: FileType.custom,
-        allowedExtensions: ['json', 'txt'],
-      );
-      if (result == null) return;
-
-      final file = result.xFile;
-      final content = await file.readAsString();
-      final jsonData = jsonDecode(content);
-
-      if (jsonData is! Map<String, dynamic>) {
-        SmartDialog.showToast('配置格式错误：期望对象格式');
-        return;
-      }
-      if (jsonData['sites'] == null || jsonData['sites'] is! List) {
-        SmartDialog.showToast('配置格式错误：缺少 sites 字段');
-        return;
-      }
-
-      final baseName = file.name.split('.').first;
-      _showAddDialog(context, controller, initialName: baseName, initialApi: file.path);
-    } catch (e) {
-      SmartDialog.showToast('加载文件失败: $e');
-    }
   }
 }

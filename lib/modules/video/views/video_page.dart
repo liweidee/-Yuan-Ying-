@@ -66,18 +66,29 @@ class _DetailPageState extends State<DetailPage>
 
   @override
   void didPushNext() {
-    if (controller.playerController.playerStatus.value.isPlaying) {
-      controller.playerController.pause();
+    final ctr = controller.playerController;
+    // 保存当前播放位置
+    controller.savedPosition = ctr.position;
+    if (ctr.dataStatus.value == DataStatus.loading) {
+      ctr.dataStatus.value = DataStatus.none;
+      ctr.isBuffering.value = false;
+      controller.autoPlay.value = false;
+    }
+    if (ctr.playerStatus.value.isPlaying) {
+      ctr.pause();
     }
   }
 
   @override
   void didPopNext() {
-    if (controller.currentPlayUrl.value.isNotEmpty) {
-      controller.playerController.play();
-    } else {
-      controller.playerController.pause();
-      controller.playerController.dataStatus.value = DataStatus.none;
+    final ctr = controller.playerController;
+    ctr.dataStatus.value = DataStatus.none;
+    ctr.isBuffering.value = false;
+    controller.autoPlay.value = false;
+    controller.isPlaying.value = false;
+    // 如果播放器存在且正在播放，暂停
+    if (ctr.playerStatus.value.isPlaying) {
+      ctr.pause();
     }
   }
 
@@ -141,11 +152,15 @@ class _DetailPageState extends State<DetailPage>
             ),
             actions: [
               PopupMenuButton(
+                tooltip: '更多功能',
                 icon: const Icon(Icons.more_vert, size: 22, color: Colors.white),
-                itemBuilder: (context) => <PopupMenuEntry>[
-                  const PopupMenuItem(child: Text('更多功能')),
-                ],
                 onSelected: (value) {},
+                itemBuilder: (context) => <PopupMenuEntry>[
+                  PopupMenuItem(
+                    onTap: () => controller.saveCover(),
+                    child: const Text('保存封面'),
+                  ),
+                ],
               ),
             ],
           ),
@@ -154,14 +169,18 @@ class _DetailPageState extends State<DetailPage>
         Center(
           child: IconButton(
             iconSize: 80,
+            // onPressed: () {
+            //   if (controller.currentPlayUrl.value.isNotEmpty) {
+            //     controller.autoPlay.value = true;
+            //     controller.playerController.play();
+            //   } else {
+            //     controller.autoPlay.value = true;
+            //     controller.reloadCurrentEpisode();
+            //   }
+            // },
             onPressed: () {
-              if (controller.currentPlayUrl.value.isNotEmpty) {
-                controller.autoPlay.value = true;
-                controller.playerController.play();
-              } else {
-                controller.autoPlay.value = true;
-                controller.reloadCurrentEpisode();
-              }
+              controller.autoPlay.value = true;
+              controller.reloadCurrentEpisode(seekTo: controller.savedPosition);
             },
             icon: Icon(
               Icons.play_circle_filled,
