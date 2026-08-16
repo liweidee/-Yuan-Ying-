@@ -125,6 +125,29 @@ class NodeJSService extends GetxService {
   }
 
   Future<bool> loadSourceFromURL(String url) async {
+    // 确保已初始化
+    if (!_isInitialized) {
+      await initialize();
+    }
+
+    // 如果 managementPort 为 0，主动等待
+    if (_managementPort == 0) {
+      print('managementPort is 0, waiting...');
+      _managementPortCompleter ??= Completer<void>();
+      final timer = Timer(const Duration(seconds: 10), () {
+        if (!_managementPortCompleter!.isCompleted) {
+          _managementPortCompleter!.complete();
+          print('managementPort wait timeout');
+        }
+      });
+      await _managementPortCompleter!.future;
+      timer.cancel();
+      if (_managementPort == 0) {
+        print('managementPort still 0, cannot load source');
+        return false;
+      }
+    }
+
     try {
       print('loadSourceFromURL: $url');
       final result = await _channel.invokeMethod('loadSourceFromURL', {'url': url});
