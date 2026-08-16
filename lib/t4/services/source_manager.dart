@@ -315,10 +315,10 @@ class SourceManager extends GetxController {
       return;
     }
 
-    // ===== 判断配置类型 =====
+    // ===== 先判断 configType，精准分流 =====
     final configType = selectedConfig['configType']?.toString() ?? 'tvbox';
-
-    // ===== 桌面端二次防御 =====
+    
+    // ===== 桌面端防御 =====
     if (PlatformUtils.isDesktop && configType == 'catvod') {
       print('[SourceManager] 桌面端跳过猫影视配置加载');
       remoteSites.clear();
@@ -327,7 +327,7 @@ class SourceManager extends GetxController {
     }
 
     if (configType == 'catvod') {
-      // ===== 猫影视类型：走 Node.js 流程 =====
+      // 猫影视类型：走 Node.js 流程
       await _loadCatVodConfig(configUrl);
       return;
     }
@@ -365,24 +365,32 @@ class SourceManager extends GetxController {
   Future<void> _loadCatVodConfig(String configUrl) async {
     try {
       final nodejs = NodeJSService.instance;
-
-      // 1. 加载源到 Node.js（内部处理 MD5 缓存）
-      print('[SourceManager] 加载猫影视源: $configUrl');
+  
+      // 1. 确保 Node.js 已初始化（原项目 addSource 前已初始化，这里强制等待）
+      if (!nodejs.isInitialized) {
+        await nodejs.initialize();
+      }
+      // 2. 调用加载（原项目直接调用）
       final success = await nodejs.loadSourceFromURL(configUrl);
       if (!success) {
-        print('[SourceManager] 猫影视源加载失败');
+        print('[SourceManager] 猫影视源加载失败（loadSourceFromURL 返回 false）');
         remoteSites.clear();
         remoteParses.clear();
         return;
       }
-
-      // 2. 等待 Spider 端口就绪
+      
+      // 3. 等待 spiderPort 就绪（原项目 loadSourceFromURL 内部已等待，但为保险再等一次）
       await nodejs.waitForSpiderPort();
-
-      // 3. 获取配置（/config）
+      if (nodejs.spiderPort == 0) {
+        print('[SourceManager] spiderPort 未就绪，无法获取配置');
+        remoteSites.clear();
+        return;
+      }
+      
+      // 4. 获取配置（/config）
       final result = await nodejs.getCatConfig();
 
-      // 4. 解析 sites
+      // 5. 解析 sites
       final videoSites = result['video']?['sites'] as List<dynamic>? ?? [];
       if (videoSites.isNotEmpty) {
         final rawSites = videoSites.map((e) => Map<String, dynamic>.from(e)).toList();
@@ -395,7 +403,7 @@ class SourceManager extends GetxController {
         remoteSites.clear();
       }
 
-      // 5. 解析 parses
+      // 6. 解析 parses
       if (result['parses'] != null && result['parses'] is List) {
         remoteParses.value = (result['parses'] as List)
             .map((e) => Map<String, dynamic>.from(e))

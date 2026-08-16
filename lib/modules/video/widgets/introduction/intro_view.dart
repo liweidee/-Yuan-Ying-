@@ -92,7 +92,10 @@ class IntroView extends StatelessWidget {
         // 封面图 - 修改点：添加 GestureDetector + fromHero
         // ============================================================
         GestureDetector(
-          onTap: () => showImageViewer(context, detail.vodPic, tag: detail.vodPic),
+          onTap: () {
+            detailController.isImageViewerOpen = true;
+            showImageViewer(context, detail.vodPic, tag: detail.vodPic);
+          },
           child: fromHero(
             tag: detail.vodPic,
             child: ClipRRect(

@@ -124,6 +124,9 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
   /// 保存离开页面时的播放进度
   Duration? savedPosition;
 
+  /// 标记是否正在打开图片查看器
+  bool isImageViewerOpen = false;
+
   /// 当前播放的请求头
   final RxMap<String, String> currentHeaders = <String, String>{}.obs;
 

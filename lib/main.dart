@@ -329,10 +329,10 @@ class MyApp extends StatelessWidget {
       initialRoute: '/',
       getPages: AppPages.routes,
 
-      // ===== 修复1：页面过渡动画 - 从 SettingPref 读取，类型安全 =====
+      // ===== 页面过渡动画 - 从 SettingPref 读取，类型安全 =====
       defaultTransition: SettingPref.pageTransition,
 
-      // ===== 修复2：字体大小 - 应用 textScaleFactor =====
+      // ===== 字体大小 - 应用 textScaleFactor =====
       builder: (context, child) {
         // 获取字体大小设置
         final textScale = SettingPref.defaultTextScale;

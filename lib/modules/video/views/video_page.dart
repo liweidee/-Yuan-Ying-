@@ -66,6 +66,18 @@ class _DetailPageState extends State<DetailPage>
 
   @override
   void didPushNext() {
+    // 如果是图片查看器，只保存进度，不重置状态
+    if (controller.isImageViewerOpen) {
+      final ctr = controller.playerController;
+      controller.savedPosition = ctr.position;
+      // 不暂停播放（可选），或者暂停？通常图片查看器不影响播放，可暂停也可继续。
+      // 建议暂停，避免后台继续播放。
+      if (ctr.playerStatus.value.isPlaying) {
+        ctr.pause();
+      }
+      return;
+    }
+
     final ctr = controller.playerController;
     // 保存当前播放位置
     controller.savedPosition = ctr.position;
@@ -81,6 +93,16 @@ class _DetailPageState extends State<DetailPage>
 
   @override
   void didPopNext() {
+    // 如果是图片查看器返回，清除标志，恢复播放状态
+    if (controller.isImageViewerOpen) {
+      controller.isImageViewerOpen = false;
+      // 恢复播放（如果之前是播放状态）
+      final ctr = controller.playerController;
+      // 如果之前是播放，则继续播放？但我们没有保存状态，可以简单调用 play 或保持暂停。
+      // 为了简单，这里不做自动播放，让用户通过播放按钮控制。
+      return;
+    }
+  
     final ctr = controller.playerController;
     ctr.dataStatus.value = DataStatus.none;
     ctr.isBuffering.value = false;
