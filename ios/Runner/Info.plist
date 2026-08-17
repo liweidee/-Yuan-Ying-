@@ -139,10 +139,5 @@
 			<string>_upnp._tcp</string>
 			<string>_http._tcp</string>
 		</array>
-		<key>UIBackgroundModes</key>
-		<array>
-		    <string>audio</string>
-		    <!-- Node.js 不需要额外的后台模式 -->
-		</array>
 	</dict>
 </plist>
