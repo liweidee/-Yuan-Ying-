@@ -1,0 +1,89 @@
+# .github/workflows/build-ipa.yml
+name: Build IPA (TrollStore)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Select Xcode 26.1+
+        run: sudo xcode-select -switch /Applications/Xcode_26.1.app/Contents/Developer
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.1'
+          channel: 'stable'
+          cache: false
+
+      - name: Build iOS App
+        run: |
+          set -e
+          echo "=== Building iOS app ==="
+
+          flutter pub get
+
+          cd ios
+          pod install --repo-update
+
+          echo "=== Configuring code signing for TrollStore ==="
+          python3 << 'PYEOF'
+          with open('Runner.xcodeproj/project.pbxproj', 'r') as f:
+              content = f.read()
+          # 替换为你的实际 iOS Bundle ID
+          content = content.replace(
+              'PRODUCT_BUNDLE_IDENTIFIER = com.example.yuanying;',
+              'PRODUCT_BUNDLE_IDENTIFIER = com.example.yuanying;\n\t\t\t\tDEVELOPMENT_TEAM = 0000000000;'
+          )
+          content = content.replace('CODE_SIGN_STYLE = Automatic;', 'CODE_SIGN_STYLE = Manual;')
+          with open('Runner.xcodeproj/project.pbxproj', 'w') as f:
+              f.write(content)
+          print('DEVELOPMENT_TEAM and CODE_SIGN_STYLE configured')
+          PYEOF
+
+          cd ..
+          flutter build ios --release --no-codesign --no-tree-shake-icons
+
+      - name: Prepare IPA
+        id: prepare
+        run: |
+          echo "=== Preparing IPA ==="
+
+          APP_PATH=$(find build/ios -name "*.app" -type d | head -1)
+          if [ -z "$APP_PATH" ]; then
+            echo "❌ App bundle not found"
+            exit 1
+          fi
+
+          echo "Found app: $APP_PATH"
+
+          # 移除签名相关文件，便于 TrollStore 重签名
+          rm -rf "$APP_PATH/_CodeSignature"
+          rm -rf "$APP_PATH/embedded.mobileprovision"
+          rm -rf "$APP_PATH/CodeResources" 2>/dev/null || true
+
+          echo "✅ Code signature removed"
+
+          TEMP_DIR=$(mktemp -d)
+          mkdir -p "$TEMP_DIR/Payload"
+          cp -r "$APP_PATH" "$TEMP_DIR/Payload/"
+
+          mkdir -p Build
+          cd "$TEMP_DIR"
+          zip -r -q -X "$GITHUB_WORKSPACE/Build/app.ipa" Payload
+
+          echo "✅ IPA created"
+          ls -lh "$GITHUB_WORKSPACE/Build/app.ipa"
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-ipa
+          path: Build/app.ipa
+          retention-days: 30
