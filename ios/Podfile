@@ -1,7 +1,5 @@
-# Uncomment this line to define a global platform for your project
 platform :ios, '14.0'
 
-# CocoaPods analytics sends network stats synchronously affecting flutter build latency.
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'
 
 project 'Runner', {
@@ -32,71 +30,50 @@ target 'Runner' do
   use_modular_headers!
 
   flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
+
+  # 稳定可靠的嵌入式 HTTP 服务器
+  pod 'GCDWebServer', '~> 3.5'
 end
 
 post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_ios_build_settings(target)
-    # Start of the permission_handler configuration
-        target.build_configurations.each do |config|
+    target.build_configurations.each do |config|
+      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '14.0'
+      # 禁用严格的产品路径检查以避免 Stale file 警告
+      config.build_settings['ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES'] = 'NO'
+    end
+  end
+  
+  # 设置主项目的构建设置
+  installer.aggregate_targets.each do |aggregate_target|
+    aggregate_target.user_project.native_targets.each do |target|
+      target.build_configurations.each do |config|
+        # 禁用产品路径验证
+        config.build_settings['VALIDATE_PRODUCT'] = 'NO'
+      end
+    end
+  end
 
-          # You can enable the permissions needed here. For example to enable camera
-          # permission, just remove the `#` character in front so it looks like this:
-          #
-          # ## dart: PermissionGroup.camera
-          # 'PERMISSION_CAMERA=1'
-          #
-          #  Preprocessor definitions can be found in: https://github.com/Baseflow/flutter-permission-handler/blob/master/permission_handler_apple/ios/Classes/PermissionHandlerEnums.h
-          config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] ||= [
-            '$(inherited)',
-
-            ## dart: PermissionGroup.calendar
-            # 'PERMISSION_EVENTS=1',
-
-            ## dart: PermissionGroup.reminders
-            # 'PERMISSION_REMINDERS=1',
-
-            ## dart: PermissionGroup.contacts
-            # 'PERMISSION_CONTACTS=1',
-
-            ## dart: PermissionGroup.camera
-            # 'PERMISSION_CAMERA=1',
-
-            ## dart: PermissionGroup.microphone
-            # 'PERMISSION_MICROPHONE=1',
-
-            ## dart: PermissionGroup.speech
-            # 'PERMISSION_SPEECH_RECOGNIZER=1',
-
-            ## dart: PermissionGroup.photos
-            'PERMISSION_PHOTOS=1',
-
-            ## dart: PermissionGroup.photosAddOnly
-            # 'PERMISSION_PHOTOS_ADD_ONLY =1',
-
-            ## dart: [PermissionGroup.location, PermissionGroup.locationAlways, PermissionGroup.locationWhenInUse]
-            # 'PERMISSION_LOCATION=1',
-
-            ## dart: PermissionGroup.notification
-            # 'PERMISSION_NOTIFICATIONS=1',
-
-            ## dart: PermissionGroup.mediaLibrary
-            # 'PERMISSION_MEDIA_LIBRARY=1',
-
-            ## dart: PermissionGroup.sensors
-            # 'PERMISSION_SENSORS=1',
-
-            ## dart: PermissionGroup.bluetooth
-            # 'PERMISSION_BLUETOOTH=1',
-
-            ## dart: PermissionGroup.appTrackingTransparency
-            # 'PERMISSION_APP_TRACKING_TRANSPARENCY=1',
-
-            ## dart: PermissionGroup.criticalAlerts
-            # 'PERMISSION_CRITICAL_ALERTS=1'
-          ]
-
-        end
-        # End of the permission_handler configuration
+  # 将 NodeMobile.xcframework 添加到 Runner target
+  runner_target = installer.pods_project.targets.find { |t| t.name == 'Runner' }
+  if runner_target.nil?
+    project_path = 'Runner.xcodeproj'
+    project = Xcodeproj::Project.open(project_path)
+    runner_native_target = project.targets.first { |t| t.name == 'Runner' }
+    
+    framework_path = 'Frameworks/NodeMobile.xcframework'
+    if File.exist?(framework_path)
+      framework_ref = project.frameworks_group.new_file(framework_path)
+      build_phase = runner_native_target.build_phases.find { |bp| bp.is_a?(Xcodeproj::Project::Object::PBXFrameworksBuildPhase) }
+      build_phase.add_file_reference(framework_ref)
+      embed_phase = runner_native_target.copy_files_build_phases.find { |bp| bp.dst_subfolder_spec == '10' }
+      if embed_phase.nil?
+        embed_phase = runner_native_target.new_copy_files_build_phase('Embed Frameworks')
+        embed_phase.dst_subfolder_spec = '10'
+      end
+      embed_phase.add_file_reference(framework_ref)
+      project.save
+    end
   end
 end
