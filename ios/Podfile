@@ -39,10 +39,12 @@ post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_ios_build_settings(target)
     target.build_configurations.each do |config|
-      # 关闭显式模块构建，解决 Xcode 26 兼容性问题
-      config.build_settings['SWIFT_INSTALL_OBJC_HEADER'] = 'NO'
-      config.build_settings['CLANG_ENABLE_MODULES'] = 'NO'
-      config.build_settings['SWIFT_ACTIVE_COMPILATION_CONDITIONS'] = '$(inherited) DEBUG'
+      # 关闭显式模块构建（这是 Xcode 26 新引入的）
+      config.build_settings['EXPLICIT_MODULE_BUILD'] = 'NO'
+      # 保留模块启用
+      config.build_settings['CLANG_ENABLE_MODULES'] = 'YES'
+      # 保留 Swift 模块启用
+      config.build_settings['SWIFT_ENABLE_MODULES'] = 'YES'
     end
   end
   
