@@ -18,6 +18,7 @@ import 'package:yuanying/t4/services/nodejs_spider_service.dart';
 import 'package:yuanying/nodejs/nodejs_service.dart';
 import 'package:yuanying/utils/platform_utils.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
+import 'package:path_provider/path_provider.dart';
 
 class SourceManager extends GetxController {
   final T4ApiService _apiService = Get.find<T4ApiService>();
@@ -326,13 +327,11 @@ class SourceManager extends GetxController {
       return;
     }
 
-    // if (configType == 'catvod') {
-    //   // 猫影视类型：走 Node.js 流程
-    //   await _loadCatVodConfig(configUrl);
-    //   return;
-    // }
-    await _loadCatVodConfig(configUrl);
-    return;
+    if (configType == 'catvod') {
+      // 猫影视类型：走 Node.js 流程
+      await _loadCatVodConfig(configUrl);
+      return;
+    }
 
     try {
       final result = await _apiService.fetchConfig(configUrl: configUrl);
@@ -365,36 +364,59 @@ class SourceManager extends GetxController {
 
   // ===== 加载猫影视配置 =====
   Future<void> _loadCatVodConfig(String configUrl) async {
-    SmartDialog.showToast('🔧 开始加载猫影视配置...');
+    // 写入调试日志
+    Directory? docDir;
+    File? logFile;
+    try {
+      docDir = await getApplicationDocumentsDirectory();
+      logFile = File('${docDir.path}/catvod_debug.txt');
+      await logFile.writeAsString('=== _loadCatVodConfig START ===\n', mode: FileMode.append);
+      await logFile.writeAsString('configUrl: $configUrl\n', mode: FileMode.append);
+    } catch (e) {
+      // 如果日志写入失败，忽略
+      print('日志写入失败: $e');
+    }
+
     try {
       final nodejs = NodeJSService.instance;
+      await logFile?.writeAsString('NodeJSService obtained\n', mode: FileMode.append);
 
-      // 1. 确保初始化
+      // 1. 确保 Node.js 已初始化
       if (!nodejs.isInitialized) {
+        await logFile?.writeAsString('Calling initialize...\n', mode: FileMode.append);
         await nodejs.initialize();
+        await logFile?.writeAsString('initialize done, isInitialized=${nodejs.isInitialized}\n', mode: FileMode.append);
       }
-      // 2. 下载源
+
+      // 2. 调用加载（原项目直接调用）
+      await logFile?.writeAsString('Calling loadSourceFromURL...\n', mode: FileMode.append);
       final success = await nodejs.loadSourceFromURL(configUrl);
+      await logFile?.writeAsString('loadSourceFromURL returned: $success\n', mode: FileMode.append);
+      await logFile?.writeAsString('spiderPort: ${nodejs.spiderPort}\n', mode: FileMode.append);
+
       if (!success) {
-        print('[SourceManager] 猫影视源加载失败（loadSourceFromURL 返回 false）');
-        SmartDialog.showToast('❌ 猫影视源加载失败');
+        await logFile?.writeAsString('loadSourceFromURL failed, clearing remoteSites\n', mode: FileMode.append);
         remoteSites.clear();
         remoteParses.clear();
         return;
       }
 
-      // 3. 等待 spiderPort（实际上 loadSourceFromURL 内部已等，但再确认一次）
+      // 3. 等待 spiderPort 就绪（原项目 loadSourceFromURL 内部已等待，但为保险再等一次）
+      await logFile?.writeAsString('Waiting for spider port...\n', mode: FileMode.append);
       await nodejs.waitForSpiderPort();
+      await logFile?.writeAsString('spiderPort after wait: ${nodejs.spiderPort}\n', mode: FileMode.append);
+
       if (nodejs.spiderPort == 0) {
-        print('[SourceManager] spiderPort 未就绪，无法获取配置');
-        SmartDialog.showToast('❌ Spider 未就绪');
+        await logFile?.writeAsString('spiderPort is 0, clearing remoteSites\n', mode: FileMode.append);
         remoteSites.clear();
+        remoteParses.clear();
         return;
       }
 
-      // 4. 获取配置
-      SmartDialog.showToast('📡 正在获取站点配置...');
+      // 4. 获取配置（/config）
+      await logFile?.writeAsString('Calling getCatConfig...\n', mode: FileMode.append);
       final result = await nodejs.getCatConfig();
+      await logFile?.writeAsString('getCatConfig result keys: ${result.keys}\n', mode: FileMode.append);
 
       // 5. 解析 sites
       final videoSites = result['video']?['sites'] as List<dynamic>? ?? [];
@@ -405,10 +427,10 @@ class SourceManager extends GetxController {
         if (result['logo'] != null) {
           configLogo.value = result['logo'].toString();
         }
-        SmartDialog.showToast('✅ 配置加载成功，共 ${remoteSites.length} 个站点');
+        await logFile?.writeAsString('Parsed sites: ${remoteSites.length}\n', mode: FileMode.append);
       } else {
         remoteSites.clear();
-        SmartDialog.showToast('⚠️ 配置中没有站点数据');
+        await logFile?.writeAsString('No video sites found\n', mode: FileMode.append);
       }
 
       // 6. 解析 parses
@@ -416,18 +438,22 @@ class SourceManager extends GetxController {
         remoteParses.value = (result['parses'] as List)
             .map((e) => Map<String, dynamic>.from(e))
             .toList();
+        await logFile?.writeAsString('Parsed parses: ${remoteParses.length}\n', mode: FileMode.append);
       } else {
         remoteParses.clear();
       }
 
       _updatePushAgentCache();
+      await logFile?.writeAsString('_loadCatVodConfig SUCCESS\n', mode: FileMode.append);
       print('[SourceManager] 猫影视配置加载成功，${remoteSites.length} 个站点');
 
-    } catch (e) {
+    } catch (e, stack) {
+      await logFile?.writeAsString('Exception: $e\n$stack\n', mode: FileMode.append);
       print('[SourceManager] 加载猫影视配置失败: $e');
-      SmartDialog.showToast('❌ 加载异常: $e');
       remoteSites.clear();
       remoteParses.clear();
+    } finally {
+      await logFile?.writeAsString('=== _loadCatVodConfig END ===\n', mode: FileMode.append);
     }
   }
 
