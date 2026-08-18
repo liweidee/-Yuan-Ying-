@@ -39,19 +39,20 @@ post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_ios_build_settings(target)
     target.build_configurations.each do |config|
-      # 关闭 Xcode 26 新增的显式模块构建（关键）
-      config.build_settings['EXPLICIT_MODULE_BUILD'] = 'NO'
+      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '14.0'
+      # 禁用严格的产品路径检查以避免 Stale file 警告
+      config.build_settings['ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES'] = 'NO'
     end
   end
-
-  # 同时为 Runner 主项目设置该选项
+  
+  # 设置主项目的构建设置
   installer.aggregate_targets.each do |aggregate_target|
-    aggregate_target.user_project.native_targets.each do |native_target|
-      native_target.build_configurations.each do |config|
-        config.build_settings['EXPLICIT_MODULE_BUILD'] = 'NO'
+    aggregate_target.user_project.native_targets.each do |target|
+      target.build_configurations.each do |config|
+        # 禁用产品路径验证
+        config.build_settings['VALIDATE_PRODUCT'] = 'NO'
       end
     end
-    aggregate_target.user_project.save
   end
 
   # 将 NodeMobile.xcframework 添加到 Runner target
