@@ -33,8 +33,8 @@ class SiteConfigController extends GetxController {
   }
 
   Future<void> switchSite(String key) async {
-    // if (currentSiteKey.value == key) return;
-    // if (!sites.any((s) => s.key == key)) return;
+    if (currentSiteKey.value == key) return;
+    if (!sites.any((s) => s.key == key)) return;
 
     final targetSite = sites.firstWhere((s) => s.key == key);
     if (PlatformUtils.isDesktop && targetSite.isCatVodConfig) {

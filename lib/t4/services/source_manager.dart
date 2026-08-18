@@ -316,7 +316,10 @@ class SourceManager extends GetxController {
     }
 
     // ===== 先判断 configType，精准分流 =====
-    final configType = selectedConfig['configType']?.toString() ?? 'tvbox';
+    String configType = selectedConfig['configType']?.toString() ?? 'tvbox';
+    if (configUrl.endsWith('.js') || configUrl.endsWith('.js.md5')) {
+      configType = 'catvod';  // 强制识别为 catvod
+    }
     
     // ===== 桌面端防御 =====
     if (PlatformUtils.isDesktop && configType == 'catvod') {
