@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:get/get.dart';
+import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 
 class NodeJSService extends GetxService {
   static const MethodChannel _channel = MethodChannel('com.tvbox/nodejs');
@@ -88,6 +89,7 @@ class NodeJSService extends GetxService {
   Future<void> initialize() async {
     if (_isInitialized) return;
 
+    SmartDialog.showToast('⏳ 正在启动 Node.js 服务...');
     _setupEventListener();
 
     try {
@@ -117,9 +119,18 @@ class NodeJSService extends GetxService {
 
         await _managementPortCompleter!.future;
         mgmtTimeout.cancel();
+
+        if (_managementPort > 0) {
+          SmartDialog.showToast('✅ Node.js 服务启动成功 (端口 $_managementPort)');
+        } else {
+          SmartDialog.showToast('⚠️ Node.js 服务启动但未获取到管理端口');
+        }
+      } else {
+        SmartDialog.showToast('❌ Node.js 服务启动失败');
       }
     } catch (e) {
       print('Node.js initialization error: $e');
+      SmartDialog.showToast('❌ Node.js 启动异常: $e');
       _isInitialized = false;
     }
   }
@@ -133,6 +144,7 @@ class NodeJSService extends GetxService {
     // 如果 managementPort 为 0，主动等待
     if (_managementPort == 0) {
       print('managementPort is 0, waiting...');
+      SmartDialog.showToast('⏳ 等待管理端口就绪...');
       _managementPortCompleter ??= Completer<void>();
       final timer = Timer(const Duration(seconds: 10), () {
         if (!_managementPortCompleter!.isCompleted) {
@@ -143,25 +155,37 @@ class NodeJSService extends GetxService {
       await _managementPortCompleter!.future;
       timer.cancel();
       if (_managementPort == 0) {
-        print('managementPort still 0, cannot load source');
+        SmartDialog.showToast('❌ 管理端口超时，无法下载配置');
         return false;
       }
     }
 
+    SmartDialog.showToast('⬇️ 正在下载配置包...');
     try {
       print('loadSourceFromURL: $url');
       final result = await _channel.invokeMethod('loadSourceFromURL', {'url': url});
       print('loadSourceFromURL result: $result');
       if (result is Map && result['success'] == true) {
+        SmartDialog.showToast('✅ 配置包下载完成，等待 Spider 启动...');
         await waitForSpiderPort();
+        if (_spiderPort > 0) {
+          SmartDialog.showToast('✅ Spider 服务已启动 (端口 $_spiderPort)');
+        } else {
+          SmartDialog.showToast('⚠️ Spider 端口未获取到');
+        }
         return true;
+      } else {
+        String msg = result is Map ? result['message'] : '未知错误';
+        SmartDialog.showToast('❌ 配置下载失败: $msg');
+        return false;
       }
-      return false;
     } on PlatformException catch (e) {
       print('PlatformException: ${e.message}');
+      SmartDialog.showToast('❌ 下载异常: ${e.message}');
       return false;
     } catch (e) {
       print('loadSourceFromURL error: $e');
+      SmartDialog.showToast('❌ 下载出错: $e');
       return false;
     }
   }

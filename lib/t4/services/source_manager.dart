@@ -363,31 +363,35 @@ class SourceManager extends GetxController {
 
   // ===== 加载猫影视配置 =====
   Future<void> _loadCatVodConfig(String configUrl) async {
+    SmartDialog.showToast('🔧 开始加载猫影视配置...');
     try {
       final nodejs = NodeJSService.instance;
-  
-      // 1. 确保 Node.js 已初始化（原项目 addSource 前已初始化，这里强制等待）
+
+      // 1. 确保初始化
       if (!nodejs.isInitialized) {
         await nodejs.initialize();
       }
-      // 2. 调用加载（原项目直接调用）
+      // 2. 下载源
       final success = await nodejs.loadSourceFromURL(configUrl);
       if (!success) {
         print('[SourceManager] 猫影视源加载失败（loadSourceFromURL 返回 false）');
+        SmartDialog.showToast('❌ 猫影视源加载失败');
         remoteSites.clear();
         remoteParses.clear();
         return;
       }
-      
-      // 3. 等待 spiderPort 就绪（原项目 loadSourceFromURL 内部已等待，但为保险再等一次）
+
+      // 3. 等待 spiderPort（实际上 loadSourceFromURL 内部已等，但再确认一次）
       await nodejs.waitForSpiderPort();
       if (nodejs.spiderPort == 0) {
         print('[SourceManager] spiderPort 未就绪，无法获取配置');
+        SmartDialog.showToast('❌ Spider 未就绪');
         remoteSites.clear();
         return;
       }
-      
-      // 4. 获取配置（/config）
+
+      // 4. 获取配置
+      SmartDialog.showToast('📡 正在获取站点配置...');
       final result = await nodejs.getCatConfig();
 
       // 5. 解析 sites
@@ -399,8 +403,10 @@ class SourceManager extends GetxController {
         if (result['logo'] != null) {
           configLogo.value = result['logo'].toString();
         }
+        SmartDialog.showToast('✅ 配置加载成功，共 ${remoteSites.length} 个站点');
       } else {
         remoteSites.clear();
+        SmartDialog.showToast('⚠️ 配置中没有站点数据');
       }
 
       // 6. 解析 parses
@@ -417,6 +423,7 @@ class SourceManager extends GetxController {
 
     } catch (e) {
       print('[SourceManager] 加载猫影视配置失败: $e');
+      SmartDialog.showToast('❌ 加载异常: $e');
       remoteSites.clear();
       remoteParses.clear();
     }
