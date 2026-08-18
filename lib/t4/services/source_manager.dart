@@ -316,10 +316,7 @@ class SourceManager extends GetxController {
     }
 
     // ===== 先判断 configType，精准分流 =====
-    String configType = selectedConfig['configType']?.toString() ?? 'tvbox';
-    if (configUrl.endsWith('.js') || configUrl.endsWith('.js.md5')) {
-      configType = 'catvod';  // 强制识别为 catvod
-    }
+    final configType = selectedConfig['configType']?.toString() ?? 'tvbox';
     
     // ===== 桌面端防御 =====
     if (PlatformUtils.isDesktop && configType == 'catvod') {
@@ -329,11 +326,13 @@ class SourceManager extends GetxController {
       return;
     }
 
-    if (configType == 'catvod') {
-      // 猫影视类型：走 Node.js 流程
-      await _loadCatVodConfig(configUrl);
-      return;
-    }
+    // if (configType == 'catvod') {
+    //   // 猫影视类型：走 Node.js 流程
+    //   await _loadCatVodConfig(configUrl);
+    //   return;
+    // }
+    await _loadCatVodConfig(configUrl);
+    return;
 
     try {
       final result = await _apiService.fetchConfig(configUrl: configUrl);
