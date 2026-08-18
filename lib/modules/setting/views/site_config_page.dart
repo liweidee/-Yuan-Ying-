@@ -1047,7 +1047,7 @@ class SiteConfigPage extends StatelessWidget {
                           SmartDialog.showToast('请输入接口链接');
                           return;
                         }
-                        controller.addSite(name, api);
+                        controller.addSite(name, api, configType: selectedConfigType);
                         SmartDialog.showToast('接口添加成功');
                       }
 
