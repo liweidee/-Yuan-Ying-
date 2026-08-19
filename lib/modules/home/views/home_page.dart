@@ -27,6 +27,7 @@ import 'package:yuanying/modules/setting/views/site_config_page.dart';
 import 'package:yuanying/common/widgets/custom_height_widget.dart';
 import 'package:yuanying/models/common/bar_hide_type.dart';
 import 'package:yuanying/modules/common/base/common_page.dart';
+import 'package:yuanying/nodejs/nodejs_service.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -36,7 +37,7 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends CommonPageState<HomePage>
-    with AutomaticKeepAliveClientMixin {
+    with AutomaticKeepAliveClientMixin, WidgetsBindingObserver {
   late final HomeController controller;
   late final SourceManager sourceManager;
   late final ActionRenderer actionRenderer;
@@ -50,6 +51,8 @@ class _HomePageState extends CommonPageState<HomePage>
   @override
   void initState() {
     super.initState();
+    // 生命周期监听
+    WidgetsBinding.instance.addObserver(this);
     controller = Get.put(HomeController());
     sourceManager = Get.find<SourceManager>();
     actionRenderer = Get.find<ActionRenderer>();
@@ -973,7 +976,41 @@ class _HomePageState extends CommonPageState<HomePage>
 
   @override
   void dispose() {
+    // 移除监听
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  // 生命周期回调（猫影视）
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // 注意：不要调用 super.didChangeAppLifecycleState，因为父类没有该方法
+    if (state == AppLifecycleState.resumed) {
+      print('[HomePage] App resumed, reactivating catvod services');
+      _reactivateCatvodService();
+    }
+  }
+
+  // 恢复方法（猫影视）
+  Future<void> _reactivateCatvodService() async {
+    final site = sourceManager.currentSite.value;
+    if (site == null) return;
+    // 只处理猫影视源
+    if (!SourceManager.isNodeJSSite(site)) {
+      print('[HomePage] Current site is not catvod, skip');
+      return;
+    }
+
+    // 使用 NodeJSService.instance
+    final nodejs = NodeJSService.instance;
+    if (nodejs.spiderPort == 0) {
+      print('[HomePage] spiderPort is 0, reloading config');
+      await sourceManager.loadConfig();
+    } else {
+      print('[HomePage] spiderPort exists, re-initializing spider');
+      await nodejs.initSpider();
+      await sourceManager.loadConfig();
+    }
   }
 }
 

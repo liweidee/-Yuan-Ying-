@@ -36,30 +36,22 @@ class NodeJSSpiderService implements ISpiderService {
     }
 
     // 从 siteKey 中提取 spider key 和 type
-    // 支持两种格式：
-    //   1. "nodejs_xxx_3" 或 "catvod_xxx_3" -> 提取 "xxx" 和 3
-    //   2. "ysgc"（纯字母）-> 直接使用 "ysgc" 作为 key
     String spiderKey;
     int spiderType = 3;
 
     final parts = siteKey.split('_');
     if (parts.length >= 2) {
-      // 格式：nodejs_xxx_3 或 catvod_xxx_3
       spiderKey = parts[1];
       if (parts.length > 2) {
         final parsedType = int.tryParse(parts[2]);
         if (parsedType != null) spiderType = parsedType;
       }
     } else {
-      // 格式：纯字母（如 "ysgc"、"bili"）
-      spiderKey = siteKey;
+      spiderKey = siteKey; // 纯字母直接使用
     }
+    if (spiderKey.isEmpty) spiderKey = 'default';
 
-    // 兜底：防止 spiderKey 为空
-    if (spiderKey.isEmpty) {
-      spiderKey = 'default';
-    }
-
+    // 直接使用 apiUrl 作为 apiBase（猫影视站点 api 字段就是路径前缀）
     _nodejs.setCurrentSpider(spiderKey, spiderType, apiBase: apiUrl);
   }
 
