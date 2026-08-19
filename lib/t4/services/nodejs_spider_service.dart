@@ -36,13 +36,31 @@ class NodeJSSpiderService implements ISpiderService {
     }
 
     // 从 siteKey 中提取 spider key 和 type
+    // 支持两种格式：
+    //   1. "nodejs_xxx_3" 或 "catvod_xxx_3" -> 提取 "xxx" 和 3
+    //   2. "ysgc"（纯字母）-> 直接使用 "ysgc" 作为 key
+    String spiderKey;
+    int spiderType = 3;
+
     final parts = siteKey.split('_');
     if (parts.length >= 2) {
-      final key = parts[1];
-      final type = parts.length > 2 ? int.tryParse(parts[2]) ?? 3 : 3;
-      // 将 apiUrl 作为 apiBase 传入
-      _nodejs.setCurrentSpider(key, type, apiBase: apiUrl);
+      // 格式：nodejs_xxx_3 或 catvod_xxx_3
+      spiderKey = parts[1];
+      if (parts.length > 2) {
+        final parsedType = int.tryParse(parts[2]);
+        if (parsedType != null) spiderType = parsedType;
+      }
+    } else {
+      // 格式：纯字母（如 "ysgc"、"bili"）
+      spiderKey = siteKey;
     }
+
+    // 兜底：防止 spiderKey 为空
+    if (spiderKey.isEmpty) {
+      spiderKey = 'default';
+    }
+
+    _nodejs.setCurrentSpider(spiderKey, spiderType, apiBase: apiUrl);
   }
 
   /// 初始化 Node.js 蜘蛛（调用 /init 接口）
