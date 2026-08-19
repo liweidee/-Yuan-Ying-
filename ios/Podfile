@@ -42,6 +42,8 @@ post_install do |installer|
       config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '14.0'
       # 禁用严格的产品路径检查以避免 Stale file 警告
       config.build_settings['ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES'] = 'NO'
+      config.build_settings['SWIFT_ENABLE_EXPLICIT_MODULES'] = 'NO'
+      config.build_settings['CLANG_ENABLE_EXPLICIT_MODULES'] = 'NO'
     end
   end
   
