@@ -22,6 +22,49 @@ jobs:
           channel: 'stable'
           cache: false
 
+      - name: Download and Setup NodeMobile.xcframework
+        run: |
+          set -e
+          echo "=== Downloading NodeMobile.xcframework ==="
+          mkdir -p ios/Frameworks
+
+          DOWNLOAD_URL="https://github.com/nodejs-mobile/nodejs-mobile/releases/download/v18.20.4/nodejs-mobile-v18.20.4-ios.zip"
+          curl -L -o ios/Frameworks/nodejs-mobile.zip "$DOWNLOAD_URL"
+          cd ios/Frameworks
+          unzip -o -q nodejs-mobile.zip
+          rm nodejs-mobile.zip
+          cd ../..
+
+          if [ ! -d "ios/Frameworks/NodeMobile.xcframework" ]; then
+            echo "❌ NodeMobile.xcframework not found"
+            exit 1
+          fi
+
+          echo "✅ NodeMobile.xcframework downloaded"
+
+      - name: Build Node.js Project (auto build dist, consistent with build_trollstore.yml)
+        run: |
+          set -e
+          echo "=== Building Node.js project (dist) ==="
+          cd ios/Runner/nodejs-project
+
+          # 安装依赖（无 node_modules 时执行 npm install）
+          if [ ! -d "node_modules" ]; then
+            npm install 2>&1 | tail -3
+          fi
+
+          # 用 esbuild 构建出 dist/main.js（与 02 版本一致）
+          node esbuild.js 2>&1
+
+          if [ -d "dist" ] && [ -f "dist/main.js" ]; then
+            echo "✅ Node.js build successful"
+            echo "   Output: dist/main.js"
+            ls -la dist/
+          else
+            echo "❌ Build failed - missing dist/main.js"
+            exit 1
+          fi
+
       - name: Build iOS App
         run: |
           set -e
@@ -50,6 +93,27 @@ jobs:
           cd ..
           flutter build ios --release --no-codesign --no-tree-shake-icons
 
+      - name: Copy Node.js files to App Bundle
+        run: |
+          set -e
+          echo "=== Copying Node.js files to App Bundle ==="
+
+          APP_PATH=$(find build/ios -name "*.app" -type d | head -1)
+          if [ -z "$APP_PATH" ]; then
+            echo "❌ App bundle not found"
+            exit 1
+          fi
+
+          echo "Found app: $APP_PATH"
+
+          # 与 02 版本保持一致：拷贝 dist/main.js 及可选的 main.js.md5
+          mkdir -p "$APP_PATH/nodejs-project/dist"
+          cp ios/Runner/nodejs-project/dist/main.js "$APP_PATH/nodejs-project/dist/"
+          cp ios/Runner/nodejs-project/dist/main.js.md5 "$APP_PATH/nodejs-project/dist/" 2>/dev/null || true
+
+          echo "✅ Node.js files copied to app bundle"
+          ls -la "$APP_PATH/nodejs-project/dist/"
+
       - name: Prepare IPA
         id: prepare
         run: |
@@ -62,6 +126,13 @@ jobs:
           fi
 
           echo "Found app: $APP_PATH"
+
+          # 校验 nodejs-project/dist/main.js 已存在，缺失则直接报错，避免产出废包
+          if [ ! -f "$APP_PATH/nodejs-project/dist/main.js" ]; then
+            echo "❌ nodejs-project/dist/main.js not found in app bundle!"
+            echo "   The Node.js build step may have failed to produce dist/main.js."
+            exit 1
+          fi
 
           # 移除签名相关文件，便于 TrollStore 重签名
           rm -rf "$APP_PATH/_CodeSignature"
