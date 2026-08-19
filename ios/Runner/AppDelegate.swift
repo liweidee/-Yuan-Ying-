@@ -2,135 +2,179 @@ import Flutter
 import UIKit
 
 @main
-@objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
-  // ===== 存储 MethodChannel 引用 =====
-  private var nodeJSChannel: FlutterMethodChannel?
-  private var nodeJSEventChannel: FlutterEventChannel?
-  private var eventSink: FlutterEventSink?
+@objc class AppDelegate: FlutterAppDelegate {
+    private var nodeJSChannel: FlutterMethodChannel?
+    private var eventChannel: FlutterEventChannel?
+    fileprivate var eventSink: FlutterEventSink?
+    fileprivate var managementPort: Int = 0
+    fileprivate var spiderPort: Int = 0
+    fileprivate var isNodeReady: Bool = false
 
-  override func application(
-    _ application: UIApplication,
-    didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
-  ) -> Bool {
-    application.applicationSupportsShakeToEdit = false
-    return super.application(application, didFinishLaunchingWithOptions: launchOptions)
-  }
+    override func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
+    ) -> Bool {
+        let flutterViewController = FlutterViewController()
+        window = UIWindow(frame: UIScreen.main.bounds)
+        window?.rootViewController = flutterViewController
+        window?.makeKeyAndVisible()
 
-  // ===== Flutter 3.41+ UIScene 迁移后的正确入口 =====
-  func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
-    GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
-    
-    // ===== 用 applicationRegistrar.messenger() 替代旧的 controller.binaryMessenger =====
-    let binaryMessenger = engineBridge.applicationRegistrar.messenger()
-    
-    // ===== 注册 Node.js MethodChannel =====
-    let nodeJSChannel = FlutterMethodChannel(
-      name: "com.tvbox/nodejs",
-      binaryMessenger: binaryMessenger
-    )
-    self.nodeJSChannel = nodeJSChannel
-    
-    // ===== 注册 EventChannel =====
-    let eventChannel = FlutterEventChannel(
-      name: "com.tvbox/nodejs/events",
-      binaryMessenger: binaryMessenger
-    )
-    self.nodeJSEventChannel = eventChannel
-    eventChannel.setStreamHandler(self)
-    
-    // ===== 设置 MethodChannel 处理器 =====
-    nodeJSChannel.setMethodCallHandler { [weak self] call, result in
-      self?.handleMethodCall(call, result: result)
+        GeneratedPluginRegistrant.register(with: self)
+
+        setupNodeJSChannel(with: flutterViewController)
+        setupEventChannel(with: flutterViewController)
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleNodePortNotification(_:)),
+            name: NSNotification.Name("NodeServerPortReceived"),
+            object: nil
+        )
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleNodeReady(_:)),
+            name: NSNotification.Name("NodeReady"),
+            object: nil
+        )
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleNodeMessage(_:)),
+            name: NSNotification.Name("NodeMessageReceived"),
+            object: nil
+        )
+
+        return super.application(application, didFinishLaunchingWithOptions: launchOptions)
     }
-    
-    // ===== 监听 Node.js 端口通知 =====
-    NotificationCenter.default.addObserver(
-      self,
-      selector: #selector(onNodePortReceived(_:)),
-      name: NSNotification.Name("NodeServerPortReceived"),
-      object: nil
-    )
-    NotificationCenter.default.addObserver(
-      self,
-      selector: #selector(onNodeReady(_:)),
-      name: NSNotification.Name("NodeReady"),
-      object: nil
-    )
-  }
-  
-  // ===== 处理 MethodChannel 调用 =====
-  private func handleMethodCall(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
-    switch call.method {
-    case "startNodeJS":
-      NodeJSManager.shared().startNodeJS { success in
-        result(success)
-      }
-      
-    case "loadSourceFromURL":
-      guard let args = call.arguments as? [String: Any],
-            let url = args["url"] as? String else {
-        result(FlutterError(code: "INVALID_ARGS", message: "Missing url", details: nil))
-        return
-      }
-      // ===== 修复 2：OC 方法 loadSourceFromURL: 映射为 Swift 的 fromURL: =====
-      NodeJSManager.shared().loadSource(fromURL: url) { success, message in
-        if success {
-          result(["success": true])
-        } else {
-          result(["success": false, "message": message ?? "Unknown error"])
+
+    private func setupNodeJSChannel(with controller: FlutterViewController?) {
+        guard let controller = controller else { return }
+
+        nodeJSChannel = FlutterMethodChannel(
+            name: "com.tvbox/nodejs",
+            binaryMessenger: controller.binaryMessenger
+        )
+
+        nodeJSChannel?.setMethodCallHandler { [weak self] (call, result) in
+            guard let self = self else { return }
+            switch call.method {
+            case "startNodeJS":
+                NodeJSManager.shared().startNodeJS { success in
+                    result(success)
+                }
+
+            case "getNativeServerPort":
+                result(NodeJSManager.shared().getNativeServerPort())
+
+            case "getManagementPort":
+                result(NodeJSManager.shared().getManagementPort())
+
+            case "getSpiderPort":
+                result(NodeJSManager.shared().getSpiderPort())
+
+            case "isNodeReady":
+                result(NodeJSManager.shared().isNodeReady)
+
+            case "stopNodeJS":
+                NodeJSManager.shared().stopNodeJS()
+                result(nil)
+
+            case "loadSourceFromURL":
+                guard let args = call.arguments as? [String: Any],
+                      let url = args["url"] as? String else {
+                    result(FlutterError(code: "INVALID_ARGS", message: "url is required", details: nil))
+                    return
+                }
+                NodeJSManager.shared().loadSource(fromURL: url) { success, message in
+                    if success {
+                        result(["success": true, "message": message ?? ""])
+                    } else {
+                        result(FlutterError(code: "LOAD_FAILED", message: message ?? "Unknown error", details: nil))
+                    }
+                }
+
+            case "deleteSource":
+                NodeJSManager.shared().deleteSource(completion: { success in
+                    result(success)
+                })
+
+            case "getSourcePath":
+                result(NodeJSManager.shared().getDocumentsSourcePath())
+
+            default:
+                result(FlutterMethodNotImplemented)
+            }
         }
-      }
-      
-    case "deleteSource":
-      NodeJSManager.shared().deleteSource { success in
-        result(success)
-      }
-      
-    case "getSourcePath":
-      let path = NodeJSManager.shared().getDocumentsSourcePath()
-      result(path)
-      
-    case "stopNodeJS":
-      NodeJSManager.shared().stopNodeJS()
-      result(nil)
-      
-    default:
-      result(FlutterMethodNotImplemented)
     }
-  }
-  
-  // ===== 接收端口通知 =====
-  @objc private func onNodePortReceived(_ notification: Notification) {
-    guard let userInfo = notification.userInfo,
-          let port = userInfo["port"] as? Int,
-          let type = userInfo["type"] as? String else { return }
-    
-    let data: [String: Any] = [
-      "port": port,
-      "type": type
-    ]
-    eventSink?(data)
-  }
-  
-  // ===== 接收就绪通知 =====
-  @objc private func onNodeReady(_ notification: Notification) {
-    eventSink?(["event": "ready"])
-  }
-  
-  deinit {
-    NotificationCenter.default.removeObserver(self)
-  }
+
+    private func setupEventChannel(with controller: FlutterViewController?) {
+        guard let controller = controller else { return }
+
+        eventChannel = FlutterEventChannel(
+            name: "com.tvbox/nodejs/events",
+            binaryMessenger: controller.binaryMessenger
+        )
+
+        eventChannel?.setStreamHandler(NodeEventStreamHandler.shared)
+        NodeEventStreamHandler.shared.setAppDelegate(self)
+    }
+
+    @objc private func handleNodePortNotification(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let port = userInfo["port"] as? Int,
+              let type = userInfo["type"] as? String else { return }
+
+        if type == "management" {
+            managementPort = port
+        } else if type == "spider" {
+            spiderPort = port
+        }
+
+        let eventData: [String: Any] = ["port": port, "type": type]
+        if let jsonData = try? JSONSerialization.data(withJSONObject: eventData),
+           let jsonString = String(data: jsonData, encoding: .utf8) {
+            eventSink?(jsonString)
+        }
+    }
+
+    @objc private func handleNodeReady(_ notification: Notification) {
+        isNodeReady = true
+
+        let eventData: [String: Any] = ["event": "ready"]
+        if let jsonData = try? JSONSerialization.data(withJSONObject: eventData),
+           let jsonString = String(data: jsonData, encoding: .utf8) {
+            eventSink?(jsonString)
+        }
+    }
+
+    @objc private func handleNodeMessage(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let message = userInfo["message"] as? String else { return }
+
+        let eventData: [String: Any] = ["event": "message", "message": message]
+        if let jsonData = try? JSONSerialization.data(withJSONObject: eventData),
+           let jsonString = String(data: jsonData, encoding: .utf8) {
+            eventSink?(jsonString)
+        }
+    }
 }
 
-// ===== EventChannel StreamHandler 实现 =====
-extension AppDelegate: FlutterStreamHandler {
-  func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
-    self.eventSink = events
-    return nil
-  }
-  
-  func onCancel(withArguments arguments: Any?) -> FlutterError? {
-    self.eventSink = nil
-    return nil
-  }
+class NodeEventStreamHandler: NSObject, FlutterStreamHandler {
+    static let shared = NodeEventStreamHandler()
+    private weak var appDelegate: AppDelegate?
+
+    func setAppDelegate(_ delegate: AppDelegate) {
+        self.appDelegate = delegate
+    }
+
+    func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
+        appDelegate?.eventSink = events
+        return nil
+    }
+
+    func onCancel(withArguments arguments: Any?) -> FlutterError? {
+        appDelegate?.eventSink = nil
+        return nil
+    }
 }
