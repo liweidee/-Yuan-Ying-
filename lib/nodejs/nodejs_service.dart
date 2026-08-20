@@ -227,29 +227,26 @@ class NodeJSService extends GetxService {
     }
   }
 
-  Future<Map<String, dynamic>> getCatConfig() async {
+  Future<Map<String, dynamic>> getCatConfig({int retries = 3}) async {
     if (_spiderPort <= 0) return {};
-    try {
-      final url = '${_spiderBaseUrl()}/config';
-      print('getCatConfig GET $url');
-      final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 10));
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body) as Map<String, dynamic>;
-        final videoSites = data['video']?['sites'] as List<dynamic>? ?? [];
-        if (videoSites.isNotEmpty) {
-          final firstSite = videoSites.first as Map<String, dynamic>;
-          final api = firstSite['api'] as String? ?? '';
-          // 恢复自动设置
-          if (api.isNotEmpty) {
-            _spiderApiBase = api;
-            print('getCatConfig 自动设置 _spiderApiBase = $api');
+    for (int i = 0; i < retries; i++) {
+      try {
+        final url = '${_spiderBaseUrl()}/config';
+        final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 10));
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body) as Map<String, dynamic>;
+          // 解析并设置 _spiderApiBase
+          final videoSites = data['video']?['sites'] as List<dynamic>? ?? [];
+          if (videoSites.isNotEmpty) {
+            final api = videoSites.first['api'] as String? ?? '';
+            if (api.isNotEmpty) _spiderApiBase = api;
           }
-          // 注意：这里不设置 key/type，因为 key/type 由后续 setCurrentSpider 决定
+          return data;
         }
-        return data;
+      } catch (e) {
+        print('getCatConfig attempt ${i+1} failed: $e');
+        if (i < retries - 1) await Future.delayed(Duration(milliseconds: 500 * (i + 1)));
       }
-    } catch (e) {
-      print('getCatConfig error: $e');
     }
     return {};
   }
