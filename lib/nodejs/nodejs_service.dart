@@ -149,8 +149,10 @@ class NodeJSService extends GetxService {
     }
 
     try {
-      // 重置 spiderPort，强制等待新端口
+      // 强制重置端口，抛弃旧值
       _spiderPort = 0;
+      _spiderPortCompleter = Completer<void>();
+      print('loadSourceFromURL: 重置 spiderPort，等待新端口');
 
       print('loadSourceFromURL: $url');
       final result = await _channel.invokeMethod('loadSourceFromURL', {'url': url});

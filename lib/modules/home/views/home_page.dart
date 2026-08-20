@@ -28,6 +28,7 @@ import 'package:yuanying/common/widgets/custom_height_widget.dart';
 import 'package:yuanying/models/common/bar_hide_type.dart';
 import 'package:yuanying/modules/common/base/common_page.dart';
 import 'package:yuanying/nodejs/nodejs_service.dart';
+import 'package:http/http.dart' as http;
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -984,33 +985,24 @@ class _HomePageState extends CommonPageState<HomePage>
   // 生命周期回调（猫影视）
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // 注意：不要调用 super.didChangeAppLifecycleState，因为父类没有该方法
     if (state == AppLifecycleState.resumed) {
-      print('[HomePage] App resumed, reactivating catvod services');
-      _reactivateCatvodService();
+      _ensureCatvodServiceAlive();
     }
   }
 
-  // 恢复方法（猫影视）
-  Future<void> _reactivateCatvodService() async {
+  // 检测猫影视服务是否存活，如果挂了则静默重启
+  Future<void> _ensureCatvodServiceAlive() async {
     final site = sourceManager.currentSite.value;
     if (site == null) return;
-    // 只处理猫影视源
-    if (!SourceManager.isNodeJSSite(site)) {
-      print('[HomePage] Current site is not catvod, skip');
-      return;
-    }
+    if (!SourceManager.isNodeJSSite(site)) return;
 
-    // 使用 NodeJSService.instance
     final nodejs = NodeJSService.instance;
     if (nodejs.spiderPort == 0) {
-      print('[HomePage] spiderPort is 0, reloading config');
+      print('[HomePage] 猫影视服务已停止，静默重启...');
       await sourceManager.loadConfig();
-    } else {
-      print('[HomePage] spiderPort exists, re-initializing spider');
-      await nodejs.initSpider();
-      await sourceManager.loadConfig();
+      print('[HomePage] 猫影视服务恢复完成');
     }
+    // 注意：端口 > 0 时不做任何操作，避免干扰用户
   }
 }
 

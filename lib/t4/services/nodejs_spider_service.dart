@@ -35,7 +35,7 @@ class NodeJSSpiderService implements ISpiderService {
       _currentExtMap = null;
     }
 
-    // 从 siteKey 中提取 spider key 和 type
+    // 确保 setCurrentSpider 总是被调用
     String spiderKey;
     int spiderType = 3;
 
@@ -47,12 +47,25 @@ class NodeJSSpiderService implements ISpiderService {
         if (parsedType != null) spiderType = parsedType;
       }
     } else {
-      spiderKey = siteKey; // 纯字母直接使用
+      // 纯字母直接使用
+      spiderKey = siteKey;
     }
     if (spiderKey.isEmpty) spiderKey = 'default';
 
-    // 直接使用 apiUrl 作为 apiBase（猫影视站点 api 字段就是路径前缀）
-    _nodejs.setCurrentSpider(spiderKey, spiderType, apiBase: apiUrl);
+    // 提取 apiUrl 的路径部分作为 apiBase（避免传入完整 URL）
+    String apiBase = '';
+    if (apiUrl.isNotEmpty) {
+      try {
+        final uri = Uri.parse(apiUrl);
+        if (uri.path.isNotEmpty) apiBase = uri.path;
+      } catch (_) {
+        // 可能是相对路径，直接使用
+        apiBase = apiUrl.startsWith('/') ? apiUrl : '/$apiUrl';
+      }
+    }
+
+    // 必须调用
+    _nodejs.setCurrentSpider(spiderKey, spiderType, apiBase: apiBase);
   }
 
   /// 初始化 Node.js 蜘蛛（调用 /init 接口）
