@@ -1,9 +1,3 @@
-// ============================================================
-// 文件：nodejs_service.dart
-// 说明：在【原始附件 nodejs_service.dart.txt】基础上，仅修改 3 个方法。
-//       所有修改用 "// [PATCH]" 标注。其余代码保持原样。
-// ============================================================
-
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/services.dart';
@@ -41,13 +35,7 @@ class NodeJSService extends GetxService {
   bool get hasSpiderServer => _spiderPort > 0;
 
   String _spiderBaseUrl() => 'http://127.0.0.1:$_spiderPort';
-
-  // [PATCH-B] 修改 _spiderPath：nodejs_ 开头强制走 key/type 路由，不拼远端 URL
-  // 原第 38-41 行整体替换为：
   String _spiderPath() {
-    if (_currentSpiderKey.startsWith('nodejs_')) {
-      return '/$_currentSpiderKey/$_currentSpiderType';
-    }
     if (_spiderApiBase.isNotEmpty) return _spiderApiBase;
     return '/$_currentSpiderKey/$_currentSpiderType';
   }
@@ -99,12 +87,16 @@ class NodeJSService extends GetxService {
 
   Future<void> initialize() async {
     if (_isInitialized) return;
+
     _setupEventListener();
+
     try {
       _readyCompleter = Completer<void>();
       _managementPortCompleter = Completer<void>();
+
       final result = await _channel.invokeMethod('startNodeJS');
       _isInitialized = result == true;
+
       if (_isInitialized) {
         final readyTimeout = Timer(const Duration(seconds: 15), () {
           if (_readyCompleter != null && !_readyCompleter!.isCompleted) {
@@ -112,14 +104,17 @@ class NodeJSService extends GetxService {
             _readyCompleter!.complete();
           }
         });
+
         await _readyCompleter!.future;
         readyTimeout.cancel();
+
         final mgmtTimeout = Timer(const Duration(seconds: 15), () {
           if (_managementPortCompleter != null && !_managementPortCompleter!.isCompleted) {
             print('Warning: Management port timeout, proceeding anyway');
             _managementPortCompleter!.complete();
           }
         });
+
         await _managementPortCompleter!.future;
         mgmtTimeout.cancel();
       }
@@ -130,9 +125,12 @@ class NodeJSService extends GetxService {
   }
 
   Future<bool> loadSourceFromURL(String url) async {
+    // 确保已初始化
     if (!_isInitialized) {
       await initialize();
     }
+
+    // 如果 managementPort 为 0，主动等待
     if (_managementPort == 0) {
       print('managementPort is 0, waiting...');
       _managementPortCompleter ??= Completer<void>();
@@ -149,6 +147,7 @@ class NodeJSService extends GetxService {
         return false;
       }
     }
+
     try {
       print('loadSourceFromURL: $url');
       final result = await _channel.invokeMethod('loadSourceFromURL', {'url': url});
@@ -169,6 +168,7 @@ class NodeJSService extends GetxService {
 
   Future<void> waitForSpiderPort({Duration timeout = const Duration(seconds: 30)}) async {
     if (_spiderPort > 0) return;
+
     _spiderPortCompleter = Completer<void>();
     final timer = Timer(timeout, () {
       if (_spiderPortCompleter != null && !_spiderPortCompleter!.isCompleted) {
@@ -176,6 +176,7 @@ class NodeJSService extends GetxService {
         _spiderPortCompleter!.complete();
       }
     });
+
     await _spiderPortCompleter!.future;
     timer.cancel();
   }
@@ -226,8 +227,6 @@ class NodeJSService extends GetxService {
     }
   }
 
-  // [PATCH-C] 修改 getCatConfig：去掉"用站点 api 字段污染 _spiderApiBase"的逻辑
-  // 原第 230-252 行整体替换为：
   Future<Map<String, dynamic>> getCatConfig() async {
     if (_spiderPort <= 0) return {};
     try {
@@ -238,10 +237,11 @@ class NodeJSService extends GetxService {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
         final videoSites = data['video']?['sites'] as List<dynamic>? ?? [];
         if (videoSites.isNotEmpty) {
-          // 仅日志，不再把远端 api 赋给 _spiderApiBase（避免拼出非法 URL）
           final firstSite = videoSites.first as Map<String, dynamic>;
           final api = firstSite['api'] as String? ?? '';
-          print('[getCatConfig] nodejs 路由生效，忽略站点 api 字段: $api');
+          // if (api.isNotEmpty) {
+          //   _spiderApiBase = api;
+          // }
         }
         return data;
       }
@@ -311,40 +311,23 @@ class NodeJSService extends GetxService {
     return {};
   }
 
-  // [PATCH-D] 修改 getVideoDetail：请求失败时静默重启 Node 并重试一次
-  // 原第 314-333 行整体替换为：
   Future<Map<String, dynamic>> getVideoDetail({required String videoId}) async {
-    for (int i = 0; i < 2; i++) {
-      try {
-        if (_spiderPort <= 0 || (_spiderApiBase.isEmpty && _currentSpiderKey.isEmpty)) {
-          return {};
-        }
-        final url = '${_spiderBaseUrl()}${_spiderPath()}/detail';
-        print('getVideoDetail POST $url (attempt ${i + 1})');
-        final response = await http.post(
-          Uri.parse(url),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({'id': videoId}),
-        ).timeout(const Duration(seconds: 15));
-        if (response.statusCode == 200) {
-          return jsonDecode(response.body) as Map<String, dynamic>;
-        }
-        // 非 200：首次失败时重启再试一次
-        if (i == 0) {
-          print('[getVideoDetail] 非200，静默重启后重试');
-          await stop();
-          await initialize();
-          await waitForSpiderPort();
-        }
-      } catch (e) {
-        print('getVideoDetail error (attempt ${i + 1}): $e');
-        if (i == 0) {
-          print('[getVideoDetail] 异常，静默重启后重试');
-          await stop();
-          await initialize();
-          await waitForSpiderPort();
-        }
+    if (_spiderPort <= 0 || (_spiderApiBase.isEmpty && _currentSpiderKey.isEmpty)) {
+      return {};
+    }
+    try {
+      final url = '${_spiderBaseUrl()}${_spiderPath()}/detail';
+      print('getVideoDetail POST $url');
+      final response = await http.post(
+        Uri.parse(url),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'id': videoId}),
+      ).timeout(const Duration(seconds: 15));
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body) as Map<String, dynamic>;
       }
+    } catch (e) {
+      print('getVideoDetail error: $e');
     }
     return {};
   }

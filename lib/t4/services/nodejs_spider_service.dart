@@ -1,11 +1,4 @@
-// ============================================================
-// 文件：nodejs_spider_service.dart
-// 说明：在【原始附件 nodejs_spider_service.dart.txt】基础上，仅修改 switchSite 一处。
-//       新增 import 'package:flutter/services.dart' 用于 MethodChannel。
-// ============================================================
-
 import 'dart:convert';
-import 'package:flutter/services.dart'; // [PATCH-E] 新增：用于通知原生标记 nodejs 源
 import 'package:get/get.dart';
 import 'package:yuanying/t4/models/play_url.dart';
 import 'package:yuanying/t4/models/video_detail.dart';
@@ -47,19 +40,8 @@ class NodeJSSpiderService implements ISpiderService {
     if (parts.length >= 2) {
       final key = parts[1];
       final type = parts.length > 2 ? int.tryParse(parts[2]) ?? 3 : 3;
-
-      // [PATCH-E] nodejs_ 源：apiBase 传空，强制走 key/type 路由；同时标记原生需保活
-      final isNode = siteKey.startsWith('nodejs_');
-      _nodejs.setCurrentSpider(key, type, apiBase: isNode ? '' : apiUrl);
-
-      // 通知原生：当前是否为 nodejs_ 源（供 AppDelegate 前台探活判断）
-      // 通道名与 AppDelegate 中 setupNodeJSChannel 的 "com.tvbox/nodejs" 一致
-      // 注：原生侧暂未实现此 case，仅写 UserDefaults 标记，无副作用（readValue 不会报错）。
-      //     若希望严格不新增原生分支，可删除下面 4 行——不影响核心路由修复。
-      try {
-        const MethodChannel('com.tvbox/nodejs')
-            .invokeMethod('markNodejsConfig', {'isNode': isNode});
-      } catch (_) {}
+      // 将 apiUrl 作为 apiBase 传入
+      _nodejs.setCurrentSpider(key, type, apiBase: '');
     }
   }
 
