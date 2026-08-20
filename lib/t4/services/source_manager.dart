@@ -391,7 +391,6 @@ class SourceManager extends GetxController {
       final result = await nodejs.getCatConfig();
 
       // 5. 解析 sites
-      final result = await nodejs.getCatConfig();
       final videoSites = result['video']?['sites'] as List<dynamic>? ?? [];
       if (videoSites.isNotEmpty) {
         // 立即预设第一个站点的 api，确保 _spiderApiBase 有值
