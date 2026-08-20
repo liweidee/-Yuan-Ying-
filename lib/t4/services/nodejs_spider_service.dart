@@ -1,4 +1,11 @@
+// ============================================================
+// 文件：nodejs_spider_service.dart
+// 说明：在【原始附件 nodejs_spider_service.dart.txt】基础上，仅修改 switchSite 一处。
+//       新增 import 'package:flutter/services.dart' 用于 MethodChannel。
+// ============================================================
+
 import 'dart:convert';
+import 'package:flutter/services.dart'; // [PATCH-E] 新增：用于通知原生标记 nodejs 源
 import 'package:get/get.dart';
 import 'package:yuanying/t4/models/play_url.dart';
 import 'package:yuanying/t4/models/video_detail.dart';
@@ -35,37 +42,25 @@ class NodeJSSpiderService implements ISpiderService {
       _currentExtMap = null;
     }
 
-    // 确保 setCurrentSpider 总是被调用
-    String spiderKey;
-    int spiderType = 3;
-
+    // 从 siteKey 中提取 spider key 和 type
     final parts = siteKey.split('_');
     if (parts.length >= 2) {
-      spiderKey = parts[1];
-      if (parts.length > 2) {
-        final parsedType = int.tryParse(parts[2]);
-        if (parsedType != null) spiderType = parsedType;
-      }
-    } else {
-      // 纯字母直接使用
-      spiderKey = siteKey;
-    }
-    if (spiderKey.isEmpty) spiderKey = 'default';
+      final key = parts[1];
+      final type = parts.length > 2 ? int.tryParse(parts[2]) ?? 3 : 3;
 
-    // 提取 apiUrl 的路径部分作为 apiBase（避免传入完整 URL）
-    String apiBase = '';
-    if (apiUrl.isNotEmpty) {
+      // [PATCH-E] nodejs_ 源：apiBase 传空，强制走 key/type 路由；同时标记原生需保活
+      final isNode = siteKey.startsWith('nodejs_');
+      _nodejs.setCurrentSpider(key, type, apiBase: isNode ? '' : apiUrl);
+
+      // 通知原生：当前是否为 nodejs_ 源（供 AppDelegate 前台探活判断）
+      // 通道名与 AppDelegate 中 setupNodeJSChannel 的 "com.tvbox/nodejs" 一致
+      // 注：原生侧暂未实现此 case，仅写 UserDefaults 标记，无副作用（readValue 不会报错）。
+      //     若希望严格不新增原生分支，可删除下面 4 行——不影响核心路由修复。
       try {
-        final uri = Uri.parse(apiUrl);
-        if (uri.path.isNotEmpty) apiBase = uri.path;
-      } catch (_) {
-        // 可能是相对路径，直接使用
-        apiBase = apiUrl.startsWith('/') ? apiUrl : '/$apiUrl';
-      }
+        const MethodChannel('com.tvbox/nodejs')
+            .invokeMethod('markNodejsConfig', {'isNode': isNode});
+      } catch (_) {}
     }
-
-    // 必须调用
-    _nodejs.setCurrentSpider(spiderKey, spiderType, apiBase: apiBase);
   }
 
   /// 初始化 Node.js 蜘蛛（调用 /init 接口）

@@ -27,8 +27,6 @@ import 'package:yuanying/modules/setting/views/site_config_page.dart';
 import 'package:yuanying/common/widgets/custom_height_widget.dart';
 import 'package:yuanying/models/common/bar_hide_type.dart';
 import 'package:yuanying/modules/common/base/common_page.dart';
-import 'package:yuanying/nodejs/nodejs_service.dart';
-import 'package:http/http.dart' as http;
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -38,7 +36,7 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends CommonPageState<HomePage>
-    with AutomaticKeepAliveClientMixin, WidgetsBindingObserver {
+    with AutomaticKeepAliveClientMixin {
   late final HomeController controller;
   late final SourceManager sourceManager;
   late final ActionRenderer actionRenderer;
@@ -52,8 +50,6 @@ class _HomePageState extends CommonPageState<HomePage>
   @override
   void initState() {
     super.initState();
-    // 生命周期监听
-    WidgetsBinding.instance.addObserver(this);
     controller = Get.put(HomeController());
     sourceManager = Get.find<SourceManager>();
     actionRenderer = Get.find<ActionRenderer>();
@@ -977,32 +973,7 @@ class _HomePageState extends CommonPageState<HomePage>
 
   @override
   void dispose() {
-    // 移除监听
-    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
-  }
-
-  // 生命周期回调（猫影视）
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      _ensureCatvodServiceAlive();
-    }
-  }
-
-  // 检测猫影视服务是否存活，如果挂了则静默重启
-  Future<void> _ensureCatvodServiceAlive() async {
-    final site = sourceManager.currentSite.value;
-    if (site == null) return;
-    if (!SourceManager.isNodeJSSite(site)) return;
-
-    final nodejs = NodeJSService.instance;
-    if (nodejs.spiderPort == 0) {
-      print('[HomePage] 猫影视服务已停止，静默重启...');
-      await sourceManager.loadConfig();
-      print('[HomePage] 猫影视服务恢复完成');
-    }
-    // 注意：端口 > 0 时不做任何操作，避免干扰用户
   }
 }
 

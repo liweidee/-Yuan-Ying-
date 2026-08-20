@@ -816,33 +816,13 @@ class SourceManager extends GetxController {
   }
 
   Future<void> _switchToNodeJSSite(Map<String, dynamic> site) async {
-    final nodejs = NodeJSService.instance;
-    
-    // 如果服务端口为 0，先静默恢复
-    if (nodejs.spiderPort == 0) {
-      print('[SourceManager] NodeJS 端口为0，先恢复服务');
-      await loadConfig();  // 这会重载配置并恢复端口
-      // 恢复后，当前站点可能是之前的站点，需要再次切换到目标站点
-      // 但 loadConfig 内部会调用 _selectDefaultSite，可能改变了 currentSite
-      // 所以这里强制切换
-      final service = _getNodeJSService();
-      service.switchSite(site['api']?.toString() ?? '', site['key']?.toString() ?? '', ext: site['ext']);
-      await service.initSpider();
-      currentSite.value = site;
-      _saveCurrentSiteKey();
-      _notifyHomeController();
-      return;
-    }
-
-    // 端口正常，直接切换
     final service = _getNodeJSService();
-    service.switchSite(site['api']?.toString() ?? '', site['key']?.toString() ?? '', ext: site['ext']);
+    service.switchSite(
+      site['api']?.toString() ?? '',
+      site['key']?.toString() ?? '',
+      ext: site['ext'],
+    );
     await service.initSpider();
-    // 注意：switchSite 本身会调用 setCurrentSpider，但不会改变 SourceManager 的 currentSite
-    // 所以需要手动更新
-    currentSite.value = site;
-    _saveCurrentSiteKey();
-    _notifyHomeController();
   }
 
   void _switchToT4Site(Map<String, dynamic> site) {

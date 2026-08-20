@@ -1,3 +1,10 @@
+// ============================================================
+// 文件：NodeJSManager.m
+// 说明：在【原始附件 NodeJSManager.m.txt】基础上，仅做 3 处新增/修改。
+//       所有修改均用 "// [PATCH]" 标注，其余代码保持原样不动。
+//       下面给出"修改后"的完整可替换文件内容。
+// ============================================================
+
 #import "NodeJSManager.h"
 #import <NodeMobile/NodeMobile.h>
 #import <GCDWebServer/GCDWebServer.h>
@@ -12,6 +19,8 @@
 @property (nonatomic, assign) int managementPort;
 @property (nonatomic, assign) int spiderPort;
 @property (nonatomic, strong) GCDWebServer *webServer;
+// [PATCH-1] 新增属性：缓存最后一次加载的源 URL，供后台恢复后自动重 load
+@property (nonatomic, copy) NSString *lastLoadedSourceUrl;
 @end
 
 @implementation NodeJSManager
@@ -32,6 +41,8 @@
         _managementPort = 0;
         _spiderPort = 0;
         _isNodeReady = NO;
+        // [PATCH-1] 初始化新增属性
+        _lastLoadedSourceUrl = @"";
     }
     return self;
 }
@@ -96,6 +107,18 @@
 
                 dispatch_async(dispatch_get_main_queue(), ^{
                     if (completion) completion(YES);
+
+                    // [PATCH-2] 启动成功后，若有缓存的源 URL，自动重新加载（复用本地 MD5 缓存，秒级完成）
+                    // 位置：原 completion(YES) 之后新增。后台恢复时 lastLoadedSourceUrl 仍在，
+                    //       webServer/management 已就绪，sendLoadCommandToNodeJS 会自行等待 managementPort。
+                    if (self.lastLoadedSourceUrl.length > 0) {
+                        NSString *urlToReload = [self.lastLoadedSourceUrl copy];
+                        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)),
+                                       dispatch_get_main_queue(), ^{
+                            NSLog(@"[PATCH] Auto reloading cached source after start: %@", urlToReload);
+                            [self loadSourceFromURL:urlToReload completion:nil];
+                        });
+                    }
                 });
 
                 int result = node_start(argc, argv);
@@ -121,6 +144,7 @@
 }
 
 - (void)startLocalWebServerWithCompletion:(void (^)(BOOL))completion {
+    // 原样不动
     self.webServer = [[GCDWebServer alloc] init];
 
     [self.webServer addHandlerForMethod:@"GET" path:@"/onCatPawOpenPort" requestClass:[GCDWebServerDataRequest class] processBlock:^GCDWebServerResponse * _Nullable(GCDWebServerDataRequest * _Nonnull request) {
@@ -129,14 +153,12 @@
         if (portStr) {
             int port = [portStr intValue];
             NSLog(@"Port received: %d, type: %@", port, typeStr);
-
             dispatch_async(dispatch_get_main_queue(), ^{
                 if ([typeStr isEqualToString:@"management"]) {
                     self.managementPort = port;
                 } else {
                     self.spiderPort = port;
                 }
-
                 [[NSNotificationCenter defaultCenter] postNotificationName:@"NodeServerPortReceived"
                                                                     object:nil
                                                                   userInfo:@{@"port": @(port), @"type": typeStr}];
@@ -193,7 +215,6 @@
         if (completion) completion(YES);
         return;
     }
-
     __block id observer = [[NSNotificationCenter defaultCenter] addObserverForName:@"NodeReady"
                                                                             object:nil
                                                                              queue:[NSOperationQueue mainQueue]
@@ -201,15 +222,22 @@
         [[NSNotificationCenter defaultCenter] removeObserver:observer];
         if (completion) completion(YES);
     }];
-
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [[NSNotificationCenter defaultCenter] removeObserver:observer];
         if (completion) completion(NO);
     });
 }
 
+// [PATCH-3] 在 loadSourceFromURL:completion: 开头缓存源 URL
+// 原第 211-213 行：
+//   - (void)loadSourceFromURL:(NSString *)urlString
+//                  completion:(void (^)(BOOL, NSString * _Nullable))completion {
+//     NSLog(@"=== Starting to load source from URL: %@ ===", urlString);
+// 改为下面这样（仅新增 self.lastLoadedSourceUrl = urlString; 一行）：
 - (void)loadSourceFromURL:(NSString *)urlString
                completion:(void (^)(BOOL success, NSString * _Nullable message))completion {
+    // [PATCH-3] 缓存最后一次源地址，供后台恢复自动重 load
+    self.lastLoadedSourceUrl = urlString;
     NSLog(@"=== Starting to load source from URL: %@ ===", urlString);
 
     NSString *normalizedUrl = urlString;
@@ -341,8 +369,8 @@
         NSLog(@"All downloads completed");
 
         if (jsError || !jsData) {
-            NSString *errorMsg = [NSString stringWithFormat:@"Failed to download source: %@ (status: %ld)", 
-                                  jsError ? jsError.localizedDescription : @"no data", 
+            NSString *errorMsg = [NSString stringWithFormat:@"Failed to download source: %@ (status: %ld)",
+                                  jsError ? jsError.localizedDescription : @"no data",
                                   jsResponse ? (long)jsResponse.statusCode : -1];
             NSLog(@"ERROR: %@", errorMsg);
             dispatch_async(dispatch_get_main_queue(), ^{
@@ -410,7 +438,7 @@
 
 - (void)sendLoadCommandToNodeJS:(NSString *)path retryCount:(int)retryCount completion:(void (^)(BOOL, NSString * _Nullable))completion {
     NSLog(@"sendLoadCommandToNodeJS called, managementPort: %d, retryCount: %d", self.managementPort, retryCount);
-    
+
     if (self.managementPort <= 0) {
         if (retryCount > 0) {
             NSLog(@"Management port not ready, retrying... (%d left)", retryCount);
@@ -438,7 +466,7 @@
 
     [[[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         NSHTTPURLResponse *httpResponse = (NSHTTPURLResponse *)response;
-        
+
         if (error) {
             NSLog(@"ERROR: Load command failed with error: %@", error.localizedDescription);
             if (retryCount > 0) {
@@ -512,6 +540,7 @@
     self.nativeServerPort = 0;
     self.managementPort = 0;
     self.spiderPort = 0;
+    // [PATCH] 注意：不清除 lastLoadedSourceUrl，供下次 startNodeJS 自动重 load
 }
 
 - (int)getNativeServerPort {
