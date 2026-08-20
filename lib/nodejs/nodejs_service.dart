@@ -239,9 +239,12 @@ class NodeJSService extends GetxService {
         if (videoSites.isNotEmpty) {
           final firstSite = videoSites.first as Map<String, dynamic>;
           final api = firstSite['api'] as String? ?? '';
-          // if (api.isNotEmpty) {
-          //   _spiderApiBase = api;
-          // }
+          // 恢复自动设置
+          if (api.isNotEmpty) {
+            _spiderApiBase = api;
+            print('getCatConfig 自动设置 _spiderApiBase = $api');
+          }
+          // 注意：这里不设置 key/type，因为 key/type 由后续 setCurrentSpider 决定
         }
         return data;
       }

@@ -25,6 +25,7 @@ class NodeJSSpiderService implements ISpiderService {
     _baseUrl = apiUrl;
     _currentKey = siteKey;
 
+    // 解析 ext（如果有）
     if (ext is String && ext.isNotEmpty) {
       try {
         _currentExtMap = jsonDecode(ext) as Map<String, dynamic>;
@@ -36,12 +37,15 @@ class NodeJSSpiderService implements ISpiderService {
     }
 
     // 从 siteKey 中提取 spider key 和 type
+    // siteKey 格式示例: "nodejs_xxx_3" 或 "catvod_xxx"
     final parts = siteKey.split('_');
     if (parts.length >= 2) {
       final key = parts[1];
+      // 如果 parts 长度大于2，尝试解析 type，否则默认为 3
       final type = parts.length > 2 ? int.tryParse(parts[2]) ?? 3 : 3;
+      
       // 将 apiUrl 作为 apiBase 传入
-      _nodejs.setCurrentSpider(key, type, apiBase: '');
+      _nodejs.setCurrentSpider(key, type, apiBase: apiUrl);
     }
   }
 

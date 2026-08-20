@@ -391,8 +391,22 @@ class SourceManager extends GetxController {
       final result = await nodejs.getCatConfig();
 
       // 5. 解析 sites
+      final result = await nodejs.getCatConfig();
       final videoSites = result['video']?['sites'] as List<dynamic>? ?? [];
       if (videoSites.isNotEmpty) {
+        // 立即预设第一个站点的 api，确保 _spiderApiBase 有值
+        final firstSite = videoSites.first as Map<String, dynamic>;
+        final api = firstSite['api'] as String? ?? '';
+        final key = firstSite['key'] as String? ?? '';
+        if (key.isNotEmpty) {
+          // 去除可能的前缀
+          final siteKey = key.replaceFirst('nodejs_', '').replaceFirst('catvod_', '');
+          final type = firstSite['type'] as int? ?? 3;
+          nodejs.setCurrentSpider(siteKey, type, apiBase: api);
+          print('预设站点: key=$siteKey, type=$type, api=$api');
+        }
+
+        // 过滤并存入 remoteSites
         final rawSites = videoSites.map((e) => Map<String, dynamic>.from(e)).toList();
         final filteredSites = _filterSites(rawSites);
         remoteSites.value = filteredSites;
