@@ -201,7 +201,7 @@ class NodeJSManager private constructor(context: Context) {
             // 但可以通过尝试列出其内容来判断。
             // 如果 list 返回非空数组，则视为目录。
             val subEntries = assetManager.list(srcPath)
-            if (subEntries != null && subEntries.isNotEmpty()) {
+            if (subEntries != null) {
                 // 这是一个目录：递归复制
                 copyAssetsToDir(srcPath, destFile)
             } else {

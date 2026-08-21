@@ -2,6 +2,7 @@
 #include <android/log.h>
 #include <string.h>
 #include <stdlib.h>
+#include <unistd.h>   // 用于 chdir 系统调用
 #include "node.h"   // nodejs-mobile 的正确入口头文件
 
 #define LOG_TAG "NodeJS-JNI"
@@ -54,8 +55,11 @@ Java_com_example_yuanying_NodeJSManager_nodeStart(
     }
     argv[argc] = nullptr;
 
-    // 设置 NODE_PATH 环境变量（在 node::Start 之前）
-    setenv("NODE_PATH", "/data/data/com.example.yignshijie/files/nodejs-project/node_modules", 1);
+    // 1. 切换工作目录（让 main.js 中的 ./ 相对路径指向 dist 文件夹）
+    chdir("/data/data/com.example.yuanying/files/nodejs-project/dist/");
+
+    // 2. 设置 NODE_PATH（修正包名拼写错误）
+    setenv("NODE_PATH", "/data/data/com.example.yuanying/files/nodejs-project/node_modules", 1);
 
     // ---- 调用 nodejs-mobile 的正确入口 ----
     LOGI("Calling node::Start...");

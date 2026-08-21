@@ -1415,7 +1415,10 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
       );
     } else {
       final videoHeight = size.width * 9 / 16;
-      final topOffset = videoHeight;
+      // 获取顶部安全区域（刘海/状态栏高度）
+      final double topPadding = MediaQuery.viewPaddingOf(context).top;
+      // 视频实际底部位置 = 视频高度 + 顶部安全区域偏移
+      final double topOffset = videoHeight + topPadding;
 
       showGeneralDialog(
         context: context,
@@ -1708,6 +1711,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     final size = MediaQuery.sizeOf(context);
     final isWide = size.width > 800;
     final videoHeight = size.width * 9 / 16;
+    final double topPadding = MediaQuery.viewPaddingOf(context).top;
 
     if (isWide) {
       // 固定右侧宽度 400px（与内容区一致）
@@ -1774,7 +1778,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
                   ),
                 ),
                 Positioned(
-                  top: videoHeight,
+                  top: videoHeight + topPadding,
                   left: 0,
                   right: 0,
                   bottom: 0,
