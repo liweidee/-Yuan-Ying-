@@ -27,6 +27,7 @@ import 'package:yuanying/modules/setting/views/site_config_page.dart';
 import 'package:yuanying/common/widgets/custom_height_widget.dart';
 import 'package:yuanying/models/common/bar_hide_type.dart';
 import 'package:yuanying/modules/common/base/common_page.dart';
+import 'package:yuanying/common/widgets/scroll_physics.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -731,6 +732,7 @@ class _HomePageState extends CommonPageState<HomePage>
     // -------- TabBarView --------
     Widget tabView = TabBarView(
       controller: controller.tabController!,
+      physics: clampingScrollPhysics,
       children: categories.map((category) {
         if (category.typeId == 'recommend') {
           return RecommendPage(
@@ -1147,36 +1149,33 @@ class _SourceSwitchDialogContentState extends State<_SourceSwitchDialogContent> 
         // ---------- 筛选标签 ----------
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            physics: const BouncingScrollPhysics(),
-            child: Row(
-              children: [
-                _buildTagChip(
-                  label: '全部',
-                  isSelected: _selectedTag == '全部',
-                  onTap: () {
-                    setState(() {
-                      _selectedTag = '全部';
-                    });
-                  },
-                ),
-                const SizedBox(width: 8),
-                ...widget.tagList.map((tag) {
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: _buildTagChip(
-                      label: tag,
-                      isSelected: _selectedTag == tag,
-                      onTap: () {
-                        setState(() {
-                          _selectedTag = tag;
-                        });
-                      },
-                    ),
-                  );
-                }),
-              ],
+          child: Container(
+            width: double.infinity,                    // 强制容器宽度填满父级
+            alignment: Alignment.centerLeft,            // 让内部子组件左对齐
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.start,  // 显式左对齐
+                children: [
+                  _buildTagChip(
+                    label: '全部',
+                    isSelected: _selectedTag == '全部',
+                    onTap: () => setState(() => _selectedTag = '全部'),
+                  ),
+                  const SizedBox(width: 8),
+                  ...widget.tagList.map((tag) {
+                    return Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: _buildTagChip(
+                        label: tag,
+                        isSelected: _selectedTag == tag,
+                        onTap: () => setState(() => _selectedTag = tag),
+                      ),
+                    );
+                  }),
+                ],
+              ),
             ),
           ),
         ),

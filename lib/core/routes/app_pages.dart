@@ -21,6 +21,7 @@ import 'package:yuanying/modules/webview/views/webview_page.dart';
 import 'package:yuanying/modules/disclaimer/views/disclaimer_page.dart';
 import 'package:yuanying/modules/debug_log/views/debug_log_page.dart';
 import 'package:yuanying/modules/setting/views/about_page.dart';
+import 'package:yuanying/modules/catvod_log/views/catvod_log_page.dart';
 
 class AppPages {
   static const String initial = '/';
@@ -43,6 +44,7 @@ class AppPages {
   static const String disclaimer = '/disclaimer';
   static const String about = '/about';
   static const String debugLogs = '/debugLogs';
+  static const String catvodLog = '/catvodLog';
 
   static final List<GetPage> routes = [
     GetPage(name: initial, page: () => const MainPage()),
@@ -73,5 +75,9 @@ class AppPages {
       page: () => const DisclaimerPage(),
     ),
     GetPage(name: debugLogs, page: () => const DebugLogPage()),
+    GetPage(
+      name: catvodLog,
+      page: () => const CatVodLogPage(),
+    ),
   ];
 }

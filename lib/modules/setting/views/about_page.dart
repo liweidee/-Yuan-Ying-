@@ -17,6 +17,7 @@ import 'package:yuanying/utils/update.dart';
 import 'package:yuanying/utils/utils.dart';
 import 'package:yuanying/common/widgets/dialog/export_import.dart';
 import 'package:yuanying/utils/device_utils.dart';
+import 'package:yuanying/t4/services/source_manager.dart';
 
 class AboutPage extends StatefulWidget {
   const AboutPage({super.key, this.showAppBar = true});
@@ -203,6 +204,23 @@ class _AboutPageState extends State<AboutPage> {
               title: const Text('查看日志'),
               subtitle: Text(
                 '共 $count 条日志记录',
+                style: subTitleStyle,
+              ),
+              trailing: Icon(Icons.arrow_forward, size: 16, color: outline),
+            );
+          }),
+
+          // 猫影视调试日志
+          Obx(() {
+            final isCatVod = Get.find<SourceManager>().currentConfigType.value == 'catvod';
+            if (!isCatVod) return const SizedBox.shrink();
+            
+            return ListTile(
+              onTap: () => Get.toNamed('/catvodLog'),
+              leading: const Icon(Icons.movie_filter_outlined),
+              title: const Text('猫影视日志'),
+              subtitle: Text(
+                '查看 Node.js 运行日志',
                 style: subTitleStyle,
               ),
               trailing: Icon(Icons.arrow_forward, size: 16, color: outline),

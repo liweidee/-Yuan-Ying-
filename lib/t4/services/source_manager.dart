@@ -39,6 +39,7 @@ class SourceManager extends GetxController {
   final RxString configSource = 'remote'.obs; // 'remote' | 'local' | 'file'
   final RxBool isConfigLoading = false.obs;
   final RxBool configLoadError = false.obs;
+  final RxString currentConfigType = 'tvbox'.obs;
 
   // ===== 内部状态 =====
   bool _isRestoring = false;
@@ -232,6 +233,18 @@ class SourceManager extends GetxController {
   // ===== 核心：加载当前配置并强制重置爬虫源 =====
   Future<void> loadConfig() async {
     isConfigLoading.value = true;
+
+    // ---- 更新当前接口配置类型 ----
+    final customConfigs = GStorage.getCustomSites();
+    final savedKey = GStorage.setting.get('selected_config_key');
+    Map<String, dynamic>? selectedConfig;
+    if (savedKey != null && savedKey.toString().isNotEmpty) {
+      selectedConfig = customConfigs.firstWhereOrNull((c) => c['key'] == savedKey);
+    }
+    selectedConfig ??= customConfigs.isNotEmpty ? customConfigs.first : null;
+    currentConfigType.value = selectedConfig?['configType']?.toString() ?? 'tvbox';
+    // --------------------------------
+    
     try {
       if (PlatformUtils.isDesktop) {
         final customConfigs = GStorage.getCustomSites();

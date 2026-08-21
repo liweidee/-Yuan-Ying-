@@ -42,6 +42,7 @@ import 'package:yuanying/t4/services/python_runtime.dart';
 import 'package:yuanying/services/debug_log_service.dart';
 import 'package:yuanying/nodejs/nodejs_service.dart';
 import 'package:yuanying/t4/services/nodejs_spider_service.dart';
+import 'package:yuanying/services/catvod_log_service.dart';
 
 // ============================================================================
 // 全局变量
@@ -220,7 +221,14 @@ void main() async {
   // ==========================================================================
   // 第九步：注册全局控制器
   // ==========================================================================
+  // 1. 猫影视日志服务（必须先初始化，供 NodeJSService 使用）
+  await Get.putAsync<CatVodLogService>(() async {
+    final service = CatVodLogService();
+    await service.init();
+    return service;
+  });
 
+  // 2. 其他服务
   Get.put(T4ApiService(), permanent: true);
   Get.put(Drpy2ApiService(), permanent: true);
   Get.put(CatvodOpenService(), permanent: true);

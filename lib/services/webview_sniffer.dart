@@ -78,6 +78,28 @@ class WebViewSniffer {
                 ),
                 onWebViewCreated: (controller) {
                   webViewController = controller;
+                  // 注册 JS 回调处理
+                  controller.addJavaScriptHandler(
+                    handlerName: 'onVideoFound',
+                    callback: (args) async {  // 改为异步
+                      if (isCompleted) return null;
+                      if (args.isNotEmpty && args[0] is String) {
+                        var url = args[0] as String;
+                        // 获取当前页面基础 URL，用于补全相对路径
+                        final currentWebUri = await controller.getUrl();
+                        final base = currentWebUri?.toString();
+                        if (base != null && !url.startsWith('http://') && !url.startsWith('https://')) {
+                          try {
+                            url = Uri.parse(base).resolve(url).toString();
+                          } catch (_) {}
+                        }
+                        if (isVideoUrl(url)) {
+                          completeWithResult(url);
+                        }
+                      }
+                      return null;
+                    },
+                  );
                 },
                 shouldOverrideUrlLoading: (controller, navigationAction) async {
                   if (isCompleted) return NavigationActionPolicy.CANCEL;

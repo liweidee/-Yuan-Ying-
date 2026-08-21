@@ -63,6 +63,7 @@ class _MainPageState extends State<MainPage> with WidgetsBindingObserver {
     double baseHeight;
     switch (style) {
       case NavigationBarStyle.default_:
+      case NavigationBarStyle.defaultCompact:
         baseHeight = 56.0;
         break;
       case NavigationBarStyle.capsule:
@@ -241,6 +242,24 @@ class _MainPageState extends State<MainPage> with WidgetsBindingObserver {
       }).toList(),
     );
 
+    // ========== 紧凑风格 BottomNavigationBar ==========
+  Widget compactBottomBar = BottomNavigationBar(
+    currentIndex: selectedIndex,
+    onTap: _controller.switchPage,
+    type: BottomNavigationBarType.fixed,
+    iconSize: 16,
+    selectedFontSize: 12,
+    unselectedFontSize: 12,
+    items: navigationBars.map((item) {
+      return BottomNavigationBarItem(
+        icon: Icon(item.icon.icon, size: 16, color: colorScheme.outline),
+        activeIcon: Icon(item.selectIcon.icon, size: 16, color: colorScheme.primary),
+        label: item.label,
+      );
+    }).toList(),
+    // 不设置 selectedItemColor / unselectedItemColor，完全继承主题默认值
+  );
+
     // ============================================================
     // 2. 胶囊 NavigationBar
     // ============================================================
@@ -286,6 +305,10 @@ class _MainPageState extends State<MainPage> with WidgetsBindingObserver {
     switch (style) {
       case NavigationBarStyle.default_:
         bottomBar = baseNavigationBar;
+        break;
+
+      case NavigationBarStyle.defaultCompact:
+        bottomBar = compactBottomBar;
         break;
 
       case NavigationBarStyle.floating:

@@ -4,6 +4,7 @@ import 'package:yuanying/t4/models/play_url.dart';
 import 'package:yuanying/t4/models/video_detail.dart';
 import 'package:yuanying/t4/services/i_spider_service.dart';
 import 'package:yuanying/nodejs/nodejs_service.dart';
+import 'package:yuanying/services/catvod_log_service.dart';
 
 class NodeJSSpiderService implements ISpiderService {
   String? _currentKey;
@@ -11,6 +12,15 @@ class NodeJSSpiderService implements ISpiderService {
   String? _baseUrl;
 
   final NodeJSService _nodejs = NodeJSService.instance;
+  late CatVodLogService _logService;
+
+  NodeJSSpiderService() {
+    _logService = Get.find<CatVodLogService>();
+  }
+
+  void _log(String msg) {
+    _logService.addLog('[SpiderService] $msg');
+  }
 
   @override
   String? get currentKey => _currentKey;
@@ -22,45 +32,60 @@ class NodeJSSpiderService implements ISpiderService {
 
   @override
   void switchSite(String apiUrl, String siteKey, {dynamic ext}) {
+    _log('=== switchSite: apiUrl=$apiUrl, siteKey=$siteKey ===');
     _baseUrl = apiUrl;
     _currentKey = siteKey;
 
-    // 解析 ext（如果有）
     if (ext is String && ext.isNotEmpty) {
       try {
         _currentExtMap = jsonDecode(ext) as Map<String, dynamic>;
+        _log('ext parsed: $_currentExtMap');
       } catch (_) {
         _currentExtMap = null;
+        _log('ext parse failed: $ext');
       }
     } else {
       _currentExtMap = null;
     }
 
-    // 从 siteKey 中提取 spider key 和 type
-    // siteKey 格式示例: "nodejs_xxx_3" 或 "catvod_xxx"
     final parts = siteKey.split('_');
     if (parts.length >= 2) {
       final key = parts[1];
-      // 如果 parts 长度大于2，尝试解析 type，否则默认为 3
       final type = parts.length > 2 ? int.tryParse(parts[2]) ?? 3 : 3;
-      
-      // 将 apiUrl 作为 apiBase 传入
+      _log('spider key=$key, type=$type, apiBase=$apiUrl');
       _nodejs.setCurrentSpider(key, type, apiBase: apiUrl);
+    } else {
+      _log('⚠️ siteKey parse failed: $siteKey');
     }
   }
 
-  /// 初始化 Node.js 蜘蛛（调用 /init 接口）
   Future<void> initSpider() async {
-    await _nodejs.initSpider();
+    _log('🔄 initSpider');
+    try {
+      await _nodejs.initSpider();
+      _log('✅ initSpider success');
+    } catch (e) {
+      _log('❌ initSpider error: $e');
+      rethrow;
+    }
   }
 
   @override
   Future<Map<String, dynamic>> fetchHome({int filter = 1}) async {
-    return await _nodejs.getHomeContent();
+    _log('📡 fetchHome: filter=$filter');
+    try {
+      final result = await _nodejs.getHomeContent();
+      _log('✅ fetchHome success, keys: ${result.keys}');
+      return result;
+    } catch (e) {
+      _log('❌ fetchHome error: $e');
+      rethrow;
+    }
   }
 
   @override
   Future<Map<String, dynamic>> fetchCate(String cateId, int page, {String? ext}) async {
+    _log('📡 fetchCate: cateId=$cateId, page=$page, ext=$ext');
     Map<String, dynamic> filters = {};
     if (ext != null && ext.isNotEmpty) {
       try {
@@ -71,44 +96,80 @@ class NodeJSSpiderService implements ISpiderService {
         } catch (_) {}
         final parsed = jsonDecode(decodedStr) as Map<String, dynamic>;
         filters = parsed;
-      } catch (_) {}
+        _log('filters parsed: $filters');
+      } catch (e) {
+        _log('⚠️ filters parse error: $e');
+      }
     }
-    return await _nodejs.getCategoryContent(
-      categoryId: cateId,
-      page: page,
-      filters: filters,
-    );
+    try {
+      final result = await _nodejs.getCategoryContent(
+        categoryId: cateId,
+        page: page,
+        filters: filters,
+      );
+      _log('✅ fetchCate success, keys: ${result.keys}');
+      return result;
+    } catch (e) {
+      _log('❌ fetchCate error: $e');
+      rethrow;
+    }
   }
 
   @override
   Future<Map<String, dynamic>> search(String wd, int page, {int quick = 0}) async {
-    return await _nodejs.search(keyword: wd, page: page);
+    _log('🔍 search: wd="$wd", page=$page, quick=$quick');
+    try {
+      final result = await _nodejs.search(keyword: wd, page: page);
+      final list = result['list'] as List?;
+      _log('✅ search success, count=${list?.length ?? 0}');
+      return result;
+    } catch (e) {
+      _log('❌ search error: $e');
+      rethrow;
+    }
   }
 
   @override
   Future<VideoDetail?> getDetail({required String vodId, required String pwd}) async {
-    final result = await _nodejs.getVideoDetail(videoId: vodId);
-    final list = result['list'];
-    if (list is List && list.isNotEmpty) {
-      final dataMap = list[0] as Map<String, dynamic>;
-      try {
-        return VideoDetail.fromJson(dataMap);
-      } catch (e) {
-        return VideoDetail(
-          vodId: dataMap['vod_id']?.toString() ?? vodId,
-          vodName: dataMap['vod_name']?.toString() ?? '未命名',
-          vodPic: dataMap['vod_pic']?.toString() ?? '',
-          vodContent: dataMap['vod_content']?.toString(),
-          playSources: _parsePlaySources(dataMap),
-        );
+    _log('📖 getDetail: vodId=$vodId');
+    try {
+      final result = await _nodejs.getVideoDetail(videoId: vodId);
+      final list = result['list'];
+      if (list is List && list.isNotEmpty) {
+        final dataMap = list[0] as Map<String, dynamic>;
+        _log('✅ getDetail success, vodName=${dataMap['vod_name']}');
+        try {
+          return VideoDetail.fromJson(dataMap);
+        } catch (e) {
+          _log('⚠️ VideoDetail.fromJson failed, using manual parse: $e');
+          return VideoDetail(
+            vodId: dataMap['vod_id']?.toString() ?? vodId,
+            vodName: dataMap['vod_name']?.toString() ?? '未命名',
+            vodPic: dataMap['vod_pic']?.toString() ?? '',
+            vodContent: dataMap['vod_content']?.toString(),
+            playSources: _parsePlaySources(dataMap),
+          );
+        }
       }
+      _log('⚠️ getDetail: no list data');
+      return null;
+    } catch (e) {
+      _log('❌ getDetail error: $e');
+      return null;
     }
-    return null;
   }
 
   @override
   Future<Map<String, dynamic>> fetchDetail(String ids) async {
-    return await _nodejs.getVideoDetail(videoId: ids);
+    _log('📖 fetchDetail: ids=$ids');
+    try {
+      final result = await _nodejs.getVideoDetail(videoId: ids);
+      _log('✅ fetchDetail success');
+      return result;
+    } catch (e) {
+      _log('❌ fetchDetail error: $e');
+      rethrow;
+    }
   }
 
   @override
@@ -117,38 +178,56 @@ class NodeJSSpiderService implements ISpiderService {
     required String flag,
     required String pwd,
   }) async {
-    final result = await _nodejs.getPlayUrl(
-      videoId: '',
-      flag: flag,
-      playId: playParams,
-    );
-    final urlData = result['url'];
-    if (urlData != null) {
-      List<String> urlList = [];
-      if (urlData is List) {
-        urlList = urlData.map((e) => e.toString()).where((e) => e.isNotEmpty).toList();
-      } else if (urlData is String && urlData.isNotEmpty) {
-        urlList = [urlData];
+    _log('🎬 getPlayUrl: playParams=$playParams, flag=$flag');
+    try {
+      final result = await _nodejs.getPlayUrl(
+        videoId: '',
+        flag: flag,
+        playId: playParams,
+      );
+      final urlData = result['url'];
+      if (urlData != null) {
+        List<String> urlList = [];
+        if (urlData is List) {
+          urlList = urlData.map((e) => e.toString()).where((e) => e.isNotEmpty).toList();
+        } else if (urlData is String && urlData.isNotEmpty) {
+          urlList = [urlData];
+        }
+        if (urlList.isNotEmpty) {
+          _log('✅ getPlayUrl success, urlList count=${urlList.length}');
+          final playUrlData = {
+            'parse': result['parse'] ?? 0,
+            'url': urlList.length > 1 ? urlList : urlList.first,
+            'headers': result['headers'],
+          };
+          return PlayUrl.fromJson(playUrlData);
+        }
+        _log('⚠️ getPlayUrl: urlData is empty');
+      } else {
+        _log('⚠️ getPlayUrl: no url data in result');
       }
-      if (urlList.isNotEmpty) {
-        final playUrlData = {
-          'parse': result['parse'] ?? 0,
-          'url': urlList.length > 1 ? urlList : urlList.first,
-          'headers': result['headers'],
-        };
-        return PlayUrl.fromJson(playUrlData);
-      }
+      return null;
+    } catch (e) {
+      _log('❌ getPlayUrl error: $e');
+      return null;
     }
-    return null;
   }
 
   @override
   Future<Map<String, dynamic>> fetchPlayUrl(String play, {String? flag}) async {
-    return await _nodejs.getPlayUrl(
-      videoId: '',
-      flag: flag ?? '',
-      playId: play,
-    );
+    _log('🎬 fetchPlayUrl: play=$play, flag=$flag');
+    try {
+      final result = await _nodejs.getPlayUrl(
+        videoId: '',
+        flag: flag ?? '',
+        playId: play,
+      );
+      _log('✅ fetchPlayUrl success');
+      return result;
+    } catch (e) {
+      _log('❌ fetchPlayUrl error: $e');
+      rethrow;
+    }
   }
 
   @override
@@ -159,9 +238,19 @@ class NodeJSSpiderService implements ISpiderService {
     required int page,
     int quick = 0,
   }) async {
-    return await _nodejs.search(keyword: wd, page: page);
+    _log('🔍 searchDirect: baseUrl=$baseUrl, wd="$wd", page=$page');
+    try {
+      final result = await _nodejs.search(keyword: wd, page: page);
+      final list = result['list'] as List?;
+      _log('✅ searchDirect success, count=${list?.length ?? 0}');
+      return result;
+    } catch (e) {
+      _log('❌ searchDirect error: $e');
+      rethrow;
+    }
   }
 
+  // ===== 私有解析方法 =====
   List<PlaySource> _parsePlaySources(Map<String, dynamic> map) {
     final from = map['vod_play_from']?.toString() ?? '';
     final url = map['vod_play_url']?.toString() ?? '';

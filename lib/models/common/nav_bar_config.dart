@@ -40,10 +40,13 @@ enum NavigationBarStyle implements EnumWithLabel {
   /// 1. 默认风格：BottomNavigationBar 经典风格
   default_('默认风格'),
 
-  /// 2. 胶囊高亮：Material3 NavigationBar 胶囊指示器
+  /// 2. 默认（紧凑）：完全复刻 PiliPlus 关闭 MD3 底栏样式
+  defaultCompact('默认（紧凑）'),
+
+  /// 3. 胶囊高亮：Material3 NavigationBar 胶囊指示器
   capsule('胶囊高亮'),
 
-  /// 3. 悬浮底栏：悬浮圆角卡片
+  /// 4. 悬浮底栏：悬浮圆角卡片
   floating('悬浮底栏');
 
   const NavigationBarStyle(this.label);
