@@ -7,6 +7,7 @@ import 'package:yuanying/modules/main/controllers/main_controller.dart';
 import 'package:yuanying/modules/setting/models/setting_pref.dart';
 import 'package:yuanying/common/widgets/floating_navigation_bar.dart';
 import 'package:yuanying/core/theme/style.dart';
+import 'package:yuanying/nodejs/nodejs_service.dart';
 
 class MainPage extends StatefulWidget {
   const MainPage({super.key});
@@ -15,13 +16,40 @@ class MainPage extends StatefulWidget {
   State<MainPage> createState() => _MainPageState();
 }
 
-class _MainPageState extends State<MainPage> {
+class _MainPageState extends State<MainPage> with WidgetsBindingObserver {
   late final MainController _controller;
 
   @override
   void initState() {
     super.initState();
     _controller = Get.put(MainController());
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.resumed) {
+      _checkAndRestartNodeService();
+    }
+  }
+
+  Future<void> _checkAndRestartNodeService() async {
+    final nodejs = NodeJSService.instance;
+    // 若服务未初始化，无需检测
+    if (!nodejs.isInitialized) return;
+    final alive = await nodejs.isServiceAlive();
+    if (!alive) {
+      print('Node.js 服务不可用，启动无感重启');
+      await nodejs.reinitialize();
+      // 注意：这里不刷新首页，不调用 SourceProvider.loadHomeContent
+    }
   }
 
   @override

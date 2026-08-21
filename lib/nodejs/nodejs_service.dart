@@ -34,6 +34,9 @@ class NodeJSService extends GetxService {
   int get spiderPort => _spiderPort;
   bool get hasSpiderServer => _spiderPort > 0;
 
+  String? _lastLoadedUrl;        // 保存最近一次加载的源 URL
+  bool _isRestarting = false;    // 防止并发重启
+
   String _spiderBaseUrl() => 'http://127.0.0.1:$_spiderPort';
   String _spiderPath() {
     if (_spiderApiBase.isNotEmpty) return _spiderApiBase;
@@ -125,6 +128,8 @@ class NodeJSService extends GetxService {
   }
 
   Future<bool> loadSourceFromURL(String url) async {
+    _lastLoadedUrl = url;
+
     // 确保已初始化
     if (!_isInitialized) {
       await initialize();
@@ -179,6 +184,54 @@ class NodeJSService extends GetxService {
 
     await _spiderPortCompleter!.future;
     timer.cancel();
+  }
+
+  Future<bool> isServiceAlive() async {
+    if (_spiderPort <= 0) return false;
+    try {
+      final response = await http.get(
+        Uri.parse('http://127.0.0.1:$_spiderPort/config'),
+      ).timeout(const Duration(milliseconds: 800));
+      return response.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> reinitialize() async {
+    if (_isRestarting) return;
+    _isRestarting = true;
+    print('无感重启 Node.js 服务...');
+    try {
+      // 停止旧服务，清理状态
+      await stop();
+      // stop 已重置端口等，但显式再确保一次
+      _isInitialized = false;
+      _isNodeReady = false;
+      _managementPort = 0;
+      _spiderPort = 0;
+      _spiderApiBase = '';
+      _eventSubscription?.cancel();
+
+      // 重新初始化（启动 Node.js 进程）
+      await initialize();
+
+      // 如果有保存的源 URL，重新加载（但不触发首页刷新）
+      if (_lastLoadedUrl != null && _lastLoadedUrl!.isNotEmpty) {
+        print('📡 重新加载源: $_lastLoadedUrl');
+        final success = await loadSourceFromURL(_lastLoadedUrl!);
+        if (success) {
+          print('源重载成功，spiderPort: $_spiderPort');
+        } else {
+          print('源重载失败，可能需要手动刷新');
+        }
+      } else {
+        print('无保存的源 URL，跳过加载');
+      }
+    } finally {
+      _isRestarting = false;
+    }
+    print('无感重启完成');
   }
 
   Future<bool> deleteSource() async {
