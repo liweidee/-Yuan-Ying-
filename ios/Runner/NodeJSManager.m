@@ -64,26 +64,10 @@
 }
 
 - (BOOL)isNodeProcessActuallyAlive {
-    if (self.nativeServerPort <= 0) return NO;
-    
-    NSString *url = [NSString stringWithFormat:@"http://127.0.0.1:%d/onCatPawOpenPort?type=ping", self.nativeServerPort];
-    dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
-    __block BOOL alive = NO;
-    
-    NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithURL:[NSURL URLWithString:url]
-                                                             completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-        if (!error && [(NSHTTPURLResponse *)response statusCode] == 200) {
-            alive = YES;
-        }
-        dispatch_semaphore_signal(semaphore);
-    }];
-    [task resume];
-    
-    // 最多等待 0.5 秒
-    dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, 0.5 * NSEC_PER_SEC));
-    [task cancel];
-    
-    return alive;
+    // 仅通过端口值判断，绝不进行网络请求
+    // 优点：0 阻塞，主线程绝对安全
+    // 缺点：可能误判（端口值存在但进程已死），但后续加载会超时并触发自愈
+    return self.nativeServerPort > 0;
 }
 
 - (void)startNodeJS:(void (^)(BOOL))completion {
