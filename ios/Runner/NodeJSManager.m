@@ -49,7 +49,30 @@
 
 - (void)startNodeJS:(void (^)(BOOL))completion {
     if (self.isRunning) {
-        // 已运行时，重新发送端口通知（确保 Dart 层能收到）
+        // Node.js 线程正在运行，检查 webServer 是否需要重建
+        if (!self.webServer) {
+            // webServer 被 stopNodeJS 停了，需要重建以获取新端口
+            [self startLocalWebServerWithCompletion:^(BOOL webServerStarted) {
+                if (!webServerStarted) {
+                    if (completion) completion(NO);
+                    return;
+                }
+                // 通知 Dart 层新端口
+                if (self.managementPort > 0) {
+                    [[NSNotificationCenter defaultCenter] postNotificationName:@"NodeServerPortReceived"
+                                                                        object:nil
+                                                                      userInfo:@{@"port": @(self.managementPort), @"type": @"management"}];
+                }
+                if (self.spiderPort > 0) {
+                    [[NSNotificationCenter defaultCenter] postNotificationName:@"NodeServerPortReceived"
+                                                                        object:nil
+                                                                      userInfo:@{@"port": @(self.spiderPort), @"type": @"spider"}];
+                }
+                if (completion) completion(YES);
+            }];
+            return;
+        }
+        // webServer 还在，直接发通知
         if (self.managementPort > 0) {
             [[NSNotificationCenter defaultCenter] postNotificationName:@"NodeServerPortReceived"
                                                                 object:nil
@@ -517,8 +540,8 @@
 }
 
 - (void)stopNodeJS {
-    // 停止本地 Web 服务器（接收回调用）
-    self.isRunning = NO;
+    // 不设置 self.isRunning = NO，让 Node.js 线程继续运行
+    // isRunning 只在 node_start 返回后才被设为 NO（线程真正死亡时）
     self.isNodeReady = NO;
     [self.webServer stop];
     self.webServer = nil;
