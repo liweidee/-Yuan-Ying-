@@ -377,9 +377,9 @@ class SourceManager extends GetxController {
 
   // ===== 加载猫影视配置 =====
   Future<void> _loadCatVodConfig(String configUrl) async {
+    final nodejs = NodeJSService.instance;
+    
     try {
-      final nodejs = NodeJSService.instance;
-  
       // 1. 确保 Node.js 已初始化（原项目 addSource 前已初始化，这里强制等待）
       if (!nodejs.isInitialized) {
         await nodejs.initialize();
@@ -388,6 +388,7 @@ class SourceManager extends GetxController {
       final success = await nodejs.loadSourceFromURL(configUrl);
       if (!success) {
         print('[SourceManager] 猫影视源加载失败（loadSourceFromURL 返回 false）');
+        await nodejs.resetForRetry();
         remoteSites.clear();
         remoteParses.clear();
         return;
@@ -397,6 +398,7 @@ class SourceManager extends GetxController {
       await nodejs.waitForSpiderPort();
       if (nodejs.spiderPort == 0) {
         print('[SourceManager] spiderPort 未就绪，无法获取配置');
+        await nodejs.resetForRetry();
         remoteSites.clear();
         return;
       }
@@ -415,6 +417,8 @@ class SourceManager extends GetxController {
           configLogo.value = result['logo'].toString();
         }
       } else {
+        // 如果失败，重置服务
+        await nodejs.resetForRetry();
         remoteSites.clear();
       }
 
@@ -432,6 +436,7 @@ class SourceManager extends GetxController {
 
     } catch (e) {
       print('[SourceManager] 加载猫影视配置失败: $e');
+      await nodejs.resetForRetry();
       remoteSites.clear();
       remoteParses.clear();
     }

@@ -151,6 +151,7 @@ class NodeJSService extends GetxService {
     // 如果 managementPort 为 0，主动等待
     if (_managementPort == 0) {
       _log('managementPort is 0, waiting...');
+      _lastLoadedUrl = null;
       _managementPortCompleter ??= Completer<void>();
       final timer = Timer(const Duration(seconds: 10), () {
         if (!_managementPortCompleter!.isCompleted) {
@@ -174,12 +175,15 @@ class NodeJSService extends GetxService {
         await waitForSpiderPort();
         return true;
       }
+      _lastLoadedUrl = null;
       return false;
     } on PlatformException catch (e) {
       _log('PlatformException: ${e.message}');
+      _lastLoadedUrl = null;
       return false;
     } catch (e) {
       _log('loadSourceFromURL error: $e');
+      _lastLoadedUrl = null;
       return false;
     }
   }
@@ -255,6 +259,20 @@ class NodeJSService extends GetxService {
       _isRestarting = false;
     }
     _log('✅ 无感重启流程结束');
+  }
+
+  /// 重置服务状态，用于加载失败后的重试
+  Future<void> resetForRetry() async {
+    _log('🔄 重置 Node.js 服务状态以便重试');
+    await stop();
+    _lastLoadedUrl = null;
+    _isInitialized = false;
+    _isNodeReady = false;
+    _managementPort = 0;
+    _spiderPort = 0;
+    _spiderApiBase = '';
+    _eventSubscription?.cancel();
+    _log('✅ 服务状态已重置');
   }
 
   Future<bool> deleteSource() async {
