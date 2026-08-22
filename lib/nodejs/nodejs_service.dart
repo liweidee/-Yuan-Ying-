@@ -252,9 +252,12 @@ class NodeJSService extends GetxService {
       final result = await _channel.invokeMethod('deleteSource');
       _spiderPort = 0;
       _spiderApiBase = '';
+      if (result == true) {
+        _lastLoadedUrl = null;
+      }
       return result == true;
     } catch (e) {
-      _log('deleteSource error: $e');
+      print('deleteSource error: $e');
       return false;
     }
   }

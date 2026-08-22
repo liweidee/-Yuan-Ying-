@@ -8,6 +8,7 @@ import 'package:yuanying/modules/setting/models/setting_pref.dart';
 import 'package:yuanying/common/widgets/floating_navigation_bar.dart';
 import 'package:yuanying/core/theme/style.dart';
 import 'package:yuanying/nodejs/nodejs_service.dart';
+import 'package:yuanying/t4/services/source_manager.dart';
 
 class MainPage extends StatefulWidget {
   const MainPage({super.key});
@@ -41,14 +42,19 @@ class _MainPageState extends State<MainPage> with WidgetsBindingObserver {
   }
 
   Future<void> _checkAndRestartNodeService() async {
+    final sourceManager = Get.find<SourceManager>();
+    // 仅当当前配置为猫影视（catvod）时执行保活逻辑
+    if (sourceManager.currentConfigType.value != 'catvod') {
+      print('当前非猫影视配置，跳过保活检测');
+      return;
+    }
+
     final nodejs = NodeJSService.instance;
-    // 若服务未初始化，无需检测
     if (!nodejs.isInitialized) return;
     final alive = await nodejs.isServiceAlive();
     if (!alive) {
       print('Node.js 服务不可用，启动无感重启');
       await nodejs.reinitialize();
-      // 注意：这里不刷新首页，不调用 SourceProvider.loadHomeContent
     }
   }
 
