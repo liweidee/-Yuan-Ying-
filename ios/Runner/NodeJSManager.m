@@ -55,7 +55,7 @@
 - (void)forceCleanup {
     self.isRunning = NO;
     self.isNodeReady = NO;
-    self.nodeThread = NULL;
+    self.nodeThread = 0;
     [self.webServer stop];
     self.webServer = nil;
     self.nativeServerPort = 0;
@@ -157,7 +157,7 @@
                 dispatch_async(dispatch_get_main_queue(), ^{
                     self.isRunning = NO;
                     self.isNodeReady = NO;
-                    self.nodeThread = NULL;
+                    self.nodeThread = 0;
                     [self.webServer stop];
                 });
             } else {
@@ -555,13 +555,15 @@
 }
 
 - (void)stopNodeJS {
-    if (self.nodeThread) {
-        // 使用 pthread_kill(thread, 0) 检查线程是否存在，不发送实际信号
-        if (pthread_kill(self.nodeThread, 0) == 0) {
+    if (self.nodeThread != 0) {
+        int killResult = pthread_kill(self.nodeThread, 0);
+        if (killResult == 0) {
             pthread_kill(self.nodeThread, SIGTERM);
             pthread_join(self.nodeThread, NULL);
+        } else if (killResult != ESRCH) {
+            NSLog(@"⚠️ pthread_kill 返回错误: %d", killResult);
         }
-        self.nodeThread = NULL;
+        self.nodeThread = 0;
     }
     [self forceCleanup];
 }
