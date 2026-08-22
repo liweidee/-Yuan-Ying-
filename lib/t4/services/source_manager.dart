@@ -295,8 +295,9 @@ class SourceManager extends GetxController {
 
     // ---- 判断是否加载失败 ----
     final hasCustomSites = GStorage.getCustomSites().isNotEmpty;
-    if (hasCustomSites && this.sites.isEmpty) {
-      configLoadError.value = true;
+    final isCatVodConfig = currentConfigType.value == 'catvod';
+    if (hasCustomSites && this.sites.isEmpty && !isConfigLoading.value) {
+      configLoadError.value = isCatVodConfig; // 只有猫影视配置无数据时才报错
     } else {
       configLoadError.value = false;
     }
@@ -379,35 +380,24 @@ class SourceManager extends GetxController {
   Future<void> _loadCatVodConfig(String configUrl) async {
     try {
       final nodejs = NodeJSService.instance;
-  
-      // 1. 确保 Node.js 已初始化（原项目 addSource 前已初始化，这里强制等待）
-      if (!nodejs.isInitialized) {
-        await nodejs.initialize();
-      }
-      // 2. 调用加载（原项目直接调用）
+      // 直接调用 loadSourceFromURL，它内部会确保服务可用
       final success = await nodejs.loadSourceFromURL(configUrl);
       if (!success) {
-        print('[SourceManager] 猫影视源加载失败（loadSourceFromURL 返回 false）');
-        remoteSites.clear();
-        remoteParses.clear();
+        print('[SourceManager] 猫影视源加载失败，保留旧数据');
         return;
       }
-      
-      // 3. 等待 spiderPort 就绪（原项目 loadSourceFromURL 内部已等待，但为保险再等一次）
+
+      // 等待 spiderPort
       await nodejs.waitForSpiderPort();
       if (nodejs.spiderPort == 0) {
-        print('[SourceManager] spiderPort 未就绪，无法获取配置');
-        remoteSites.clear();
+        print('[SourceManager] spiderPort 未就绪');
         return;
       }
-      
-      // 4. 获取配置（/config）
-      final result = await nodejs.getCatConfig(); // 已带重试
 
-      // 5. 解析 sites
+      // 获取配置
+      final result = await nodejs.getCatConfig();
       final videoSites = result['video']?['sites'] as List<dynamic>? ?? [];
       if (videoSites.isNotEmpty) {
-        // 成功获取，更新 remoteSites
         final rawSites = videoSites.map((e) => Map<String, dynamic>.from(e)).toList();
         final filteredSites = _filterSites(rawSites);
         remoteSites.value = filteredSites;
@@ -415,10 +405,9 @@ class SourceManager extends GetxController {
           configLogo.value = result['logo'].toString();
         }
       } else {
-        remoteSites.clear();
+        print('[SourceManager] getCatConfig 返回空 sites');
       }
 
-      // 6. 解析 parses
       if (result['parses'] != null && result['parses'] is List) {
         remoteParses.value = (result['parses'] as List)
             .map((e) => Map<String, dynamic>.from(e))
@@ -429,11 +418,9 @@ class SourceManager extends GetxController {
 
       _updatePushAgentCache();
       print('[SourceManager] 猫影视配置加载成功，${remoteSites.length} 个站点');
-
     } catch (e) {
-      print('[SourceManager] 加载猫影视配置失败: $e');
-      remoteSites.clear();
-      remoteParses.clear();
+      print('[SourceManager] 加载猫影视配置异常: $e');
+      // 发生异常时也不要清空 remoteSites，保留旧数据供用户重试
     }
   }
 
