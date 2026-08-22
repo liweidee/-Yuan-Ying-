@@ -214,11 +214,14 @@ class NodeJSService extends GetxService {
   Future<void> reinitialize() async {
     if (_isRestarting) return;
     _isRestarting = true;
-    _log('无感重启 Node.js 服务...');
+    _log('🔄 无感重启 Node.js 服务...');
     try {
-      // 停止旧服务，清理状态
+      // 停止旧服务
       await stop();
-      // stop 已重置端口等，但显式再确保一次
+      // 等待原生资源释放（关键）
+      await Future.delayed(const Duration(milliseconds: 300));
+
+      // 重置状态（stop 已重置部分，但显式确保）
       _isInitialized = false;
       _isNodeReady = false;
       _managementPort = 0;
@@ -226,25 +229,32 @@ class NodeJSService extends GetxService {
       _spiderApiBase = '';
       _eventSubscription?.cancel();
 
-      // 重新初始化（启动 Node.js 进程）
+      // 重新初始化
       await initialize();
 
-      // 如果有保存的源 URL，重新加载（但不触发首页刷新）
+      // 重新加载源（带重试）
       if (_lastLoadedUrl != null && _lastLoadedUrl!.isNotEmpty) {
-        _log('📡 重新加载源: $_lastLoadedUrl');
-        final success = await loadSourceFromURL(_lastLoadedUrl!);
-        if (success) {
-          _log('源重载成功，spiderPort: $_spiderPort');
+        bool loaded = false;
+        for (int i = 0; i < 3; i++) {
+          _log('📡 重新加载源尝试 ${i+1}/3: $_lastLoadedUrl');
+          loaded = await loadSourceFromURL(_lastLoadedUrl!);
+          if (loaded) break;
+          if (i < 2) await Future.delayed(const Duration(milliseconds: 500));
+        }
+        if (loaded) {
+          _log('✅ 源重载成功，spiderPort: $_spiderPort');
         } else {
-          _log('源重载失败，可能需要手动刷新');
+          _log('❌ 源重载失败，可能需要手动刷新');
         }
       } else {
-        _log('无保存的源 URL，跳过加载');
+        _log('⚠️ 无保存的源 URL，跳过加载');
       }
+    } catch (e) {
+      _log('❌ reinitialize 异常: $e');
     } finally {
       _isRestarting = false;
     }
-    _log('无感重启完成');
+    _log('✅ 无感重启流程结束');
   }
 
   Future<bool> deleteSource() async {

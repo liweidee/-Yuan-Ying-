@@ -4,6 +4,7 @@
 #import <GCDWebServer/GCDWebServerDataRequest.h>
 #import <GCDWebServer/GCDWebServerDataResponse.h>
 #import <CommonCrypto/CommonDigest.h>
+#import <pthread.h>
 
 @interface NodeJSManager ()
 @property (nonatomic, assign) BOOL isRunning;
@@ -12,6 +13,7 @@
 @property (nonatomic, assign) int managementPort;
 @property (nonatomic, assign) int spiderPort;
 @property (nonatomic, strong) GCDWebServer *webServer;
+@property (nonatomic, assign) pthread_t nodeThread;
 @end
 
 @implementation NodeJSManager
@@ -72,6 +74,9 @@
             }
 
             if (scriptPath) {
+                // 保存当前线程 ID
+                self.nodeThread = pthread_self();
+                
                 int nativePort = self.nativeServerPort;
                 NSLog(@"Starting Node.js with script: %@, native-port: %d", scriptPath, nativePort);
 
@@ -505,6 +510,16 @@
 }
 
 - (void)stopNodeJS {
+    // 1. 终止 Node.js 线程
+    if (self.nodeThread) {
+        // 发送 SIGTERM 信号，让 Node.js 优雅退出
+        pthread_kill(self.nodeThread, SIGTERM);
+        // 等待线程完全退出，回收资源
+        pthread_join(self.nodeThread, NULL);
+        self.nodeThread = NULL;
+    }
+
+    // 2. 停止本地 Web 服务器（接收回调用）
     self.isRunning = NO;
     self.isNodeReady = NO;
     [self.webServer stop];
