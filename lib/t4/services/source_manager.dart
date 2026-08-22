@@ -222,6 +222,8 @@ class SourceManager extends GetxController {
 
   Future<void> loadConfig() async {
     isConfigLoading.value = true;
+    ++_configLoadId;
+    final currentLoadId = _configLoadId;
     final customConfigs = GStorage.getCustomSites();
     final savedKey = GStorage.setting.get('selected_config_key');
     Map<String, dynamic>? selectedConfig;
@@ -230,6 +232,7 @@ class SourceManager extends GetxController {
     }
     selectedConfig ??= customConfigs.isNotEmpty ? customConfigs.first : null;
     currentConfigType.value = selectedConfig?['configType']?.toString() ?? 'tvbox';
+    NodeJSService.instance.updateConfigType(currentConfigType.value);
 
     try {
       if (PlatformUtils.isDesktop) {
@@ -265,7 +268,7 @@ class SourceManager extends GetxController {
       } else if (configSource.value == 'file') {
         await _loadFileConfigBySavedKey();
       } else {
-        await _loadRemoteConfig();
+        await _loadRemoteConfig(loadId: currentLoadId);
       }
       await _selectDefaultSite();
       if (!isConfigLoaded.value) {
@@ -285,7 +288,7 @@ class SourceManager extends GetxController {
     }
   }
 
-  Future<void> _loadRemoteConfig() async {
+  Future<void> _loadRemoteConfig({int? loadId}) async {
     final customConfigs = GStorage.getCustomSites();
     if (customConfigs.isEmpty) {
       remoteSites.clear();
@@ -317,11 +320,13 @@ class SourceManager extends GetxController {
       return;
     }
     if (configType == 'catvod') {
-      await _loadCatVodConfig(configUrl);
+      await _loadCatVodConfig(configUrl, loadId: loadId);
       return;
     }
     try {
       final result = await _apiService.fetchConfig(configUrl: configUrl);
+      // 检查是否被更新的请求覆盖了
+      if (loadId != null && loadId != _configLoadId) return;
       if (result['sites'] != null && result['sites'] is List) {
         final rawSites = (result['sites'] as List)
             .map((e) => Map<String, dynamic>.from(e))
@@ -332,25 +337,29 @@ class SourceManager extends GetxController {
           configLogo.value = result['logo'].toString();
         }
       } else {
-        remoteSites.clear();
+        if (loadId == null || loadId == _configLoadId) remoteSites.clear();
       }
       if (result['parses'] != null && result['parses'] is List) {
-        remoteParses.value = (result['parses'] as List)
-            .map((e) => Map<String, dynamic>.from(e))
-            .toList();
+        if (loadId == null || loadId == _configLoadId) {
+          remoteParses.value = (result['parses'] as List)
+              .map((e) => Map<String, dynamic>.from(e))
+              .toList();
+        }
       } else {
-        remoteParses.clear();
+        if (loadId == null || loadId == _configLoadId) remoteParses.clear();
       }
-      _updatePushAgentCache();
+      if (loadId == null || loadId == _configLoadId) _updatePushAgentCache();
     } catch (e) {
       print('加载远端配置失败: $e');
-      remoteSites.clear();
-      remoteParses.clear();
+      if (loadId == null || loadId == _configLoadId) {
+        remoteSites.clear();
+        remoteParses.clear();
+      }
     }
   }
 
-  Future<void> _loadCatVodConfig(String configUrl) async {
-    final currentLoadId = ++_configLoadId;
+  Future<void> _loadCatVodConfig(String configUrl, {int? loadId}) async {
+    final currentLoadId = loadId ?? ++_configLoadId; // 优先使用外部传入的 ID
     try {
       final nodejs = NodeJSService.instance;
       if (!nodejs.isInitialized) {
@@ -542,12 +551,22 @@ class SourceManager extends GetxController {
     final customConfigs = GStorage.getCustomSites();
     final targetConfig = customConfigs.firstWhereOrNull((c) => c['key'] == configKey);
     if (targetConfig == null) return;
+    
     final configType = targetConfig['configType']?.toString() ?? 'tvbox';
     if (PlatformUtils.isDesktop && configType == 'catvod') {
       print('[SourceManager] 桌面端不支持猫影视配置');
       SmartDialog.showToast('猫影视配置仅支持移动端');
       return;
     }
+    
+    // 如果切换到非猫影视，先停止 Node.js
+    if (configType != 'catvod') {
+      final nodejs = NodeJSService.instance;
+      if (nodejs.isInitialized) {
+        await nodejs.stop();
+      }
+    }
+    
     final exists = customConfigs.any((c) => c['key'] == configKey);
     if (!exists) return;
     await GStorage.setSetting('selected_config_key', configKey);

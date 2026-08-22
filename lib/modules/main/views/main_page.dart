@@ -60,6 +60,7 @@ class _MainPageState extends State<MainPage> {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final padding = MediaQuery.viewPaddingOf(context);
+
     return PopScope(
       canPop: _controller.directExitOnBack && _controller.selectedIndex.value == 0,
       onPopInvoked: (didPop) {
@@ -70,10 +71,13 @@ class _MainPageState extends State<MainPage> {
         }
       },
       child: Obx(() {
+        // 依赖 navStyleVersion，样式切换后触发重建
         final _ = _controller.navStyleVersion.value;
+
         final useBottomNav = _controller.useBottomNav.value;
         final selectedIndex = _controller.selectedIndex.value;
         final navigationBars = _controller.navigationBars;
+
         if (useBottomNav) {
           return Scaffold(
             extendBody: true,
@@ -162,12 +166,20 @@ class _MainPageState extends State<MainPage> {
     );
   }
 
+  // ============================================================
+  // 底部栏方式：始终渲染，通过偏移量控制位置
+  // ============================================================
+
   Widget _buildMobileBottomBar({
     required ColorScheme colorScheme,
     required int selectedIndex,
     required List<NavigationBarType> navigationBars,
   }) {
     final style = SettingPref.navigationBarStyle;
+
+    // ============================================================
+    // 1. 基础 NavigationBar
+    // ============================================================
     final baseNavigationBar = NavigationBar(
       height: 56,
       elevation: 0,
@@ -192,7 +204,8 @@ class _MainPageState extends State<MainPage> {
         if (states.any((state) =>
             state == WidgetState.pressed ||
             state == WidgetState.hovered ||
-            state == WidgetState.focused)) {
+            state == WidgetState.focused
+        )) {
           return Colors.transparent;
         }
         return null;
@@ -207,6 +220,7 @@ class _MainPageState extends State<MainPage> {
       }).toList(),
     );
 
+    // ========== 紧凑风格 BottomNavigationBar ==========
     Widget compactBottomBar = BottomNavigationBar(
       currentIndex: selectedIndex,
       onTap: _controller.switchPage,
@@ -221,8 +235,12 @@ class _MainPageState extends State<MainPage> {
           label: item.label,
         );
       }).toList(),
+      // 不设置 selectedItemColor / unselectedItemColor，完全继承主题默认值
     );
 
+    // ============================================================
+    // 2. 胶囊 NavigationBar
+    // ============================================================
     final capsuleNavigationBar = NavigationBar(
       height: 70,
       elevation: 0,
@@ -258,14 +276,19 @@ class _MainPageState extends State<MainPage> {
       }).toList(),
     );
 
+    // ============================================================
+    // 3. 根据样式选择
+    // ============================================================
     Widget bottomBar;
     switch (style) {
       case NavigationBarStyle.default_:
         bottomBar = baseNavigationBar;
         break;
+
       case NavigationBarStyle.defaultCompact:
         bottomBar = compactBottomBar;
         break;
+
       case NavigationBarStyle.floating:
         bottomBar = FloatingNavigationBar(
           selectedIndex: selectedIndex,
@@ -281,18 +304,23 @@ class _MainPageState extends State<MainPage> {
           }).toList(),
         );
         break;
+
       case NavigationBarStyle.capsule:
         bottomBar = capsuleNavigationBar;
         break;
     }
 
+    // 更新底部栏高度（用于计算偏移比例，但实际偏移由 topBarHeight 决定）
     final double actualHeight = _getBottomBarHeight(style);
     _controller.bottomBarHeight.value = actualHeight;
+
     return Obx(() {
       if (!_controller.hideBottomBar.value) {
         return bottomBar;
       }
+
       if (_controller.isInstantMode) {
+        // 即时模式：使用 showBottomBar + AnimatedSlide
         final bool show = _controller.showBottomBar.value;
         return AnimatedSlide(
           offset: Offset(0, show ? 0 : 1),
@@ -301,6 +329,8 @@ class _MainPageState extends State<MainPage> {
           child: bottomBar,
         );
       } else {
+        // 同步模式：使用 barOffset + FractionalTranslation
+        // 平移比例 = barOffset / topBarHeight，确保与顶部栏同步
         final double slideFactor = (_controller.barOffset.value / Style.topBarHeight).clamp(0.0, 1.0);
         return FractionalTranslation(
           translation: Offset(0, slideFactor),
@@ -336,6 +366,7 @@ class _NavItem extends StatelessWidget {
     required this.onTap,
     super.key,
   });
+
   final NavigationBarType item;
   final bool isSelected;
   final VoidCallback onTap;
@@ -343,6 +374,7 @@ class _NavItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+
     return Material(
       color: Colors.transparent,
       shape: RoundedRectangleBorder(

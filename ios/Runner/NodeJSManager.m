@@ -4,7 +4,6 @@
 #import <GCDWebServer/GCDWebServerDataRequest.h>
 #import <GCDWebServer/GCDWebServerDataResponse.h>
 #import <CommonCrypto/CommonDigest.h>
-#import <pthread.h>
 
 @interface NodeJSManager ()
 @property (nonatomic, assign) BOOL isRunning;
@@ -13,7 +12,6 @@
 @property (nonatomic, assign) int managementPort;
 @property (nonatomic, assign) int spiderPort;
 @property (nonatomic, strong) GCDWebServer *webServer;
-@property (nonatomic, assign) pthread_t nodeThread;
 @end
 
 @implementation NodeJSManager
@@ -51,6 +49,17 @@
 
 - (void)startNodeJS:(void (^)(BOOL))completion {
     if (self.isRunning) {
+        // 已运行时，重新发送端口通知（确保 Dart 层能收到）
+        if (self.managementPort > 0) {
+            [[NSNotificationCenter defaultCenter] postNotificationName:@"NodeServerPortReceived"
+                                                                object:nil
+                                                              userInfo:@{@"port": @(self.managementPort), @"type": @"management"}];
+        }
+        if (self.spiderPort > 0) {
+            [[NSNotificationCenter defaultCenter] postNotificationName:@"NodeServerPortReceived"
+                                                                object:nil
+                                                              userInfo:@{@"port": @(self.spiderPort), @"type": @"spider"}];
+        }
         if (completion) completion(YES);
         return;
     }
@@ -74,9 +83,6 @@
             }
 
             if (scriptPath) {
-                // 保存当前线程 ID
-                self.nodeThread = pthread_self();
-                
                 int nativePort = self.nativeServerPort;
                 NSLog(@"Starting Node.js with script: %@, native-port: %d", scriptPath, nativePort);
 
@@ -114,6 +120,7 @@
                     self.isRunning = NO;
                     self.isNodeReady = NO;
                     [self.webServer stop];
+                    self.webServer = nil;
                 });
             } else {
                 NSLog(@"Node.js script not found!");
@@ -510,16 +517,7 @@
 }
 
 - (void)stopNodeJS {
-    // 1. 终止 Node.js 线程
-    if (self.nodeThread) {
-        // 发送 SIGTERM 信号，让 Node.js 优雅退出
-        pthread_kill(self.nodeThread, SIGTERM);
-        // 等待线程完全退出，回收资源
-        pthread_join(self.nodeThread, NULL);
-        self.nodeThread = NULL;
-    }
-
-    // 2. 停止本地 Web 服务器（接收回调用）
+    // 停止本地 Web 服务器（接收回调用）
     self.isRunning = NO;
     self.isNodeReady = NO;
     [self.webServer stop];
