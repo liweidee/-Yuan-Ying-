@@ -13,7 +13,6 @@ import 'package:yuanying/t4/services/xyq_service.dart';
 import 'package:yuanying/t4/services/catvod_open_service.dart';
 import 'package:yuanying/t4/services/py3_spider_service.dart';
 import 'package:yuanying/core/constants/storage_keys.dart';
-
 import 'package:yuanying/t4/services/nodejs_spider_service.dart';
 import 'package:yuanying/nodejs/nodejs_service.dart';
 import 'package:yuanying/utils/platform_utils.dart';
@@ -23,7 +22,6 @@ class SourceManager extends GetxController {
   final T4ApiService _apiService = Get.find<T4ApiService>();
   final Drpy2ApiService _drpy2Service = Get.find<Drpy2ApiService>();
 
-  // ===== 三类配置的爬虫源列表 =====
   final RxList<Map<String, dynamic>> remoteSites = <Map<String, dynamic>>[].obs;
   final RxList<Map<String, dynamic>> remoteParses = <Map<String, dynamic>>[].obs;
   final RxList<Map<String, dynamic>> localSites = <Map<String, dynamic>>[].obs;
@@ -31,20 +29,18 @@ class SourceManager extends GetxController {
   final RxList<Map<String, dynamic>> fileSites = <Map<String, dynamic>>[].obs;
   final RxList<Map<String, dynamic>> fileParses = <Map<String, dynamic>>[].obs;
 
-  // ===== 当前状态 =====
   final Rx<Map<String, dynamic>?> currentSite = Rx<Map<String, dynamic>?>(null);
   final RxList<Map<String, dynamic>> currentParses = <Map<String, dynamic>>[].obs;
   final RxString configLogo = ''.obs;
   final RxBool isConfigLoaded = false.obs;
-  final RxString configSource = 'remote'.obs; // 'remote' | 'local' | 'file'
+  final RxString configSource = 'remote'.obs;
   final RxBool isConfigLoading = false.obs;
   final RxBool configLoadError = false.obs;
   final RxString currentConfigType = 'tvbox'.obs;
 
-  // ===== 内部状态 =====
   bool _isRestoring = false;
+  int _configLoadId = 0; // 防止异步竞态
 
-  // ===== 辅助方法 =====
   void _saveCurrentSiteKey() {
     final site = currentSite.value;
     if (site != null) {
@@ -55,7 +51,6 @@ class SourceManager extends GetxController {
     }
   }
 
-  // ===== 静态爬虫类型判断 =====
   static bool isDrpy2Site(Map<String, dynamic> site) {
     final type = site['type']?.toString() ?? '';
     final api = site['api']?.toString() ?? '';
@@ -63,19 +58,23 @@ class SourceManager extends GetxController {
     return type == '3' &&
         (apiWithoutQuery.endsWith('drpy2.min.js') || apiWithoutQuery.endsWith('drpy2.js'));
   }
+
   static bool isXbpqSite(Map<String, dynamic> site) {
     final api = site['api']?.toString() ?? '';
     return api == 'csp_XBPQ';
   }
+
   static bool isXyqSite(Map<String, dynamic> site) {
     final api = site['api']?.toString() ?? '';
     return api == 'csp_XYQHiker';
   }
+
   static bool isCatVodOpenSite(Map<String, dynamic> site) {
     final type = site['type']?.toString() ?? '';
     final key = site['key']?.toString() ?? '';
     return type == '3' && key.startsWith('catvod_');
   }
+
   static bool isPurePy3Site(Map<String, dynamic> site) {
     final type = site['type']?.toString() ?? '';
     final api = site['api']?.toString() ?? '';
@@ -83,13 +82,13 @@ class SourceManager extends GetxController {
     final apiWithoutQuery = api.split('?')[0];
     return apiWithoutQuery.endsWith('.py');
   }
+
   static bool isNodeJSSite(Map<String, dynamic> site) {
     final type = site['type']?.toString() ?? '';
     final key = site['key']?.toString() ?? '';
     return type == '3' && key.startsWith('nodejs_');
   }
 
-  // ===== 获取当前使用的爬虫服务 =====
   ISpiderService get currentApiService {
     final site = currentSite.value;
     if (site == null) return _apiService;
@@ -102,19 +101,16 @@ class SourceManager extends GetxController {
     return _apiService;
   }
 
-  // ===== 独立服务（详情页使用） =====
   ISpiderService createIndependentService(Map<String, dynamic> site) {
     final key = site['key']?.toString() ?? '';
     final api = site['api']?.toString() ?? '';
     final ext = site['ext'];
-
     if (!isDrpy2Site(site) && !isXbpqSite(site) && !isCatVodOpenSite(site) &&
         !isPurePy3Site(site) && !isXyqSite(site) && !isNodeJSSite(site)) {
       final service = T4ApiService();
       service.switchSite(api, key, ext: ext);
       return service;
     }
-
     if (isXbpqSite(site)) {
       final tag = 'xbpq_$key';
       if (!Get.isRegistered<XbpqService>(tag: tag)) {
@@ -145,23 +141,21 @@ class SourceManager extends GetxController {
     return currentApiService;
   }
 
-  // ===== 推送代理站点缓存 =====
   final Rx<Map<String, dynamic>?> _pushAgentSite = Rx<Map<String, dynamic>?>(null);
   Map<String, dynamic>? get pushAgentSite => _pushAgentSite.value;
 
-  // ===== 获取当前活动的爬虫源列表 =====
   List<Map<String, dynamic>> get sites {
     if (configSource.value == 'local') return localSites;
     if (configSource.value == 'file') return fileSites;
     return remoteSites;
   }
+
   List<Map<String, dynamic>> get parses {
     if (configSource.value == 'local') return localParses;
     if (configSource.value == 'file') return fileParses;
     return remoteParses;
   }
 
-  // ===== 过滤有效爬虫 =====
   bool _shouldKeepSite(Map<String, dynamic> site) {
     final type = site['type']?.toString() ?? '';
     final key = site['key']?.toString() ?? '';
@@ -177,11 +171,11 @@ class SourceManager extends GetxController {
     if (apiWithoutQuery.endsWith('.py')) return true;
     return false;
   }
+
   List<Map<String, dynamic>> _filterSites(List<Map<String, dynamic>> sites) {
     return sites.where(_shouldKeepSite).toList();
   }
 
-  // ===== 生命周期 =====
   @override
   void onInit() {
     super.onInit();
@@ -189,7 +183,6 @@ class SourceManager extends GetxController {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       loadConfig();
     });
-
     ever(currentSite, (_) {
       if (!_isRestoring) {
         _saveCurrentSiteKey();
@@ -197,12 +190,10 @@ class SourceManager extends GetxController {
     });
   }
 
-  // ===== 选择默认爬虫源（强制重置 currentSite 并刷新首页） =====
   Future<void> _selectDefaultSite() async {
     _isRestoring = true;
     final siteList = this.sites;
     final parseList = this.parses;
-
     if (siteList.isNotEmpty) {
       Map<String, dynamic>? selectedSite;
       final savedKey = GStorage.getSetting<String>(SettingBoxKey.lastSelectedSiteKey);
@@ -216,7 +207,6 @@ class SourceManager extends GetxController {
         }
       }
       selectedSite ??= siteList.first;
-
       currentSite.value = selectedSite;
       currentParses.value = List.from(parseList);
       await _switchToSite(currentSite.value!);
@@ -230,11 +220,8 @@ class SourceManager extends GetxController {
     _isRestoring = false;
   }
 
-  // ===== 核心：加载当前配置并强制重置爬虫源 =====
   Future<void> loadConfig() async {
     isConfigLoading.value = true;
-
-    // ---- 更新当前接口配置类型 ----
     final customConfigs = GStorage.getCustomSites();
     final savedKey = GStorage.setting.get('selected_config_key');
     Map<String, dynamic>? selectedConfig;
@@ -243,8 +230,7 @@ class SourceManager extends GetxController {
     }
     selectedConfig ??= customConfigs.isNotEmpty ? customConfigs.first : null;
     currentConfigType.value = selectedConfig?['configType']?.toString() ?? 'tvbox';
-    // --------------------------------
-    
+
     try {
       if (PlatformUtils.isDesktop) {
         final customConfigs = GStorage.getCustomSites();
@@ -257,7 +243,6 @@ class SourceManager extends GetxController {
             if (targetConfig != null) {
               final configType = targetConfig['configType']?.toString() ?? 'tvbox';
               if (configType == 'catvod') {
-                // 当前选中 CatVod，自动跳转到第一个 TVBox
                 final tvboxConfig = customConfigs.firstWhereOrNull(
                   (c) => (c['configType']?.toString() ?? 'tvbox') != 'catvod'
                 );
@@ -288,12 +273,10 @@ class SourceManager extends GetxController {
       }
     } catch (e) {
       print('loadConfig error: $e');
-      // 异常时，sites 可能为空，但下面会通过 hasCustomSites 判断
     } finally {
       isConfigLoading.value = false;
     }
 
-    // ---- 判断是否加载失败 ----
     final hasCustomSites = GStorage.getCustomSites().isNotEmpty;
     if (hasCustomSites && this.sites.isEmpty) {
       configLoadError.value = true;
@@ -302,7 +285,6 @@ class SourceManager extends GetxController {
     }
   }
 
-  // ===== 加载远端配置 =====
   Future<void> _loadRemoteConfig() async {
     final customConfigs = GStorage.getCustomSites();
     if (customConfigs.isEmpty) {
@@ -310,7 +292,6 @@ class SourceManager extends GetxController {
       remoteParses.clear();
       return;
     }
-
     final savedKey = GStorage.setting.get('selected_config_key');
     Map<String, dynamic>? selectedConfig;
     if (savedKey != null && savedKey.toString().isNotEmpty) {
@@ -321,7 +302,6 @@ class SourceManager extends GetxController {
       }
     }
     selectedConfig ??= customConfigs.first;
-
     final configUrl = selectedConfig['api']?.toString();
     if (configUrl == null || configUrl.isEmpty) {
       remoteSites.clear();
@@ -329,23 +309,17 @@ class SourceManager extends GetxController {
       return;
     }
 
-    // ===== 先判断 configType，精准分流 =====
     final configType = selectedConfig['configType']?.toString() ?? 'tvbox';
-    
-    // ===== 桌面端防御 =====
     if (PlatformUtils.isDesktop && configType == 'catvod') {
       print('[SourceManager] 桌面端跳过猫影视配置加载');
       remoteSites.clear();
       remoteParses.clear();
       return;
     }
-
     if (configType == 'catvod') {
-      // 猫影视类型：走 Node.js 流程
       await _loadCatVodConfig(configUrl);
       return;
     }
-
     try {
       final result = await _apiService.fetchConfig(configUrl: configUrl);
       if (result['sites'] != null && result['sites'] is List) {
@@ -375,75 +349,75 @@ class SourceManager extends GetxController {
     }
   }
 
-  // ===== 加载猫影视配置 =====
   Future<void> _loadCatVodConfig(String configUrl) async {
+    final currentLoadId = ++_configLoadId;
     try {
       final nodejs = NodeJSService.instance;
-      // 1. 确保 Node.js 已初始化
       if (!nodejs.isInitialized) {
         await nodejs.initialize();
       }
-      
-      // 2. 调用加载
+      if (currentLoadId != _configLoadId) return;
+
       final success = await nodejs.loadSourceFromURL(configUrl);
       if (!success) {
-        print('[SourceManager] 猫影视源加载失败（loadSourceFromURL 返回 false），重置 Node.js 状态');
-        await nodejs.stop(); // 重置状态，确保重试能重新初始化
-        remoteSites.clear();
-        remoteParses.clear();
+        print('[SourceManager] 猫影视源加载失败（loadSourceFromURL 返回 false）');
+        if (currentLoadId == _configLoadId) {
+          remoteSites.clear();
+          remoteParses.clear();
+        }
         return;
       }
-      
-      // 3. 等待 spiderPort 就绪
+      if (currentLoadId != _configLoadId) return;
+
       await nodejs.waitForSpiderPort();
       if (nodejs.spiderPort == 0) {
-        print('[SourceManager] spiderPort 未就绪，无法获取配置，重置 Node.js 状态');
-        await nodejs.stop(); // 端口无效时重置，避免卡死
-        remoteSites.clear();
-        remoteParses.clear();
+        print('[SourceManager] spiderPort 未就绪，无法获取配置');
+        if (currentLoadId == _configLoadId) {
+          remoteSites.clear();
+        }
         return;
       }
-      
-      // 4. 获取配置（/config）
-      final result = await nodejs.getCatConfig(); // 已带重试
-      
-      // 5. 解析 sites
+      if (currentLoadId != _configLoadId) return;
+
+      final result = await nodejs.getCatConfig();
+      if (currentLoadId != _configLoadId) return;
+
       final videoSites = result['video']?['sites'] as List<dynamic>? ?? [];
       if (videoSites.isNotEmpty) {
-        // 成功获取，更新 remoteSites
         final rawSites = videoSites.map((e) => Map<String, dynamic>.from(e)).toList();
         final filteredSites = _filterSites(rawSites);
-        remoteSites.value = filteredSites;
-        if (result['logo'] != null) {
-          configLogo.value = result['logo'].toString();
+        if (currentLoadId == _configLoadId) {
+          remoteSites.value = filteredSites;
+          if (result['logo'] != null) {
+            configLogo.value = result['logo'].toString();
+          }
         }
       } else {
-        remoteSites.clear();
+        if (currentLoadId == _configLoadId) remoteSites.clear();
       }
-      
-      // 6. 解析 parses
+
       if (result['parses'] != null && result['parses'] is List) {
-        remoteParses.value = (result['parses'] as List)
-            .map((e) => Map<String, dynamic>.from(e))
-            .toList();
+        if (currentLoadId == _configLoadId) {
+          remoteParses.value = (result['parses'] as List)
+              .map((e) => Map<String, dynamic>.from(e))
+              .toList();
+        }
       } else {
-        remoteParses.clear();
+        if (currentLoadId == _configLoadId) remoteParses.clear();
       }
-      _updatePushAgentCache();
-      print('[SourceManager] 猫影视配置加载成功，${remoteSites.length} 个站点');
+      if (currentLoadId == _configLoadId) _updatePushAgentCache();
+      if (currentLoadId == _configLoadId) {
+        print('[SourceManager] 猫影视配置加载成功，${remoteSites.length} 个站点');
+      }
     } catch (e) {
       print('[SourceManager] 加载猫影视配置失败: $e');
-      // 异常时也重置 Node.js 状态，防止状态残留
-      try {
-        final nodejs = NodeJSService.instance;
-        await nodejs.stop();
-      } catch (_) {}
-      remoteSites.clear();
-      remoteParses.clear();
+      if (currentLoadId == _configLoadId) {
+        remoteSites.clear();
+        remoteParses.clear();
+      }
     }
   }
 
-  // ===== 加载本地缓存配置 =====
   Future<void> _loadLocalConfigPackage(String configKey) async {
     final package = GStorage.getConfigPackage(configKey);
     if (package == null) {
@@ -452,24 +426,19 @@ class SourceManager extends GetxController {
       localParses.clear();
       return;
     }
-
     final rawSites = package['sites'] as List? ?? [];
     final rawParses = package['parses'] as List? ?? [];
-
     final allSites = rawSites.map((e) => Map<String, dynamic>.from(e as Map)).toList();
     final filteredSites = _filterSites(allSites);
-
     if (filteredSites.isEmpty) {
       localSites.clear();
       localParses.clear();
       return;
     }
-
     for (var site in filteredSites) {
       site['_configKey'] = configKey;
       site['_source'] = 'local';
     }
-
     localSites.value = filteredSites;
     localParses.value = rawParses.map((e) => Map<String, dynamic>.from(e as Map)).toList();
     _updatePushAgentCache();
@@ -498,7 +467,6 @@ class SourceManager extends GetxController {
     localParses.clear();
   }
 
-  // ===== 加载本地文件配置 =====
   Future<void> _loadFileConfig(String filePath) async {
     try {
       final file = File(filePath);
@@ -563,7 +531,6 @@ class SourceManager extends GetxController {
     fileParses.clear();
   }
 
-  // ===== 对外接口：切换配置源类型 =====
   Future<void> switchConfigSource(String source) async {
     if (configSource.value == source) return;
     configSource.value = source;
@@ -571,20 +538,16 @@ class SourceManager extends GetxController {
     await loadConfig();
   }
 
-  // ===== 对外接口：切换远端配置（指定 key） =====
   Future<void> switchConfig(String configKey) async {
     final customConfigs = GStorage.getCustomSites();
     final targetConfig = customConfigs.firstWhereOrNull((c) => c['key'] == configKey);
     if (targetConfig == null) return;
-
-    // ===== 桌面端拦截 =====
     final configType = targetConfig['configType']?.toString() ?? 'tvbox';
     if (PlatformUtils.isDesktop && configType == 'catvod') {
       print('[SourceManager] 桌面端不支持猫影视配置');
       SmartDialog.showToast('猫影视配置仅支持移动端');
       return;
     }
-
     final exists = customConfigs.any((c) => c['key'] == configKey);
     if (!exists) return;
     await GStorage.setSetting('selected_config_key', configKey);
@@ -593,26 +556,22 @@ class SourceManager extends GetxController {
     await loadConfig();
   }
 
-  // ===== 对外接口：应用本地缓存配置包 =====
   Future<void> applyLocalConfigPackage({
     required List<Map<String, dynamic>> sites,
     required List<Map<String, dynamic>> parses,
-    required String siteKey,    // 接口配置的 key
-    required String packageKey, // 配置包 key
+    required String siteKey,
+    required String packageKey,
   }) async {
-    // 保存配置包
     GStorage.saveConfigPackage(packageKey, {
       'sites': sites,
       'parses': parses,
     });
-    // 设置当前选中的配置 key 为 siteKey
     await GStorage.setSetting('selected_config_key', siteKey);
     configSource.value = 'local';
     GStorage.setSetting('config_source', 'local');
     await loadConfig();
   }
 
-  // ===== 对外接口：加载本地文件配置 =====
   Future<void> loadFileConfig(String filePath, {String? siteKey}) async {
     final key = siteKey ?? 'file_${DateTime.now().millisecondsSinceEpoch}';
     await GStorage.setSetting('selected_config_key', key);
@@ -621,9 +580,7 @@ class SourceManager extends GetxController {
     await loadConfig();
   }
 
-  // ===== 切换爬虫源 =====
   Future<void> switchSite(Map<String, dynamic> site) async {
-    // 卸载旧的 py3 爬虫（如果存在且不同）
     final oldSite = currentSite.value;
     if (oldSite != null && SourceManager.isPurePy3Site(oldSite)) {
       final oldKey = oldSite['key']?.toString() ?? '';
@@ -635,29 +592,22 @@ class SourceManager extends GetxController {
         }
       }
     }
-
     final siteKey = site['key']?.toString();
     if (siteKey == null || siteKey.isEmpty) {
       print('[SourceManager] switchSite: site key is empty');
       return;
     }
-
-    // 根据当前 configSource 获取对应的爬虫源列表
     final sourceList = this.sites;
     final parseList = this.parses;
-
     Map<String, dynamic>? target = sourceList.firstWhereOrNull((s) => s['key']?.toString() == siteKey);
     if (target == null) {
-      // 如果找不到，回退到第一个
       target = sourceList.isNotEmpty ? sourceList.first : null;
     }
-
     if (target == null) {
       currentSite.value = null;
       currentParses.clear();
       return;
     }
-
     currentSite.value = target;
     currentParses.value = List.from(parseList);
     await _switchToSite(target);
@@ -715,7 +665,6 @@ class SourceManager extends GetxController {
     }
   }
 
-  // ===== 实际切换爬虫服务 =====
   Future<void> _switchToSite(Map<String, dynamic> site) async {
     print('_switchToSite received: key=${site['key']}, api=${site['api']}');
     if (isDrpy2Site(site)) {
@@ -828,7 +777,6 @@ class SourceManager extends GetxController {
     );
   }
 
-  // ===== 切换到猫影视 Node.js 源 =====
   NodeJSSpiderService _getNodeJSService() {
     if (!Get.isRegistered<NodeJSSpiderService>()) {
       Get.put(NodeJSSpiderService(), permanent: true);

@@ -8,96 +8,26 @@ import 'package:yuanying/modules/main/controllers/main_controller.dart';
 import 'package:yuanying/modules/setting/models/setting_pref.dart';
 import 'package:yuanying/common/widgets/floating_navigation_bar.dart';
 import 'package:yuanying/core/theme/style.dart';
-import 'package:yuanying/nodejs/nodejs_service.dart';
-import 'package:yuanying/t4/services/source_manager.dart';
 
 class MainPage extends StatefulWidget {
   const MainPage({super.key});
-
   @override
   State<MainPage> createState() => _MainPageState();
 }
 
-class _MainPageState extends State<MainPage> with WidgetsBindingObserver {
+class _MainPageState extends State<MainPage> {
   late final MainController _controller;
-  Timer? _restartTimer;
-  bool _isChecking = false;
 
   @override
   void initState() {
     super.initState();
     _controller = Get.put(MainController());
-    WidgetsBinding.instance.addObserver(this);
+    // 不再监听生命周期，保活逻辑已移入 NodeJSService
   }
 
   @override
   void dispose() {
-    _restartTimer?.cancel(); 
-    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    super.didChangeAppLifecycleState(state);
-    if (state == AppLifecycleState.resumed) {
-      // 延迟执行，给系统足够时间恢复
-      _restartTimer?.cancel();
-      _restartTimer = Timer(const Duration(milliseconds: 600), () {
-        _checkAndRestartNodeService();
-      });
-    }
-  }
-
-  Future<void> _checkAndRestartNodeService() async {
-    // 防止并发
-    if (_isChecking) return;
-    _isChecking = true;
-    try {
-      final sourceManager = Get.find<SourceManager>();
-      
-      // 若正在加载配置，跳过本次检测（避免与正常加载流程冲突）
-      if (sourceManager.isConfigLoading.value) {
-        print('配置加载中，跳过保活检测');
-        return;
-      }
-      
-      // 仅猫影视配置需要保活
-      if (sourceManager.currentConfigType.value != 'catvod') {
-        print('非猫影视配置，跳过保活检测');
-        return;
-      }
-
-      final nodejs = NodeJSService.instance;
-      
-      // 服务未初始化则先初始化
-      if (!nodejs.isInitialized) {
-        print('Node.js 未初始化，执行初始化');
-        await nodejs.initialize();
-        // 若初始化后仍未就绪，则返回
-        if (!nodejs.isInitialized) return;
-      }
-
-      // 快速检查端口是否有效
-      if (nodejs.spiderPort <= 0) {
-        print('spiderPort 无效，触发重启');
-        await nodejs.reinitialize();
-        return;
-      }
-
-      // 探测服务是否存活
-      final alive = await nodejs.isServiceAlive();
-      if (!alive) {
-        print('Node.js 服务不可用，触发重启');
-        await nodejs.reinitialize();
-      } else {
-        print('Node.js 服务正常');
-      }
-    } catch (e, stack) {
-      print('保活检测异常: $e\n$stack');
-    } finally {
-      _isChecking = false;
-    }
   }
 
   @override
@@ -130,7 +60,6 @@ class _MainPageState extends State<MainPage> with WidgetsBindingObserver {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final padding = MediaQuery.viewPaddingOf(context);
-
     return PopScope(
       canPop: _controller.directExitOnBack && _controller.selectedIndex.value == 0,
       onPopInvoked: (didPop) {
@@ -141,13 +70,10 @@ class _MainPageState extends State<MainPage> with WidgetsBindingObserver {
         }
       },
       child: Obx(() {
-        // 依赖 navStyleVersion，样式切换后触发重建
         final _ = _controller.navStyleVersion.value;
-
         final useBottomNav = _controller.useBottomNav.value;
         final selectedIndex = _controller.selectedIndex.value;
         final navigationBars = _controller.navigationBars;
-
         if (useBottomNav) {
           return Scaffold(
             extendBody: true,
@@ -236,20 +162,12 @@ class _MainPageState extends State<MainPage> with WidgetsBindingObserver {
     );
   }
 
-  // ============================================================
-  // 底部栏方式：始终渲染，通过偏移量控制位置
-  // ============================================================
-
   Widget _buildMobileBottomBar({
     required ColorScheme colorScheme,
     required int selectedIndex,
     required List<NavigationBarType> navigationBars,
   }) {
     final style = SettingPref.navigationBarStyle;
-
-    // ============================================================
-    // 1. 基础 NavigationBar
-    // ============================================================
     final baseNavigationBar = NavigationBar(
       height: 56,
       elevation: 0,
@@ -274,8 +192,7 @@ class _MainPageState extends State<MainPage> with WidgetsBindingObserver {
         if (states.any((state) =>
             state == WidgetState.pressed ||
             state == WidgetState.hovered ||
-            state == WidgetState.focused
-        )) {
+            state == WidgetState.focused)) {
           return Colors.transparent;
         }
         return null;
@@ -290,27 +207,22 @@ class _MainPageState extends State<MainPage> with WidgetsBindingObserver {
       }).toList(),
     );
 
-    // ========== 紧凑风格 BottomNavigationBar ==========
-  Widget compactBottomBar = BottomNavigationBar(
-    currentIndex: selectedIndex,
-    onTap: _controller.switchPage,
-    type: BottomNavigationBarType.fixed,
-    iconSize: 16,
-    selectedFontSize: 12,
-    unselectedFontSize: 12,
-    items: navigationBars.map((item) {
-      return BottomNavigationBarItem(
-        icon: Icon(item.icon.icon, size: 16, color: colorScheme.outline),
-        activeIcon: Icon(item.selectIcon.icon, size: 16, color: colorScheme.primary),
-        label: item.label,
-      );
-    }).toList(),
-    // 不设置 selectedItemColor / unselectedItemColor，完全继承主题默认值
-  );
+    Widget compactBottomBar = BottomNavigationBar(
+      currentIndex: selectedIndex,
+      onTap: _controller.switchPage,
+      type: BottomNavigationBarType.fixed,
+      iconSize: 16,
+      selectedFontSize: 12,
+      unselectedFontSize: 12,
+      items: navigationBars.map((item) {
+        return BottomNavigationBarItem(
+          icon: Icon(item.icon.icon, size: 16, color: colorScheme.outline),
+          activeIcon: Icon(item.selectIcon.icon, size: 16, color: colorScheme.primary),
+          label: item.label,
+        );
+      }).toList(),
+    );
 
-    // ============================================================
-    // 2. 胶囊 NavigationBar
-    // ============================================================
     final capsuleNavigationBar = NavigationBar(
       height: 70,
       elevation: 0,
@@ -346,19 +258,14 @@ class _MainPageState extends State<MainPage> with WidgetsBindingObserver {
       }).toList(),
     );
 
-    // ============================================================
-    // 3. 根据样式选择
-    // ============================================================
     Widget bottomBar;
     switch (style) {
       case NavigationBarStyle.default_:
         bottomBar = baseNavigationBar;
         break;
-
       case NavigationBarStyle.defaultCompact:
         bottomBar = compactBottomBar;
         break;
-
       case NavigationBarStyle.floating:
         bottomBar = FloatingNavigationBar(
           selectedIndex: selectedIndex,
@@ -374,23 +281,18 @@ class _MainPageState extends State<MainPage> with WidgetsBindingObserver {
           }).toList(),
         );
         break;
-
       case NavigationBarStyle.capsule:
         bottomBar = capsuleNavigationBar;
         break;
     }
 
-    // 更新底部栏高度（用于计算偏移比例，但实际偏移由 topBarHeight 决定）
     final double actualHeight = _getBottomBarHeight(style);
     _controller.bottomBarHeight.value = actualHeight;
-
     return Obx(() {
       if (!_controller.hideBottomBar.value) {
         return bottomBar;
       }
-
       if (_controller.isInstantMode) {
-        // 即时模式：使用 showBottomBar + AnimatedSlide
         final bool show = _controller.showBottomBar.value;
         return AnimatedSlide(
           offset: Offset(0, show ? 0 : 1),
@@ -399,8 +301,6 @@ class _MainPageState extends State<MainPage> with WidgetsBindingObserver {
           child: bottomBar,
         );
       } else {
-        // 同步模式：使用 barOffset + FractionalTranslation
-        // 平移比例 = barOffset / topBarHeight，确保与顶部栏同步
         final double slideFactor = (_controller.barOffset.value / Style.topBarHeight).clamp(0.0, 1.0);
         return FractionalTranslation(
           translation: Offset(0, slideFactor),
@@ -436,7 +336,6 @@ class _NavItem extends StatelessWidget {
     required this.onTap,
     super.key,
   });
-
   final NavigationBarType item;
   final bool isSelected;
   final VoidCallback onTap;
@@ -444,7 +343,6 @@ class _NavItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-
     return Material(
       color: Colors.transparent,
       shape: RoundedRectangleBorder(
