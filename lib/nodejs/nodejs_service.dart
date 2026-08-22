@@ -1,14 +1,22 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:get/get.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:yuanying/services/catvod_log_service.dart';
 
-class NodeJSService extends GetxService {
+// ===== 服务状态枚举 =====
+enum _ServiceStatus {
+  uninitialized,
+  ready,
+  degraded,
+  dead,
+}
+
+class NodeJSService extends GetxService with WidgetsBindingObserver {
   static const MethodChannel _channel = MethodChannel('com.tvbox/nodejs');
   static const EventChannel _eventChannel = EventChannel('com.tvbox/nodejs/events');
 
@@ -18,6 +26,7 @@ class NodeJSService extends GetxService {
 
   static NodeJSService get instance => _instance;
 
+  // ---- 成员变量 ----
   bool _isInitialized = false;
   bool _isNodeReady = false;
   int _managementPort = 0;
@@ -31,15 +40,19 @@ class NodeJSService extends GetxService {
   Completer<void>? _managementPortCompleter;
   Completer<void>? _spiderPortCompleter;
   StreamSubscription? _eventSubscription;
+  String? _lastLoadedUrl;
+  bool _isRestarting = false;
 
+  // ---- 服务状态 ----
+  _ServiceStatus _status = _ServiceStatus.uninitialized;
+  bool _isRecovering = false;
+
+  // ---- Getter ----
   bool get isInitialized => _isInitialized;
   bool get isNodeReady => _isNodeReady;
   int get managementPort => _managementPort;
   int get spiderPort => _spiderPort;
   bool get hasSpiderServer => _spiderPort > 0;
-
-  String? _lastLoadedUrl;        // 保存最近一次加载的源 URL
-  bool _isRestarting = false;    // 防止并发重启
 
   late CatVodLogService _logService;
 
@@ -88,19 +101,89 @@ class NodeJSService extends GetxService {
     );
   }
 
-  // 内部日志方法
   void _log(String msg) {
     _logService.addLog(msg);
-    debugPrint(msg); // 可选保留打印
+    debugPrint(msg);
   }
 
+  // ---- 生命周期 ----
   @override
   Future<void> onInit() async {
     super.onInit();
     _logService = Get.find<CatVodLogService>();
+    WidgetsBinding.instance.addObserver(this);
     await initialize();
   }
 
+  @override
+  void onClose() {
+    WidgetsBinding.instance.removeObserver(this);
+    stop();
+    super.onClose();
+  }
+
+  // ---- 应用生命周期回调 ----
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _attemptAutoRecovery();
+    }
+  }
+
+  // ---- 自动自愈 ----
+  Future<void> _attemptAutoRecovery() async {
+    if (_isRecovering) return;
+    if (_lastLoadedUrl == null || _lastLoadedUrl!.isEmpty) {
+      _log('⚠️ 无已加载的源 URL，跳过自愈');
+      return;
+    }
+    if (_status == _ServiceStatus.ready && await _quickPing()) {
+      _log('✅ 服务健康，无需自愈');
+      return;
+    }
+    _log('🔄 检测到服务异常，开始自动自愈...');
+    _isRecovering = true;
+    try {
+      await reinitialize();
+    } catch (e) {
+      _log('❌ 自动自愈失败: $e');
+    } finally {
+      _isRecovering = false;
+    }
+  }
+
+  // ---- 快速端口探测 ----
+  Future<bool> _quickPing() async {
+    if (_spiderPort <= 0) return false;
+    try {
+      final response = await http.get(
+        Uri.parse('http://127.0.0.1:$_spiderPort/config'),
+      ).timeout(const Duration(milliseconds: 500));
+      return response.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // ---- 确保服务可用（内部核心） ----
+  Future<bool> _ensureServiceAvailable() async {
+    if (_isInitialized && _status == _ServiceStatus.ready) {
+      if (await _quickPing()) {
+        return true;
+      }
+      _status = _ServiceStatus.degraded;
+      _log('⚠️ 服务标记为 ready 但 ping 失败，降级为 degraded');
+    }
+    try {
+      await reinitialize();
+      return _status == _ServiceStatus.ready;
+    } catch (e) {
+      _log('❌ 恢复服务失败: $e');
+      return false;
+    }
+  }
+
+  // ---- initialize ----
   Future<void> initialize() async {
     if (_isInitialized) return;
 
@@ -120,7 +203,6 @@ class NodeJSService extends GetxService {
             _readyCompleter!.complete();
           }
         });
-
         await _readyCompleter!.future;
         readyTimeout.cancel();
 
@@ -130,25 +212,31 @@ class NodeJSService extends GetxService {
             _managementPortCompleter!.complete();
           }
         });
-
         await _managementPortCompleter!.future;
         mgmtTimeout.cancel();
+
+        _status = _ServiceStatus.ready;
+        _log('✅ Node.js 初始化成功，状态: ready');
+      } else {
+        _status = _ServiceStatus.dead;
+        _log('❌ Node.js 初始化失败');
       }
     } catch (e) {
       _log('Node.js initialization error: $e');
       _isInitialized = false;
+      _status = _ServiceStatus.dead;
     }
   }
 
+  // ---- loadSourceFromURL（带自愈） ----
   Future<bool> loadSourceFromURL(String url) async {
     _lastLoadedUrl = url;
 
-    // 确保已初始化
-    if (!_isInitialized) {
-      await initialize();
+    if (!await _ensureServiceAvailable()) {
+      _log('❌ 服务不可用，无法加载源');
+      return false;
     }
 
-    // 如果 managementPort 为 0，主动等待
     if (_managementPort == 0) {
       _log('managementPort is 0, waiting...');
       _managementPortCompleter ??= Completer<void>();
@@ -172,18 +260,23 @@ class NodeJSService extends GetxService {
       _log('loadSourceFromURL result: $result');
       if (result is Map && result['success'] == true) {
         await waitForSpiderPort();
+        _status = _ServiceStatus.ready;
         return true;
       }
+      _status = _ServiceStatus.degraded;
       return false;
     } on PlatformException catch (e) {
       _log('PlatformException: ${e.message}');
+      _status = _ServiceStatus.degraded;
       return false;
     } catch (e) {
       _log('loadSourceFromURL error: $e');
+      _status = _ServiceStatus.degraded;
       return false;
     }
   }
 
+  // ---- waitForSpiderPort ----
   Future<void> waitForSpiderPort({Duration timeout = const Duration(seconds: 30)}) async {
     if (_spiderPort > 0) return;
 
@@ -199,6 +292,7 @@ class NodeJSService extends GetxService {
     timer.cancel();
   }
 
+  // ---- isServiceAlive ----
   Future<bool> isServiceAlive() async {
     if (_spiderPort <= 0) return false;
     try {
@@ -211,28 +305,32 @@ class NodeJSService extends GetxService {
     }
   }
 
+  // ---- reinitialize（原子重启+重载） ----
   Future<void> reinitialize() async {
-    if (_isRestarting) return;
+    if (_isRestarting) {
+      _log('⚠️ 正在重启中，跳过此次请求');
+      return;
+    }
     _isRestarting = true;
-    _log('🔄 无感重启 Node.js 服务...');
-    try {
-      // 停止旧服务
-      await stop();
-      // 等待原生资源释放（关键）
-      await Future.delayed(const Duration(milliseconds: 300));
+    _status = _ServiceStatus.degraded;
+    _log('🔄 开始服务重启...');
 
-      // 重置状态（stop 已重置部分，但显式确保）
+    try {
+      await stop();
+      await Future.delayed(const Duration(milliseconds: 400));
+
       _isInitialized = false;
       _isNodeReady = false;
       _managementPort = 0;
       _spiderPort = 0;
       _spiderApiBase = '';
+      _managementPortCompleter = null;
+      _spiderPortCompleter = null;
+      _readyCompleter = null;
       _eventSubscription?.cancel();
 
-      // 重新初始化
       await initialize();
 
-      // 重新加载源（带重试）
       if (_lastLoadedUrl != null && _lastLoadedUrl!.isNotEmpty) {
         bool loaded = false;
         for (int i = 0; i < 3; i++) {
@@ -242,21 +340,27 @@ class NodeJSService extends GetxService {
           if (i < 2) await Future.delayed(const Duration(milliseconds: 500));
         }
         if (loaded) {
+          _status = _ServiceStatus.ready;
           _log('✅ 源重载成功，spiderPort: $_spiderPort');
         } else {
-          _log('❌ 源重载失败，可能需要手动刷新');
+          _status = _ServiceStatus.dead;
+          _log('❌ 源重载失败，服务不可用');
         }
       } else {
-        _log('⚠️ 无保存的源 URL，跳过加载');
+        _status = _ServiceStatus.ready;
+        _log('✅ 服务启动成功，无源加载（非猫影视配置）');
       }
     } catch (e) {
+      _status = _ServiceStatus.dead;
       _log('❌ reinitialize 异常: $e');
+      rethrow;
     } finally {
       _isRestarting = false;
     }
-    _log('✅ 无感重启流程结束');
+    _log('✅ 重启流程结束，状态: $_status');
   }
 
+  // ---- deleteSource ----
   Future<bool> deleteSource() async {
     try {
       final result = await _channel.invokeMethod('deleteSource');
@@ -264,12 +368,29 @@ class NodeJSService extends GetxService {
       _spiderApiBase = '';
       if (result == true) {
         _lastLoadedUrl = null;
+        _status = _ServiceStatus.uninitialized;
       }
       return result == true;
     } catch (e) {
       print('deleteSource error: $e');
       return false;
     }
+  }
+
+  // ---- stop ----
+  Future<void> stop() async {
+    try {
+      await _channel.invokeMethod('stopNodeJS');
+    } catch (e) {
+      _log('stopNodeJS error: $e');
+    }
+    _isInitialized = false;
+    _isNodeReady = false;
+    _managementPort = 0;
+    _spiderPort = 0;
+    _spiderApiBase = '';
+    _status = _ServiceStatus.uninitialized;
+    _eventSubscription?.cancel();
   }
 
   void setCurrentSpider(String key, int type, {String apiBase = ''}) {
@@ -314,7 +435,6 @@ class NodeJSService extends GetxService {
         final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 10));
         if (response.statusCode == 200) {
           final data = jsonDecode(response.body) as Map<String, dynamic>;
-          // 解析并设置 _spiderApiBase
           final videoSites = data['video']?['sites'] as List<dynamic>? ?? [];
           if (videoSites.isNotEmpty) {
             final api = videoSites.first['api'] as String? ?? '';
@@ -482,21 +602,6 @@ class NodeJSService extends GetxService {
     return {};
   }
 
-  Future<void> stop() async {
-    try {
-      await _channel.invokeMethod('stopNodeJS');
-    } catch (e) {
-      _log('stopNodeJS error: $e');
-    }
-    _isInitialized = false;
-    _isNodeReady = false;
-    _managementPort = 0;
-    _spiderPort = 0;
-    _spiderApiBase = '';
-    _eventSubscription?.cancel();
-  }
-
-  /// 诊断蜘蛛源 - 移植自 tvbox_flutter
   Future<Map<String, dynamic>> diagnoseSpider() async {
     final result = <String, dynamic>{};
     result['spiderPort'] = _spiderPort;
@@ -509,9 +614,7 @@ class NodeJSService extends GetxService {
       return Map<String, dynamic>.from(result);
     }
 
-    // 辅助日志（使用您已有的日志服务或 print）
-    void _log(String msg) {
-      // 如果有 CatVodLogService 则使用，否则 print
+    void _logDiag(String msg) {
       try {
         final logService = Get.find<CatVodLogService>();
         logService.addLog('[诊断] $msg');
@@ -637,12 +740,10 @@ class NodeJSService extends GetxService {
         }
       }
 
-      // 完整工作流测试
       result['=== Full Workflow Test ==='] = null;
       try {
         final fullBase = '$_spiderApiBase';
 
-        // 1. 初始化
         final initUrl = 'http://127.0.0.1:$_spiderPort$fullBase/init';
         await http.post(
           Uri.parse(initUrl),
@@ -650,7 +751,6 @@ class NodeJSService extends GetxService {
           body: jsonEncode({}),
         ).timeout(const Duration(seconds: 5));
 
-        // 2. 搜索
         final searchUrl = 'http://127.0.0.1:$_spiderPort$fullBase/search';
         final searchResp = await http.post(
           Uri.parse(searchUrl),
@@ -670,7 +770,6 @@ class NodeJSService extends GetxService {
             final vodId = list[0]['vod_id']?.toString() ?? '';
             result['[Step1a] Got vod_id'] = vodId;
 
-            // 3. 详情
             final detailUrl = 'http://127.0.0.1:$_spiderPort$fullBase/detail';
             final detailResp = await http.post(
               Uri.parse(detailUrl),
@@ -734,11 +833,5 @@ class NodeJSService extends GetxService {
     }
 
     return Map<String, dynamic>.from(result);
-  }
-
-  @override
-  void onClose() {
-    stop();
-    super.onClose();
   }
 }

@@ -14,6 +14,9 @@
 @property (nonatomic, assign) int spiderPort;
 @property (nonatomic, strong) GCDWebServer *webServer;
 @property (nonatomic, assign) pthread_t nodeThread;
+
+- (void)forceCleanup;
+- (BOOL)isNodeProcessActuallyAlive;
 @end
 
 @implementation NodeJSManager
@@ -49,12 +52,52 @@
     return sourcePath;
 }
 
-- (void)startNodeJS:(void (^)(BOOL))completion {
-    if (self.isRunning) {
-        if (completion) completion(YES);
-        return;
-    }
+- (void)forceCleanup {
+    self.isRunning = NO;
+    self.isNodeReady = NO;
+    self.nodeThread = NULL;
+    [self.webServer stop];
+    self.webServer = nil;
+    self.nativeServerPort = 0;
+    self.managementPort = 0;
+    self.spiderPort = 0;
+}
 
+- (BOOL)isNodeProcessActuallyAlive {
+    if (self.nativeServerPort <= 0) return NO;
+    
+    NSString *url = [NSString stringWithFormat:@"http://127.0.0.1:%d/onCatPawOpenPort?type=ping", self.nativeServerPort];
+    dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
+    __block BOOL alive = NO;
+    
+    NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithURL:[NSURL URLWithString:url]
+                                                             completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        if (!error && [(NSHTTPURLResponse *)response statusCode] == 200) {
+            alive = YES;
+        }
+        dispatch_semaphore_signal(semaphore);
+    }];
+    [task resume];
+    
+    // 最多等待 0.5 秒
+    dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, 0.5 * NSEC_PER_SEC));
+    [task cancel];
+    
+    return alive;
+}
+
+- (void)startNodeJS:(void (^)(BOOL))completion {
+    // 如果标记为运行中，先实际探测是否真的存活
+    if (self.isRunning) {
+        if ([self isNodeProcessActuallyAlive]) {
+            if (completion) completion(YES);
+            return;
+        } else {
+            NSLog(@"⚠️ Node.js 标记为运行但实际已死，执行强制清理");
+            [self forceCleanup];
+        }
+    }
+    
     [self startLocalWebServerWithCompletion:^(BOOL webServerStarted) {
         if (!webServerStarted) {
             if (completion) completion(NO);
@@ -110,9 +153,11 @@
                     free(argv[i]);
                 }
 
+                // 关键：node_start 退出后，清理所有状态并置空 nodeThread
                 dispatch_async(dispatch_get_main_queue(), ^{
                     self.isRunning = NO;
                     self.isNodeReady = NO;
+                    self.nodeThread = NULL;
                     [self.webServer stop];
                 });
             } else {
@@ -510,23 +555,15 @@
 }
 
 - (void)stopNodeJS {
-    // 1. 终止 Node.js 线程
     if (self.nodeThread) {
-        // 发送 SIGTERM 信号，让 Node.js 优雅退出
-        pthread_kill(self.nodeThread, SIGTERM);
-        // 等待线程完全退出，回收资源
-        pthread_join(self.nodeThread, NULL);
+        // 使用 pthread_kill(thread, 0) 检查线程是否存在，不发送实际信号
+        if (pthread_kill(self.nodeThread, 0) == 0) {
+            pthread_kill(self.nodeThread, SIGTERM);
+            pthread_join(self.nodeThread, NULL);
+        }
         self.nodeThread = NULL;
     }
-
-    // 2. 停止本地 Web 服务器（接收回调用）
-    self.isRunning = NO;
-    self.isNodeReady = NO;
-    [self.webServer stop];
-    self.webServer = nil;
-    self.nativeServerPort = 0;
-    self.managementPort = 0;
-    self.spiderPort = 0;
+    [self forceCleanup];
 }
 
 - (int)getNativeServerPort {
