@@ -359,17 +359,20 @@ class SourceManager extends GetxController {
   }
 
   Future<void> _loadCatVodConfig(String configUrl, {int? loadId}) async {
-    final currentLoadId = loadId ?? ++_configLoadId; // 优先使用外部传入的 ID
+    final currentLoadId = loadId ?? ++_configLoadId;
     try {
       final nodejs = NodeJSService.instance;
-      if (!nodejs.isInitialized) {
-        await nodejs.initialize();
+      
+      // 确保 Node.js 初始化
+      if (!nodejs.isInitialized || nodejs.managementPort == 0) {
+        await nodejs.initialize();  // 这会调用原生 startNodeJS
       }
+      
       if (currentLoadId != _configLoadId) return;
-
+      
+      // 加载源
       final success = await nodejs.loadSourceFromURL(configUrl);
       if (!success) {
-        print('[SourceManager] 猫影视源加载失败（loadSourceFromURL 返回 false）');
         if (currentLoadId == _configLoadId) {
           remoteSites.clear();
           remoteParses.clear();
@@ -554,21 +557,16 @@ class SourceManager extends GetxController {
     
     final configType = targetConfig['configType']?.toString() ?? 'tvbox';
     if (PlatformUtils.isDesktop && configType == 'catvod') {
-      print('[SourceManager] 桌面端不支持猫影视配置');
       SmartDialog.showToast('猫影视配置仅支持移动端');
       return;
     }
     
-    // 如果切换到非猫影视，先停止 Node.js
+    // 切换到非猫影视时，只清 Dart 层状态，不调用原生 stopNodeJS
     if (configType != 'catvod') {
       final nodejs = NodeJSService.instance;
-      if (nodejs.isInitialized) {
-        await nodejs.stop();
-      }
+      await nodejs.stop(); // ★ 调用公共方法，安全清理所有 Dart 层状态
     }
     
-    final exists = customConfigs.any((c) => c['key'] == configKey);
-    if (!exists) return;
     await GStorage.setSetting('selected_config_key', configKey);
     configSource.value = 'remote';
     GStorage.setSetting('config_source', 'remote');

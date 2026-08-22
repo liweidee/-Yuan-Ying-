@@ -515,18 +515,17 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
   }
 
   Future<void> stop() async {
-    try {
-      await _channel.invokeMethod('stopNodeJS');
-    } catch (e) {
-      _log('stopNodeJS error: $e');
-    }
+    // 不调用原生 stopNodeJS，只清 Dart 层状态
+    // 原因：原生 stopNodeJS 会清零端口，但 Node.js 线程还在，
+    // 下次 startNodeJS 时端口不一致会导致连接失败
     _isInitialized = false;
     _isNodeReady = false;
     _managementPort = 0;
     _spiderPort = 0;
     _spiderApiBase = '';
-    _lastLoadedUrl = null; // 清除，防止保活误触发
+    _lastLoadedUrl = null;
     _eventSubscription?.cancel();
+    _log('Node.js service stopped (Dart layer only)');
   }
 
   /// 诊断蜘蛛源（调试专用）
