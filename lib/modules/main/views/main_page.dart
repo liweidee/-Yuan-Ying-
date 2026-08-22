@@ -50,28 +50,51 @@ class _MainPageState extends State<MainPage> with WidgetsBindingObserver {
   }
 
   Future<void> _checkAndRestartNodeService() async {
+    // 防止并发
     if (_isChecking) return;
     _isChecking = true;
     try {
       final sourceManager = Get.find<SourceManager>();
+      
+      // 若正在加载配置，跳过本次检测（避免与正常加载流程冲突）
       if (sourceManager.isConfigLoading.value) {
         print('配置加载中，跳过保活检测');
         return;
       }
+      
+      // 仅猫影视配置需要保活
       if (sourceManager.currentConfigType.value != 'catvod') {
         print('非猫影视配置，跳过保活检测');
         return;
       }
 
       final nodejs = NodeJSService.instance;
-      final alive = await nodejs.ensureServiceAlive();
-      if (alive) {
-        print('Node.js 服务状态正常');
-      } else {
-        print('Node.js 服务恢复失败，可能需要手动刷新');
+      
+      // 服务未初始化则先初始化
+      if (!nodejs.isInitialized) {
+        print('Node.js 未初始化，执行初始化');
+        await nodejs.initialize();
+        // 若初始化后仍未就绪，则返回
+        if (!nodejs.isInitialized) return;
       }
-    } catch (e) {
-      print('保活检测异常: $e');
+
+      // 快速检查端口是否有效
+      if (nodejs.spiderPort <= 0) {
+        print('spiderPort 无效，触发重启');
+        await nodejs.reinitialize();
+        return;
+      }
+
+      // 探测服务是否存活
+      final alive = await nodejs.isServiceAlive();
+      if (!alive) {
+        print('Node.js 服务不可用，触发重启');
+        await nodejs.reinitialize();
+      } else {
+        print('Node.js 服务正常');
+      }
+    } catch (e, stack) {
+      print('保活检测异常: $e\n$stack');
     } finally {
       _isChecking = false;
     }
