@@ -61,11 +61,6 @@ class _MainPageState extends State<MainPage> with WidgetsBindingObserver {
         print('配置加载中，跳过保活检测');
         return;
       }
-
-      if (!sourceManager.isConfigLoaded.value) {
-        print('配置尚未加载完成，跳过保活检测');
-        return;
-      }
       
       // 仅猫影视配置需要保活
       if (sourceManager.currentConfigType.value != 'catvod') {

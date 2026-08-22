@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:get/get.dart';
@@ -147,26 +148,22 @@ class NodeJSService extends GetxService {
       await initialize();
     }
 
-    // 无论 _managementPort 当前值如何，都强制重置并等待有效端口
-    _log('等待 managementPort 就绪...');
-    _managementPortCompleter = Completer<void>();
-    bool timedOut = false;
-    final timer = Timer(const Duration(seconds: 10), () {
-      if (!_managementPortCompleter!.isCompleted) {
-        _managementPortCompleter!.complete();
-        timedOut = true;
-        _log('managementPort wait timeout');
-      }
-    });
-    await _managementPortCompleter!.future;
-    timer.cancel();
-    if (timedOut) {
-      _managementPort = 0; // 强制置零，避免使用失效端口
-    }
+    // 如果 managementPort 为 0，主动等待
     if (_managementPort == 0) {
-      _log('managementPort invalid, cannot load source');
-      _lastLoadedUrl = null;
-      return false;
+      _log('managementPort is 0, waiting...');
+      _managementPortCompleter ??= Completer<void>();
+      final timer = Timer(const Duration(seconds: 10), () {
+        if (!_managementPortCompleter!.isCompleted) {
+          _managementPortCompleter!.complete();
+          _log('managementPort wait timeout');
+        }
+      });
+      await _managementPortCompleter!.future;
+      timer.cancel();
+      if (_managementPort == 0) {
+        _log('managementPort still 0, cannot load source');
+        return false;
+      }
     }
 
     try {
@@ -177,15 +174,12 @@ class NodeJSService extends GetxService {
         await waitForSpiderPort();
         return true;
       }
-      _lastLoadedUrl = null;
       return false;
     } on PlatformException catch (e) {
       _log('PlatformException: ${e.message}');
-      _lastLoadedUrl = null;
       return false;
     } catch (e) {
       _log('loadSourceFromURL error: $e');
-      _lastLoadedUrl = null;
       return false;
     }
   }
@@ -261,20 +255,6 @@ class NodeJSService extends GetxService {
       _isRestarting = false;
     }
     _log('✅ 无感重启流程结束');
-  }
-
-  /// 重置服务状态，用于加载失败后的重试
-  Future<void> resetForRetry() async {
-    _log('🔄 重置 Node.js 服务状态以便重试');
-    await stop();
-    _lastLoadedUrl = null;
-    _isInitialized = false;
-    _isNodeReady = false;
-    _managementPort = 0;
-    _spiderPort = 0;
-    _spiderApiBase = '';
-    _eventSubscription?.cancel();
-    _log('✅ 服务状态已重置');
   }
 
   Future<bool> deleteSource() async {
