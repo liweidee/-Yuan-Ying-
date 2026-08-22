@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:get/get.dart';
@@ -148,23 +147,26 @@ class NodeJSService extends GetxService {
       await initialize();
     }
 
-    // 如果 managementPort 为 0，主动等待
-    if (_managementPort == 0) {
-      _log('managementPort is 0, waiting...');
-      _lastLoadedUrl = null;
-      _managementPortCompleter ??= Completer<void>();
-      final timer = Timer(const Duration(seconds: 10), () {
-        if (!_managementPortCompleter!.isCompleted) {
-          _managementPortCompleter!.complete();
-          _log('managementPort wait timeout');
-        }
-      });
-      await _managementPortCompleter!.future;
-      timer.cancel();
-      if (_managementPort == 0) {
-        _log('managementPort still 0, cannot load source');
-        return false;
+    // 无论 _managementPort 当前值如何，都强制重置并等待有效端口
+    _log('等待 managementPort 就绪...');
+    _managementPortCompleter = Completer<void>();
+    bool timedOut = false;
+    final timer = Timer(const Duration(seconds: 10), () {
+      if (!_managementPortCompleter!.isCompleted) {
+        _managementPortCompleter!.complete();
+        timedOut = true;
+        _log('managementPort wait timeout');
       }
+    });
+    await _managementPortCompleter!.future;
+    timer.cancel();
+    if (timedOut) {
+      _managementPort = 0; // 强制置零，避免使用失效端口
+    }
+    if (_managementPort == 0) {
+      _log('managementPort invalid, cannot load source');
+      _lastLoadedUrl = null;
+      return false;
     }
 
     try {
