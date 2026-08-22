@@ -379,30 +379,38 @@ class SourceManager extends GetxController {
   Future<void> _loadCatVodConfig(String configUrl) async {
     try {
       final nodejs = NodeJSService.instance;
-
-      // 直接调用加载（内部会自愈）
+      // 1. 确保 Node.js 已初始化
+      if (!nodejs.isInitialized) {
+        await nodejs.initialize();
+      }
+      
+      // 2. 调用加载
       final success = await nodejs.loadSourceFromURL(configUrl);
       if (!success) {
-        print('[SourceManager] 猫影视源加载失败（loadSourceFromURL 返回 false）');
+        print('[SourceManager] 猫影视源加载失败（loadSourceFromURL 返回 false），重置 Node.js 状态');
+        await nodejs.stop(); // 重置状态，确保重试能重新初始化
         remoteSites.clear();
         remoteParses.clear();
         return;
       }
-
-      // 等待 spiderPort 就绪
+      
+      // 3. 等待 spiderPort 就绪
       await nodejs.waitForSpiderPort();
       if (nodejs.spiderPort == 0) {
-        print('[SourceManager] spiderPort 未就绪，无法获取配置');
+        print('[SourceManager] spiderPort 未就绪，无法获取配置，重置 Node.js 状态');
+        await nodejs.stop(); // 端口无效时重置，避免卡死
         remoteSites.clear();
+        remoteParses.clear();
         return;
       }
-
-      // 获取配置（/config）
-      final result = await nodejs.getCatConfig();
-
-      // 解析 sites
+      
+      // 4. 获取配置（/config）
+      final result = await nodejs.getCatConfig(); // 已带重试
+      
+      // 5. 解析 sites
       final videoSites = result['video']?['sites'] as List<dynamic>? ?? [];
       if (videoSites.isNotEmpty) {
+        // 成功获取，更新 remoteSites
         final rawSites = videoSites.map((e) => Map<String, dynamic>.from(e)).toList();
         final filteredSites = _filterSites(rawSites);
         remoteSites.value = filteredSites;
@@ -412,8 +420,8 @@ class SourceManager extends GetxController {
       } else {
         remoteSites.clear();
       }
-
-      // 解析 parses
+      
+      // 6. 解析 parses
       if (result['parses'] != null && result['parses'] is List) {
         remoteParses.value = (result['parses'] as List)
             .map((e) => Map<String, dynamic>.from(e))
@@ -421,12 +429,15 @@ class SourceManager extends GetxController {
       } else {
         remoteParses.clear();
       }
-
       _updatePushAgentCache();
       print('[SourceManager] 猫影视配置加载成功，${remoteSites.length} 个站点');
-
     } catch (e) {
       print('[SourceManager] 加载猫影视配置失败: $e');
+      // 异常时也重置 Node.js 状态，防止状态残留
+      try {
+        final nodejs = NodeJSService.instance;
+        await nodejs.stop();
+      } catch (_) {}
       remoteSites.clear();
       remoteParses.clear();
     }

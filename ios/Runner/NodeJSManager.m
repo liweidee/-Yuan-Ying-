@@ -14,9 +14,6 @@
 @property (nonatomic, assign) int spiderPort;
 @property (nonatomic, strong) GCDWebServer *webServer;
 @property (nonatomic, assign) pthread_t nodeThread;
-
-- (void)forceCleanup;
-- (BOOL)isNodeProcessActuallyAlive;
 @end
 
 @implementation NodeJSManager
@@ -52,36 +49,12 @@
     return sourcePath;
 }
 
-- (void)forceCleanup {
-    self.isRunning = NO;
-    self.isNodeReady = NO;
-    self.nodeThread = 0;
-    [self.webServer stop];
-    self.webServer = nil;
-    self.nativeServerPort = 0;
-    self.managementPort = 0;
-    self.spiderPort = 0;
-}
-
-- (BOOL)isNodeProcessActuallyAlive {
-    // 仅通过端口值判断，绝不进行网络请求
-    // 优点：0 阻塞，主线程绝对安全
-    // 缺点：可能误判（端口值存在但进程已死），但后续加载会超时并触发自愈
-    return self.nativeServerPort > 0;
-}
-
 - (void)startNodeJS:(void (^)(BOOL))completion {
-    // 如果标记为运行中，先实际探测是否真的存活
     if (self.isRunning) {
-        if ([self isNodeProcessActuallyAlive]) {
-            if (completion) completion(YES);
-            return;
-        } else {
-            NSLog(@"⚠️ Node.js 标记为运行但实际已死，执行强制清理");
-            [self forceCleanup];
-        }
+        if (completion) completion(YES);
+        return;
     }
-    
+
     [self startLocalWebServerWithCompletion:^(BOOL webServerStarted) {
         if (!webServerStarted) {
             if (completion) completion(NO);
@@ -137,11 +110,9 @@
                     free(argv[i]);
                 }
 
-                // 关键：node_start 退出后，清理所有状态并置空 nodeThread
                 dispatch_async(dispatch_get_main_queue(), ^{
                     self.isRunning = NO;
                     self.isNodeReady = NO;
-                    self.nodeThread = 0;
                     [self.webServer stop];
                 });
             } else {
@@ -539,17 +510,23 @@
 }
 
 - (void)stopNodeJS {
-    if (self.nodeThread != 0) {
-        int killResult = pthread_kill(self.nodeThread, 0);
-        if (killResult == 0) {
-            pthread_kill(self.nodeThread, SIGTERM);
-            pthread_join(self.nodeThread, NULL);
-        } else if (killResult != ESRCH) {
-            NSLog(@"⚠️ pthread_kill 返回错误: %d", killResult);
-        }
-        self.nodeThread = 0;
+    // 1. 终止 Node.js 线程
+    if (self.nodeThread) {
+        // 发送 SIGTERM 信号，让 Node.js 优雅退出
+        pthread_kill(self.nodeThread, SIGTERM);
+        // 等待线程完全退出，回收资源
+        pthread_join(self.nodeThread, NULL);
+        self.nodeThread = NULL;
     }
-    [self forceCleanup];
+
+    // 2. 停止本地 Web 服务器（接收回调用）
+    self.isRunning = NO;
+    self.isNodeReady = NO;
+    [self.webServer stop];
+    self.webServer = nil;
+    self.nativeServerPort = 0;
+    self.managementPort = 0;
+    self.spiderPort = 0;
 }
 
 - (int)getNativeServerPort {
