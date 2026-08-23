@@ -141,13 +141,8 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
   }
 
   Future<void> initialize() async {
-    if (_isInitialized && _managementPort > 0) return;
+    if (_isInitialized) return;
     _setupEventListener();
-    // 优先尝试热复用
-    if (await hotRecover()) {
-      _log('initialize: hotRecover succeeded, skip full init');
-      return;
-    }
     try {
       _readyCompleter = Completer<void>();
       _managementPortCompleter = Completer<void>();
@@ -164,13 +159,15 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
         readyTimeout.cancel();
         final mgmtTimeout = Timer(const Duration(seconds: 15), () {
           if (_managementPortCompleter != null && !_managementPortCompleter!.isCompleted) {
-            _log('Warning: Management port timeout');
+            _log('Warning: Management port timeout, proceeding anyway');
             _managementPortCompleter!.complete();
           }
         });
         await _managementPortCompleter!.future;
         mgmtTimeout.cancel();
       }
+
+      // 初始化完成后校验端口，无效则重置状态
       if (_managementPort == 0) {
         _log('Node.js initialization completed but managementPort is 0, resetting state');
         _isInitialized = false;
@@ -248,92 +245,39 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
   Future<void> reinitialize() async {
     if (_isRestarting) return;
     _isRestarting = true;
-    _log('🔄 无感重启 Node.js 服务...');
+    _log('🔄 检查 Node.js 服务状态...');
     try {
-      // 停止旧服务
-      await stop();
-
-      // 等待原生资源释放（关键）
-      await Future.delayed(const Duration(milliseconds: 300));
-
-      // 重置状态
-      _isInitialized = false;
-      _isNodeReady = false;
-      _managementPort = 0;
-      _spiderPort = 0;
-      _spiderApiBase = '';
-      _eventSubscription?.cancel();
-
-      // 重新初始化
-      await initialize();
-
-      // 重新加载源（带重试）
-      if (_lastLoadedUrl != null && _lastLoadedUrl!.isNotEmpty) {
-        bool loaded = false;
-        for (int i = 0; i < 3; i++) {
-          _log('📡 重新加载源尝试 ${i + 1}/3: $_lastLoadedUrl');
-          loaded = await loadSourceFromURL(_lastLoadedUrl!);
-          if (loaded) break;
-          if (i < 2) await Future.delayed(const Duration(milliseconds: 500));
+      // 检查服务是否还活着
+      if (_spiderPort > 0) {
+        final alive = await isServiceAlive();
+        if (alive) {
+          _log('✅ 服务仍然存活，重新加载源...');
+          // 只重新加载源，不重启线程
+          if (_lastLoadedUrl != null && _lastLoadedUrl!.isNotEmpty) {
+            final loaded = await loadSourceFromURL(_lastLoadedUrl!);
+            if (loaded) {
+              _log('✅ 源重载成功');
+            } else {
+              _log('❌ 源重载失败，需重启 App');
+              _showFatalError();
+            }
+          }
+          return;
         }
-        _log(loaded ? '✅ 源重载成功，spiderPort: $_spiderPort' : '❌ 源重载失败');
-      } else {
-        _log('⚠️ 无保存的源 URL，跳过加载');
       }
+      // 服务已死，无法在进程内重启
+      _log('❌ Node.js 服务已停止，无法在进程内重启（需重启 App）');
+      _showFatalError();
     } catch (e) {
       _log('❌ reinitialize 异常: $e');
+      _showFatalError();
     } finally {
       _isRestarting = false;
     }
-    _log('✅ 无感重启流程结束');
   }
 
-  /// 热复用：当 Dart 状态丢失但原生线程还在时，直接恢复状态
-  Future<bool> hotRecover() async {
-    // 如果已初始化且端口有效，先检查是否还活着
-    if (_isInitialized && _managementPort > 0 && _spiderPort > 0) {
-      if (await isServiceAlive()) return true;
-      // 不活着，清除状态，准备重新获取
-      _isInitialized = false;
-    }
-    
-    try {
-      final mgmtPort = await _channel.invokeMethod<int>('getCurrentManagementPort');
-      final spdPort = await _channel.invokeMethod<int>('getCurrentSpiderPort');
-      
-      if (mgmtPort != null && mgmtPort > 0) {
-        // 拿到端口后验证是否真的可用
-        _managementPort = mgmtPort;
-        if (spdPort != null && spdPort > 0) _spiderPort = spdPort;
-        
-        if (_spiderPort > 0) {
-          final alive = await isServiceAlive();
-          if (!alive) {
-            // 僵尸端口（线程已死），清除并返回 false
-            _log('Hot recover: port $mgmtPort is stale (thread dead)');
-            _managementPort = 0;
-            _spiderPort = 0;
-            return false;
-          }
-        }
-        
-        _isInitialized = true;
-        _setupEventListener();
-        _log('Hot recovered Node.js state: mgmt=$mgmtPort, spider=$_spiderPort');
-        return true;
-      }
-    } catch (e) {
-      _log('Hot recover failed: $e');
-    }
-    return false;
-  }
-
-  /// 逻辑断开：只清 Dart 层标记，不清原生端口（供 hotRecover 使用）
-  void markLogicDisconnected() {
-    _lastLoadedUrl = null;
-    _isInitialized = false;
-    // 故意不清 _managementPort/_spiderPort（原生端口仍有效）
-    _log('Node.js logically disconnected (native thread still running)');
+  void _showFatalError() {
+    _log('⚠️ Node.js 服务不可用，需重启 App 以恢复');
   }
 
   Future<bool> deleteSource() async {

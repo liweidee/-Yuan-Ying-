@@ -539,16 +539,4 @@
     return self.spiderPort;
 }
 
-- (void)isNodeJSRunning:(void (^)(BOOL))completion {
-    if (completion) completion(self.isRunning);
-}
-
-- (void)getCurrentManagementPort:(void (^)(int))completion {
-    if (completion) completion(self.managementPort);
-}
-
-- (void)getCurrentSpiderPort:(void (^)(int))completion {
-    if (completion) completion(self.spiderPort);
-}
-
 @end
