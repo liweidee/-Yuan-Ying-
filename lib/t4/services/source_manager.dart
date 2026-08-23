@@ -362,10 +362,21 @@ class SourceManager extends GetxController {
     final currentLoadId = loadId ?? ++_configLoadId;
     try {
       final nodejs = NodeJSService.instance;
-      
-      // 确保 Node.js 初始化
+      // 优先热复用，失败再完整初始化
       if (!nodejs.isInitialized || nodejs.managementPort == 0) {
-        await nodejs.initialize();  // 这会调用原生 startNodeJS
+        final recovered = await nodejs.hotRecover();
+        if (!recovered) {
+          await nodejs.initialize();
+        }
+      }
+      // 再次检查，如果仍然无效则直接返回错误
+      if (!nodejs.isInitialized || nodejs.managementPort == 0) {
+        print('猫影视初始化失败，跳过加载');
+        if (currentLoadId == _configLoadId) {
+          remoteSites.clear();
+          remoteParses.clear();
+        }
+        return;
       }
       
       if (currentLoadId != _configLoadId) return;
@@ -561,10 +572,9 @@ class SourceManager extends GetxController {
       return;
     }
     
-    // 切换到非猫影视时，只清 Dart 层状态，不调用原生 stopNodeJS
+    // 切换到非猫影视时，逻辑断开（原生线程继续运行）
     if (configType != 'catvod') {
-      final nodejs = NodeJSService.instance;
-      await nodejs.stop(); // ★ 调用公共方法，安全清理所有 Dart 层状态
+      NodeJSService.instance.markLogicDisconnected();
     }
     
     await GStorage.setSetting('selected_config_key', configKey);
