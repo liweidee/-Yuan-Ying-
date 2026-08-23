@@ -362,11 +362,11 @@ class SourceManager extends GetxController {
     final currentLoadId = loadId ?? ++_configLoadId;
     try {
       final nodejs = NodeJSService.instance;
-      // 确保 Node.js 已初始化
       if (!nodejs.isInitialized || nodejs.managementPort == 0) {
         await nodejs.initialize();
       }
       if (!nodejs.isInitialized || nodejs.managementPort == 0) {
+        configLoadError.value = true;
         print('猫影视初始化失败（端口不可用），跳过加载');
         if (currentLoadId == _configLoadId) {
           remoteSites.clear();
@@ -376,7 +376,7 @@ class SourceManager extends GetxController {
       }
       if (currentLoadId != _configLoadId) return;
 
-      // 复用判断：服务活着且源没变，跳过加载源，直接获取配置
+      // 复用判断：服务活着且源相同，跳过加载
       bool needLoadSource = true;
       if (nodejs.spiderPort > 0) {
         final alive = await nodejs.isServiceAlive();
@@ -389,6 +389,7 @@ class SourceManager extends GetxController {
       if (needLoadSource) {
         final success = await nodejs.loadSourceFromURL(configUrl);
         if (!success) {
+          configLoadError.value = true;
           if (currentLoadId == _configLoadId) {
             remoteSites.clear();
             remoteParses.clear();
@@ -397,18 +398,6 @@ class SourceManager extends GetxController {
         }
         if (currentLoadId != _configLoadId) return;
       }
-      
-      // 加载源
-      final success = await nodejs.loadSourceFromURL(configUrl);
-      if (!success) {
-        configLoadError.value = true;
-        if (currentLoadId == _configLoadId) {
-          remoteSites.clear();
-          remoteParses.clear();
-        }
-        return;
-      }
-      if (currentLoadId != _configLoadId) return;
 
       await nodejs.waitForSpiderPort();
       if (nodejs.spiderPort == 0) {
@@ -447,10 +436,8 @@ class SourceManager extends GetxController {
       } else {
         if (currentLoadId == _configLoadId) remoteParses.clear();
       }
+
       if (currentLoadId == _configLoadId) _updatePushAgentCache();
-      if (currentLoadId == _configLoadId) {
-        print('[SourceManager] 猫影视配置加载成功，${remoteSites.length} 个站点');
-      }
     } catch (e) {
       configLoadError.value = true;
       print('[SourceManager] 加载猫影视配置失败: $e');

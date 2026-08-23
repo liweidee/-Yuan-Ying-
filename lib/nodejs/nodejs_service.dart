@@ -143,6 +143,14 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
 
   Future<void> initialize() async {
     if (_isInitialized) return;
+    // 如果端口还在，说明 Node.js 还在运行（stop 只清了 Dart 状态）
+    // 直接恢复 _isInitialized，不调用 startNodeJS，避免二次 node_start 闪退
+    if (_managementPort > 0) {
+      _isInitialized = true;
+      _setupEventListener();
+      _log('initialize: restored from existing port $_managementPort');
+      return;
+    }
     _setupEventListener();
     try {
       _readyCompleter = Completer<void>();
@@ -167,8 +175,6 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
         await _managementPortCompleter!.future;
         mgmtTimeout.cancel();
       }
-
-      // 初始化完成后校验端口，无效则重置状态
       if (_managementPort == 0) {
         _log('Node.js initialization completed but managementPort is 0, resetting state');
         _isInitialized = false;
@@ -206,29 +212,39 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
     }
     try {
       _log('loadSourceFromURL: $url');
-      // 添加 30s 超时保护（覆盖原生 MD5 对比 + 下载）
       final result = await _channel
           .invokeMethod('loadSourceFromURL', {'url': url})
           .timeout(const Duration(seconds: 30));
       _log('loadSourceFromURL result: $result');
       if (result is Map && result['success'] == true) {
-        await waitForSpiderPort();
-        return true;
+        // 等待 Spider Server 真正就绪（轮询探活，最多 5s）
+        for (int i = 0; i < 10; i++) {
+          await Future.delayed(const Duration(milliseconds: 500));
+          if (_spiderPort > 0) {
+            final alive = await isServiceAlive();
+            if (alive) {
+              _log('Spider Server ready after loadSource');
+              return true;
+            }
+          }
+        }
+        _log('Spider Server not ready after 5s, loadSource failed');
+        _lastLoadedUrl = previousUrl;
+        return false;
       }
-      // 加载失败，恢复旧 URL
       _lastLoadedUrl = previousUrl;
       return false;
     } on TimeoutException {
       _log('loadSourceFromURL timeout 30s, url: $url');
-      _lastLoadedUrl = previousUrl;  // 恢复旧 URL
+      _lastLoadedUrl = previousUrl;
       return false;
     } on PlatformException catch (e) {
       _log('PlatformException: ${e.message}');
-      _lastLoadedUrl = previousUrl;  // 恢复旧 URL
+      _lastLoadedUrl = previousUrl;
       return false;
     } catch (e) {
       _log('loadSourceFromURL error: $e');
-      _lastLoadedUrl = previousUrl;  // 恢复旧 URL
+      _lastLoadedUrl = previousUrl;
       return false;
     }
   }
