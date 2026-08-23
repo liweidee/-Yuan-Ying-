@@ -201,6 +201,8 @@ class _HomePageState extends CommonPageState<HomePage>
 
   Widget _buildConfigError(ThemeData theme) {
     final colorScheme = theme.colorScheme;
+    final isCatvod = sourceManager.currentConfigType.value == 'catvod';
+    
     return Column(
       children: [
         _buildNormalTopBar(theme),
@@ -218,7 +220,7 @@ class _HomePageState extends CommonPageState<HomePage>
                   ),
                   const SizedBox(height: 16),
                   Text(
-                    '配置加载失败',
+                    isCatvod ? '猫影视配置获取失败' : '配置加载失败',
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.w500,
@@ -227,7 +229,9 @@ class _HomePageState extends CommonPageState<HomePage>
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    '请检查网络连接或配置内容是否正确',
+                    isCatvod 
+                        ? '如果点击重试无效则需要重启 App'
+                        : '请检查网络连接或配置内容是否正确',
                     style: TextStyle(
                       fontSize: 14,
                       color: colorScheme.outline,
@@ -237,6 +241,7 @@ class _HomePageState extends CommonPageState<HomePage>
                   const SizedBox(height: 16),
                   FilledButton(
                     onPressed: () {
+                      sourceManager.configLoadError.value = false;
                       sourceManager.loadConfig();
                     },
                     style: FilledButton.styleFrom(

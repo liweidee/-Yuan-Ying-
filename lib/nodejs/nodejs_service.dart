@@ -39,6 +39,7 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
   void updateConfigType(String type) {  // 供外部更新配置类型
     _currentConfigType = type;
   }
+  String? get lastLoadedUrl => _lastLoadedUrl;
   bool _isRestarting = false;
   late CatVodLogService _logService;
 
@@ -179,14 +180,17 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
   }
 
   Future<bool> loadSourceFromURL(String url) async {
+    // 先保存旧 URL，加载成功后再更新
+    final previousUrl = _lastLoadedUrl;
     _lastLoadedUrl = url;
+    
     if (!_isInitialized) {
       await initialize();
     }
     if (_managementPort == 0) {
       _log('managementPort is 0, waiting...');
       _managementPortCompleter ??= Completer<void>();
-      final timer = Timer(const Duration(seconds: 10), () {
+      final timer = Timer(const Duration(seconds: 5), () {
         if (!_managementPortCompleter!.isCompleted) {
           _managementPortCompleter!.complete();
           _log('managementPort wait timeout');
@@ -196,23 +200,35 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
       timer.cancel();
       if (_managementPort == 0) {
         _log('managementPort still 0, cannot load source');
+        _lastLoadedUrl = previousUrl;  // 恢复旧 URL
         return false;
       }
     }
     try {
       _log('loadSourceFromURL: $url');
-      final result = await _channel.invokeMethod('loadSourceFromURL', {'url': url});
+      // 添加 30s 超时保护（覆盖原生 MD5 对比 + 下载）
+      final result = await _channel
+          .invokeMethod('loadSourceFromURL', {'url': url})
+          .timeout(const Duration(seconds: 30));
       _log('loadSourceFromURL result: $result');
       if (result is Map && result['success'] == true) {
         await waitForSpiderPort();
         return true;
       }
+      // 加载失败，恢复旧 URL
+      _lastLoadedUrl = previousUrl;
+      return false;
+    } on TimeoutException {
+      _log('loadSourceFromURL timeout 30s, url: $url');
+      _lastLoadedUrl = previousUrl;  // 恢复旧 URL
       return false;
     } on PlatformException catch (e) {
       _log('PlatformException: ${e.message}');
+      _lastLoadedUrl = previousUrl;  // 恢复旧 URL
       return false;
     } catch (e) {
       _log('loadSourceFromURL error: $e');
+      _lastLoadedUrl = previousUrl;  // 恢复旧 URL
       return false;
     }
   }
@@ -506,17 +522,13 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
   }
 
   Future<void> stop() async {
-    // 不调用原生 stopNodeJS，只清 Dart 层状态
-    // 原因：原生 stopNodeJS 会清零端口，但 Node.js 线程还在，
-    // 下次 startNodeJS 时端口不一致会导致连接失败
     _isInitialized = false;
     _isNodeReady = false;
-    _managementPort = 0;
-    _spiderPort = 0;
     _spiderApiBase = '';
-    _lastLoadedUrl = null;
+    // 保留 _managementPort、_spiderPort、_lastLoadedUrl
+    // 切回猫影视时可用于探活和复用，避免重新加载源
     _eventSubscription?.cancel();
-    _log('Node.js service stopped (Dart layer only)');
+    _log('Node.js service stopped (Dart layer only, ports kept)');
   }
 
   /// 诊断蜘蛛源（调试专用）

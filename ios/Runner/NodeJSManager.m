@@ -247,23 +247,37 @@
         if (localJSExists && localMd5Exists) {
             __block NSData *remoteMd5Data = nil;
             __block BOOL md5DownloadSuccess = NO;
+            __block BOOL md5NotFound = NO;
 
             dispatch_group_t md5Group = dispatch_group_create();
             dispatch_group_enter(md5Group);
             NSString *md5Url = [normalizedUrl stringByAppendingString:@".md5"];
             NSLog(@"Cache check: downloading remote MD5: %@", md5Url);
             [[[NSURLSession sharedSession] dataTaskWithURL:[NSURL URLWithString:md5Url] completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+                NSHTTPURLResponse *httpResponse = (NSHTTPURLResponse *)response;
                 if (!error && data) {
                     remoteMd5Data = data;
                     md5DownloadSuccess = YES;
                     NSLog(@"Remote MD5 downloaded, size: %lu bytes", (unsigned long)data.length);
+                } else if (httpResponse.statusCode == 404) {
+                    NSLog(@"Remote MD5 not found (404), will use cached source");
+                    md5NotFound = YES;
                 } else {
                     NSLog(@"Remote MD5 download failed: %@", error.localizedDescription);
                 }
                 dispatch_group_leave(md5Group);
             }] resume];
 
-            dispatch_group_wait(md5Group, dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC));
+            dispatch_group_wait(md5Group, dispatch_time(DISPATCH_TIME_NOW, 30 * NSEC_PER_SEC));
+
+            // MD5 404 时直接使用缓存，跳过下载
+            if (md5NotFound) {
+                NSLog(@"✅ MD5 404, using cached source, skipping download");
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [self sendLoadCommandToNodeJS:sourcePath completion:completion];
+                });
+                return;
+            }
 
             if (md5DownloadSuccess && remoteMd5Data) {
                 NSString *remoteMd5 = [[NSString alloc] initWithData:remoteMd5Data encoding:NSUTF8StringEncoding];
