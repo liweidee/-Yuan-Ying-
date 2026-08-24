@@ -266,4 +266,45 @@ abstract final class SettingPref {
       StorageManager.getSetting<bool>(SettingBoxKey.enableDebugLog) ?? false;
   static set enableDebugLog(bool v) =>
       StorageManager.setSetting(SettingBoxKey.enableDebugLog, v);
+
+  // ============================================================
+  // 弹幕API配置
+  // ============================================================
+
+  static List<Map<String, dynamic>> get danmakuApis {
+    final data = StorageManager.getSetting<List<dynamic>>(SettingBoxKey.danmakuApis);
+    if (data == null) return [];
+    return data.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  }
+  static set danmakuApis(List<Map<String, dynamic>> v) =>
+      StorageManager.setSetting(SettingBoxKey.danmakuApis, v);
+
+  static String get danmakuCurrentKey =>
+      StorageManager.getSetting<String>(SettingBoxKey.danmakuCurrentKey) ?? '';
+  static set danmakuCurrentKey(String v) =>
+      StorageManager.setSetting(SettingBoxKey.danmakuCurrentKey, v);
+
+  static bool get danmakuAutoMatch =>
+      StorageManager.getSetting<bool>(SettingBoxKey.danmakuAutoMatch) ?? false;
+  static set danmakuAutoMatch(bool v) =>
+      StorageManager.setSetting(SettingBoxKey.danmakuAutoMatch, v);
+
+  // ============================================================
+  // TMDB 配置
+  // ============================================================
+
+  static String get tmdbAccessToken =>
+      StorageManager.getSetting<String>(SettingBoxKey.tmdbAccessToken) ?? '';
+  static set tmdbAccessToken(String v) =>
+      StorageManager.setSetting(SettingBoxKey.tmdbAccessToken, v);
+
+  static String get tmdbApiProxy =>
+      StorageManager.getSetting<String>(SettingBoxKey.tmdbApiProxy) ?? 'https://api.tmdb.org';
+  static set tmdbApiProxy(String v) =>
+      StorageManager.setSetting(SettingBoxKey.tmdbApiProxy, v);
+
+  static String get tmdbImageProxy =>
+      StorageManager.getSetting<String>(SettingBoxKey.tmdbImageProxy) ?? 'https://images.tmdb.org/t/p';
+  static set tmdbImageProxy(String v) =>
+      StorageManager.setSetting(SettingBoxKey.tmdbImageProxy, v);
 }

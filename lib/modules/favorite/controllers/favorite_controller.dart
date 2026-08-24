@@ -9,6 +9,9 @@ class FavoriteController extends GetxController {
   final isLoading = false.obs;
   final _apiUrlMap = <String, String>{}.obs;  // vodId -> api_url
   final _siteKeyMap = <String, String>{}.obs;  // vodId -> site_key
+  final _configKeyMap = <String, String>{}.obs;  // vodId -> config_key
+
+  String? getConfigKey(String vodId) => _configKeyMap[vodId];
 
   final SourceManager _sourceManager = Get.find<SourceManager>();
 
@@ -27,6 +30,9 @@ class FavoriteController extends GetxController {
       final siteKeyMap = <String, String>{};
       for (final item in data) {
         final videoItem = VideoItem.fromJson(item);
+        if (item['config_key'] != null) {
+          _configKeyMap[videoItem.vodId] = item['config_key'].toString();
+        }
         list.add(videoItem);
         if (item['api_url'] != null) {
           urlMap[videoItem.vodId] = item['api_url'].toString();
@@ -82,6 +88,15 @@ class FavoriteController extends GetxController {
 
   // ===== 跳转时使用存储的 api_url =====
   void navigateToDetail(VideoItem item) {
+    // 配置一致性检查
+    final storedConfigKey = getConfigKey(item.vodId);
+    final currentConfigKey = _sourceManager.currentConfigKey.value;
+    if (storedConfigKey != null && storedConfigKey.isNotEmpty && 
+        storedConfigKey != currentConfigKey) {
+      SmartDialog.showToast('该收藏所属配置接口 "$storedConfigKey" 已切换，请切换回该配置后重试');
+      return;
+    }
+  
     // 1. 优先使用存储的 site_key
     final siteKey = getSiteKey(item.vodId);
     Map<String, dynamic>? targetSite;

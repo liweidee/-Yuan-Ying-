@@ -28,6 +28,7 @@ import 'package:yuanying/common/widgets/custom_height_widget.dart';
 import 'package:yuanying/models/common/bar_hide_type.dart';
 import 'package:yuanying/modules/common/base/common_page.dart';
 import 'package:yuanying/common/widgets/scroll_physics.dart';
+import 'package:yuanying/modules/webview/views/webview_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -58,6 +59,18 @@ class _HomePageState extends CommonPageState<HomePage>
 
   // 跳转详情
   void _navigateToDetail(VideoItem item) {
+    // 猫影视 nodejs_baseset 配置中心
+    final site = sourceManager.currentSite.value;
+    final siteKey = site?['key']?.toString() ?? '';
+    if (sourceManager.currentConfigType.value == 'catvod' && siteKey == 'nodejs_baseset' && item.vodId == 'config-center') {
+      Get.to(() => WebviewPage(
+        url: 'http://127.0.0.1:9988/website',
+        title: '配置中心',
+        inApp: true,
+      ));
+      return;
+    }
+
     // Action 卡片
     if (item.isAction) {
       final config = item.actionConfig;
@@ -85,7 +98,6 @@ class _HomePageState extends CommonPageState<HomePage>
     }
 
     // 豆瓣/TMDB 源
-    final site = sourceManager.currentSite.value;
     final siteName = site?['name']?.toString() ?? '';
     if (siteName.contains('豆瓣[官]') || siteName.contains('TMDB[官]')) {
       final filterService = Get.find<SearchFilterService>();

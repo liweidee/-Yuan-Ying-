@@ -7,6 +7,8 @@ import 'package:yuanying/modules/setting/views/style_setting.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:yuanying/modules/setting/views/play_setting_page.dart';
 import 'package:yuanying/modules/setting/views/extra_setting_page.dart';
+import 'package:yuanying/modules/setting/views/danmaku_config_page.dart';
+import 'package:yuanying/modules/setting/views/tmdb_config_page.dart';
 import 'package:yuanying/core/routes/app_pages.dart';
 
 class SettingPage extends StatelessWidget {
@@ -50,6 +52,23 @@ class SettingPage extends StatelessWidget {
             title: '外观设置',
             subtitle: '主题模式、应用主题',
             onTap: () => Get.to(() => const StyleSetting()),
+          ),
+          const SizedBox(height: 8),
+          _buildSettingItem(
+            context: context,
+            icon: Icons.closed_caption_outlined,
+            title: '弹幕API配置',
+            subtitle: '管理LogVar弹幕服务器地址，自动匹配弹幕',
+            // onTap: () => Get.toNamed(AppPages.danmakuConfig),
+            onTap: () => Get.to(() => const DanmakuConfigPage()),
+          ),
+          const SizedBox(height: 8),
+          _buildSettingItem(
+            context: context,
+            icon: Icons.movie_creation_outlined,
+            title: 'TMDB 配置',
+            subtitle: '配置 TMDB API 访问与代理',
+            onTap: () => Get.to(() => const TmdbConfigPage()),
           ),
           const SizedBox(height: 8),
           _buildSettingItem(

@@ -37,6 +37,7 @@ class SourceManager extends GetxController {
   final RxBool isConfigLoading = false.obs;
   final RxBool configLoadError = false.obs;
   final RxString currentConfigType = 'tvbox'.obs;
+  final RxString currentConfigKey = ''.obs;
 
   bool _isRestoring = false;
   int _configLoadId = 0; // 防止异步竞态
@@ -232,6 +233,7 @@ class SourceManager extends GetxController {
     }
     selectedConfig ??= customConfigs.isNotEmpty ? customConfigs.first : null;
     currentConfigType.value = selectedConfig?['configType']?.toString() ?? 'tvbox';
+    currentConfigKey.value = selectedConfig?['key']?.toString() ?? '';
     NodeJSService.instance.updateConfigType(currentConfigType.value);
 
     try {
@@ -586,6 +588,7 @@ class SourceManager extends GetxController {
     }
     
     await GStorage.setSetting('selected_config_key', configKey);
+    currentConfigKey.value = configKey;
     configSource.value = 'remote';
     GStorage.setSetting('config_source', 'remote');
     await loadConfig();

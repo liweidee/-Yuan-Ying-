@@ -154,12 +154,24 @@ abstract final class SettingBoxKey {
   static const String webdavPassword = 'webdav_password';
   static const String webdavDirectory = 'webdav_directory';
 
-  /// 调试日志总开关
+  // ===== 调试日志总开关 =====
   static const String enableDebugLog = 'enableDebugLog';
 
   static const String lastSelectedSiteKey = 'last_selected_site_key';
 
   static const String localFileScanPaths = 'local_file_scan_paths';
+
+  // ===== 弹幕API配置 =====
+  static const String danmakuApis = 'danmaku_apis';
+  static const String danmakuCurrentKey = 'danmaku_current_key';
+  static const String danmakuAutoMatch = 'danmaku_auto_match';
+
+  // ===== TMDB 配置 =====
+  static const String tmdbAccessToken = 'tmdb_access_token';
+  static const String tmdbApiProxy = 'tmdb_api_proxy';
+  static const String tmdbImageProxy = 'tmdb_image_proxy';
+  static const String tmdbEnabled = 'tmdb_enabled'; // 总开关
+  static const String tmdbSiteEnabledMap = 'tmdb_site_enabled_map'; // 站点启用状态Map
 }
 
 abstract final class VideoBoxKey {

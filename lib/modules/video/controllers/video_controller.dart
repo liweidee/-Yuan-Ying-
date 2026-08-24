@@ -36,6 +36,7 @@ import 'package:yuanying/http/browser_ua.dart';
 import 'package:yuanying/t4/services/i_spider_service.dart';
 import 'package:yuanying/t4/services/drpy2_api_service.dart';
 import 'package:yuanying/modules/video/widgets/introduction/intro_detail_panel.dart';
+import 'package:yuanying/plugin/pl_player/models/play_repeat.dart';
 
 class DetailController extends GetxController with GetTickerProviderStateMixin {
   // ===== tag 用于隔离控制器 =====
@@ -57,6 +58,11 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
   final RxString currentPlayUrl = ''.obs;
   final RxList<PlayQuality> currentQualities = <PlayQuality>[].obs;
   final RxBool isPlaying = false.obs;
+
+  // 播放完成监听器（保存函数引用，用于移除）
+  void Function(PlayerStatus)? _playCompletedListener;
+  // 防止重复处理完成事件的标志
+  bool _isHandlingCompletion = false;
 
   final RxBool isLoadingDetail = true.obs;
   final RxString detailError = ''.obs;
@@ -319,6 +325,9 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     }
 
     playerController = PlPlayerController.getInstance();
+
+    // 从全局设置读取播放顺序，确保与设置页一致
+    playerController.setPlayRepeat(PlayRepeat.values[PlayerPref.playRepeat]);
 
     final args = Get.arguments;
     if (args is Map) {
@@ -908,6 +917,8 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     bool autoPlay, {
     Duration? seekTo,
   }) async {
+    _isHandlingCompletion = false;
+
     // 确保所有残留弹窗被关闭
     SmartDialog.dismiss(force: true);
 
@@ -1003,6 +1014,81 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     }
 
     _addToHistory();
+
+    // ---- 播放完成监听（自动切换） ----
+    if (_playCompletedListener != null) {
+      playerController.removeStatusLister(_playCompletedListener!);
+    }
+    _playCompletedListener = (status) {
+      if (status == PlayerStatus.completed && !_isHandlingCompletion) {
+        _handlePlayCompleted();
+      }
+    };
+    playerController.addStatusLister(_playCompletedListener!);
+  }
+
+  /// 播放完成处理（根据播放顺序自动切换）
+  Future<void> _handlePlayCompleted() async {
+    if (_isHandlingCompletion) return;
+    _isHandlingCompletion = true;
+    try {
+      final repeat = playerController.playRepeat;  // 不是 Rx，直接取值
+      switch (repeat) {
+        case PlayRepeat.singleCycle:
+          // 单集循环：从头开始重播
+          await playerController.seekTo(Duration.zero);
+          await playerController.play();
+          break;
+        case PlayRepeat.listOrder:
+          // 顺序播放：尝试下一集，若无则暂停并提示
+          final success = await playNext();
+          if (!success) {
+            await playerController.pause();
+            SmartDialog.showToast('已经是最后一集');
+          }
+          break;
+        case PlayRepeat.listCycle:
+          // 列表循环：尝试下一集，若无则回到第一集
+          final success = await playNext();
+          if (!success) {
+            final episodes = introController.displayEpisodes;
+            if (episodes.isNotEmpty) {
+              switchEpisode(0);
+            } else {
+              await playerController.pause();
+            }
+          }
+          break;
+        case PlayRepeat.pause:
+          // 播完暂停：不进行任何自动切换，仅暂停（但已经是完成状态，暂停即可）
+          await playerController.pause();
+          SmartDialog.showToast('播放已结束');
+          break;
+        default:
+          break;
+      }
+    } finally {
+      _isHandlingCompletion = false;
+    }
+  }
+
+  /// 随机播放一集（排除当前集）
+  Future<void> _playRandomEpisode() async {
+    final episodes = introController.displayEpisodes;
+    if (episodes.isEmpty) return;
+
+    final currentIndex = introController.currentEpisodeIndex.value;
+    if (episodes.length == 1) {
+      await reloadCurrentEpisode(seekTo: Duration.zero);
+      return;
+    }
+
+    int randomIndex;
+    do {
+      randomIndex = Random().nextInt(episodes.length);
+    } while (randomIndex == currentIndex);
+
+    switchEpisode(randomIndex);
   }
 
   // ===== UA 智能判断辅助方法 =====
@@ -1067,6 +1153,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
           'type_name': sourceName,
           'api_url': currentApiUrl,
           'site_key': siteKey,
+          'config_key': Get.find<SourceManager>().currentConfigKey.value,
           'progress': '00:00 / 00:00',
           'watchTime': DateTime.now().millisecondsSinceEpoch,
         };
@@ -1553,6 +1640,13 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     playerController.dispose();
     // _cleanTempSubtitleFiles();
     tabCtr.dispose();
+
+    // 移除播放完成监听，防止内存泄漏
+    if (_playCompletedListener != null) {
+      playerController.removeStatusLister(_playCompletedListener!);
+      _playCompletedListener = null;
+    }
+
     super.onClose();
   }
 

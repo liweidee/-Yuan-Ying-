@@ -78,6 +78,7 @@ class IntroController extends GetxController {
         'type_name': sourceName,
         'api_url': apiUrl,
         'site_key': siteKey,
+        'config_key': Get.find<SourceManager>().currentConfigKey.value,
       };
       GStorage.addFavorite(item);
       isFavorite.value = true;
