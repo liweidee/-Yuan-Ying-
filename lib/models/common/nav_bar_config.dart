@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:yuanying/models/common/enum_with_label.dart';
 import 'package:yuanying/modules/home/views/home_page.dart';
 import 'package:yuanying/modules/local_file/views/local_file_page.dart';
+import 'package:yuanying/modules/live/views/live_page.dart';
 import 'package:yuanying/modules/setting/views/setting_page.dart';
 
 /// 导航栏类型枚举
@@ -11,6 +12,12 @@ enum NavigationBarType implements EnumWithLabel {
     Icon(Icons.home_outlined, size: 24),
     Icon(Icons.home, size: 24),
     HomePage(),
+  ),
+  live(
+    '直播',
+    Icon(Icons.live_tv_outlined, size: 24),
+    Icon(Icons.live_tv, size: 24),
+    LivePage(),
   ),
   localFile(
     '文件',

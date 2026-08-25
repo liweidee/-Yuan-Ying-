@@ -1,3 +1,4 @@
+// lib/modules/setting/controllers/danmaku_config_controller.dart
 import 'package:get/get.dart';
 import 'package:yuanying/core/constants/storage_keys.dart';
 import 'package:yuanying/models/danmaku/danmaku_api.dart';
@@ -28,6 +29,8 @@ class DanmakuConfigController extends GetxController {
     } else {
       currentKey.value = '';
     }
+    // 初始加载后刷新
+    apis.refresh();
   }
 
   Future<void> saveApis() async {
@@ -43,6 +46,8 @@ class DanmakuConfigController extends GetxController {
 
     currentKey.value = key;
     await StorageManager.setSetting(SettingBoxKey.danmakuCurrentKey, key);
+    // 强制刷新列表
+    apis.refresh();
   }
 
   Future<void> addApi(String name, String api) async {
@@ -51,8 +56,11 @@ class DanmakuConfigController extends GetxController {
     apis.add(newApi);
     await saveApis();
     if (apis.length == 1) {
-      await switchApi(key);
+      currentKey.value = key;
+      await StorageManager.setSetting(SettingBoxKey.danmakuCurrentKey, key);
     }
+    // 添加后刷新
+    apis.refresh();
   }
 
   Future<void> updateApi(String key, String name, String api) async {
@@ -61,7 +69,9 @@ class DanmakuConfigController extends GetxController {
       apis[index] = DanmakuApi(key: key, name: name, api: api);
       await saveApis();
       if (currentKey.value == key) {
-        currentKey.value = key; // 触发刷新
+        currentKey.value = key;
+        // 更新后刷新
+        apis.refresh();
       }
     }
   }
@@ -72,12 +82,15 @@ class DanmakuConfigController extends GetxController {
 
     if (currentKey.value == key) {
       if (apis.isNotEmpty) {
-        await switchApi(apis.first.key);
+        currentKey.value = apis.first.key;
+        await StorageManager.setSetting(SettingBoxKey.danmakuCurrentKey, currentKey.value);
       } else {
         currentKey.value = '';
         await StorageManager.deleteSetting(SettingBoxKey.danmakuCurrentKey);
       }
     }
+    // 删除后刷新
+    apis.refresh();
   }
 
   Future<void> toggleAutoMatch(bool value) async {

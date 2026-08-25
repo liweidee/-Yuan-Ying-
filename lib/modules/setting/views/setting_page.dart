@@ -9,6 +9,7 @@ import 'package:yuanying/modules/setting/views/play_setting_page.dart';
 import 'package:yuanying/modules/setting/views/extra_setting_page.dart';
 import 'package:yuanying/modules/setting/views/danmaku_config_page.dart';
 import 'package:yuanying/modules/setting/views/tmdb_config_page.dart';
+import 'package:yuanying/modules/setting/views/live_config_page.dart';
 import 'package:yuanying/core/routes/app_pages.dart';
 
 class SettingPage extends StatelessWidget {
@@ -36,6 +37,14 @@ class SettingPage extends StatelessWidget {
             title: '接口配置',
             subtitle: '管理视频源接口',
             onTap: () => Get.to(() => const SiteConfigPage()),
+          ),
+          const SizedBox(height: 8),
+          _buildSettingItem(
+            context: context,
+            icon: Icons.live_tv,
+            title: '直播配置',
+            subtitle: '管理直播源配置（TVBox格式）',
+            onTap: () => Get.to(() => const LiveConfigPage()),
           ),
           const SizedBox(height: 8),
           _buildSettingItem(

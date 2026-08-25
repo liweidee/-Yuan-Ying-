@@ -42,19 +42,61 @@ class MainController extends GetxController {
 
   // ============================================================
 
+  // void setNavBarConfig() {
+  //   final List<int>? navBarSort = SettingPref.navBarSort;
+  //   if (navBarSort == null || navBarSort.isEmpty) {
+  //     navigationBars = NavigationBarType.values.toList();
+  //   } else {
+  //     navigationBars = navBarSort
+  //         .map((i) => NavigationBarType.values[i])
+  //         .whereType<NavigationBarType>()
+  //         .toList();
+  //     if (navigationBars.isEmpty) {
+  //       navigationBars = NavigationBarType.values.toList();
+  //     }
+  //   }
+  //   final defPage = SettingPref.defaultHomePage;
+  //   final index = navigationBars.indexOf(defPage);
+  //   selectedIndex.value = index >= 0 ? index : 0;
+  // }
+
   void setNavBarConfig() {
-    final List<int>? navBarSort = SettingPref.navBarSort;
-    if (navBarSort == null || navBarSort.isEmpty) {
-      navigationBars = NavigationBarType.values.toList();
+    final List<int>? savedSort = SettingPref.navBarSort;
+    final List<NavigationBarType> allValues = NavigationBarType.values.toList();
+
+    if (savedSort == null || savedSort.isEmpty) {
+      navigationBars = allValues;
     } else {
-      navigationBars = navBarSort
+      // 从保存的索引恢复
+      navigationBars = savedSort
           .map((i) => NavigationBarType.values[i])
           .whereType<NavigationBarType>()
           .toList();
+
+      // 迁移逻辑：检查是否有遗漏的枚举项（如新增的 live）
+      final Set<int> savedIndices = savedSort.toSet();
+      bool hasMissing = false;
+      for (int i = 0; i < allValues.length; i++) {
+        if (!savedIndices.contains(i)) {
+          // 缺失的枚举项追加到末尾
+          navigationBars.add(allValues[i]);
+          savedSort.add(i);
+          hasMissing = true;
+        }
+      }
+
+      // 如果列表为空（理论上不会），降级为全部
       if (navigationBars.isEmpty) {
-        navigationBars = NavigationBarType.values.toList();
+        navigationBars = allValues;
+      }
+
+      // 如果有缺失项，保存更新后的排序
+      if (hasMissing) {
+        SettingPref.navBarSort = savedSort;
       }
     }
+
+    // 设置默认选中的页面
     final defPage = SettingPref.defaultHomePage;
     final index = navigationBars.indexOf(defPage);
     selectedIndex.value = index >= 0 ? index : 0;

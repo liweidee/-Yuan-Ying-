@@ -172,6 +172,10 @@ abstract final class SettingBoxKey {
   static const String tmdbImageProxy = 'tmdb_image_proxy';
   static const String tmdbEnabled = 'tmdb_enabled'; // 总开关
   static const String tmdbSiteEnabledMap = 'tmdb_site_enabled_map'; // 站点启用状态Map
+
+  // 直播配置
+  static const String liveConfigs = 'live_configs';
+  static const String liveCurrentKey = 'live_current_key';
 }
 
 abstract final class VideoBoxKey {

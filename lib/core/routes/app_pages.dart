@@ -25,6 +25,7 @@ import 'package:yuanying/modules/catvod_log/views/catvod_log_page.dart';
 import 'package:yuanying/modules/setting/views/danmaku_config_page.dart';
 import 'package:yuanying/modules/setting/views/tmdb_config_page.dart';
 import 'package:yuanying/modules/setting/views/tmdb_match_page.dart';
+import 'package:yuanying/modules/setting/views/live_config_page.dart';
 
 class AppPages {
   static const String initial = '/';
@@ -51,6 +52,8 @@ class AppPages {
   static const String danmakuConfig = '/danmakuConfig';
   static const String tmdbConfig = '/tmdbConfig';
   static const String tmdbMatch = '/tmdbMatch';
+  static const String liveConfig = '/liveConfig';
+
 
   static final List<GetPage> routes = [
     GetPage(name: initial, page: () => const MainPage()),
@@ -88,5 +91,6 @@ class AppPages {
     GetPage(name: danmakuConfig, page: () => const DanmakuConfigPage()),
     GetPage(name: tmdbConfig, page: () => const TmdbConfigPage()),
     GetPage(name: tmdbMatch, page: () => const TmdbMatchPage()),
+    GetPage(name: liveConfig, page: () => const LiveConfigPage()),
   ];
 }
