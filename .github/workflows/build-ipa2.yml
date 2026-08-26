@@ -147,14 +147,14 @@ jobs:
 
           mkdir -p Build
           cd "$TEMP_DIR"
-          zip -r -q -X "$GITHUB_WORKSPACE/Build/app.ipa" Payload
+          zip -r -q -X "$GITHUB_WORKSPACE/Build/yuanying.ipa" Payload
 
           echo "✅ IPA created"
-          ls -lh "$GITHUB_WORKSPACE/Build/app.ipa"
+          ls -lh "$GITHUB_WORKSPACE/Build/yuanying.ipa"
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
           name: app-ipa
-          path: Build/app.ipa
+          path: Build/yuanying.ipa
           retention-days: 30

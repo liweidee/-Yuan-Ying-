@@ -186,6 +186,7 @@ class _MainPageState extends State<MainPage> {
       selectedIndex: selectedIndex,
       onDestinationSelected: _controller.switchPage,
       indicatorColor: Colors.transparent,
+      labelPadding: const EdgeInsets.only(top: 0), // 或者 top: 2，默认是 4
       labelTextStyle: WidgetStateProperty.resolveWith((states) {
         if (states.contains(WidgetState.selected)) {
           return TextStyle(
