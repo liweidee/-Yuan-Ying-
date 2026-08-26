@@ -9,15 +9,19 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:window_manager/window_manager.dart' hide WindowCaption;
+import 'package:screen_brightness_platform_interface/screen_brightness_platform_interface.dart';
 
 import 'package:yuanying/core/constants/storage_keys.dart';
 import 'package:yuanying/models/live/live_config.dart';
 import 'package:yuanying/modules/live/models/live_channel.dart';
 import 'package:yuanying/modules/live/services/live_parser_service.dart';
+import 'package:yuanying/modules/live/widgets/live_player_view.dart';
 import 'package:yuanying/plugin/pl_player/player_pref.dart';
 import 'package:yuanying/utils/storage_manager.dart';
 import 'package:yuanying/utils/platform_utils.dart';
-import 'package:yuanying/modules/live/widgets/live_player_view.dart';
+
+import 'package:yuanying/plugin/pl_player/models/video_fit_type.dart';
+import 'package:yuanying/plugin/pl_player/utils/fullscreen.dart';
 
 class LiveController extends GetxController {
   static LiveController get to => Get.find<LiveController>(tag: 'live');
@@ -45,7 +49,7 @@ class LiveController extends GetxController {
   final Rx<Duration> duration = Duration.zero.obs;
 
   // ===== 画面比例 =====
-  final Rx<BoxFit> videoFit = BoxFit.contain.obs;
+  final Rx<VideoFitType> videoFit = VideoFitType.contain.obs;
 
   // ===== 控制条显隐 =====
   final RxBool controlsVisible = false.obs;
@@ -53,6 +57,10 @@ class LiveController extends GetxController {
 
   // ===== 用户主动暂停标志 =====
   final RxBool userPaused = false.obs;
+
+  // ===== 音量 & 亮度（手势用） =====
+  final RxDouble volume = 1.0.obs;
+  final RxDouble brightness = (-1.0).obs;
 
   // ===== 全屏 Overlay =====
   OverlayEntry? _fullScreenOverlay;
@@ -93,6 +101,7 @@ class LiveController extends GetxController {
     }
     _initPlayer();
     _loadConfigAndChannels();
+    _initVolumeAndBrightness();
   }
 
   void ensurePlayerInitialized() {
@@ -140,11 +149,22 @@ class LiveController extends GetxController {
     });
   }
 
+  void _initVolumeAndBrightness() async {
+    try {
+      final sysBrightness = await ScreenBrightnessPlatform.instance.system;
+      brightness.value = sysBrightness;
+    } catch (_) {}
+    volume.value = 1.0;
+  }
+
   @override
   void onClose() {
     _hideControlsTimer?.cancel();
     _fullScreenOverlay?.remove();
     _fullScreenOverlay = null;
+    if (PlatformUtils.isMobile) {
+      portraitUpMode();
+    }
     super.onClose();
   }
 
@@ -203,13 +223,12 @@ class LiveController extends GetxController {
   }
 
   // ============================================================
-  // 系统自动暂停/恢复（切换到其他 Tab 时调用）
+  // 系统自动暂停/恢复
   // ============================================================
 
   void pauseBySystem() {
     if (_player != null && isPlaying.value) {
       _player!.pause();
-      // print('暂停播放了...');
     }
   }
 
@@ -217,8 +236,31 @@ class LiveController extends GetxController {
     if (_player != null && !isPlaying.value && !userPaused.value && currentChannel.value != null) {
       _player!.play();
       showControls();
-      // print('恢复播放了...');
     }
+  }
+
+  // ============================================================
+  // 音量控制
+  // ============================================================
+
+  Future<void> setVolume(double value, {bool showIndicator = true}) async {
+    final clamped = value.clamp(0.0, 2.0);
+    volume.value = clamped;
+    if (_player != null) {
+      await _player!.setVolume(clamped * 100);
+    }
+  }
+
+  // ============================================================
+  // 亮度控制
+  // ============================================================
+
+  Future<void> setBrightness(double value) async {
+    final clamped = value.clamp(0.0, 1.0);
+    brightness.value = clamped;
+    try {
+      await ScreenBrightnessPlatform.instance.setSystemScreenBrightness(clamped);
+    } catch (_) {}
   }
 
   // ============================================================
@@ -409,13 +451,12 @@ class LiveController extends GetxController {
   }
 
   // ============================================================
-  // 全屏控制（Overlay 覆盖整个应用）
+  // 全屏控制
   // ============================================================
 
   Future<void> enterFullScreen(BuildContext context) async {
     if (isFullScreen.value) return;
 
-    // 系统层全屏
     if (PlatformUtils.isDesktop) {
       await windowManager.setTitleBarStyle(TitleBarStyle.hidden);
       await windowManager.setFullScreen(true);
@@ -424,10 +465,12 @@ class LiveController extends GetxController {
         await _mediaKitChannel.invokeMethod('Utils.EnterNativeFullscreen');
       } catch (_) {}
     } else {
-      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+      try {
+        await _mediaKitChannel.invokeMethod('Utils.EnterNativeFullscreen');
+      } catch (_) {}
+      await landscapeLeftMode();
     }
 
-    // 插入全屏 Overlay（覆盖整个应用，包括底部导航栏）
     _fullScreenOverlay = OverlayEntry(
       builder: (context) => _FullScreenOverlay(
         onExit: () => exitFullScreen(),
@@ -442,11 +485,9 @@ class LiveController extends GetxController {
   Future<void> exitFullScreen() async {
     if (!isFullScreen.value) return;
 
-    // 移除 Overlay
     _fullScreenOverlay?.remove();
     _fullScreenOverlay = null;
 
-    // 系统层退出全屏
     if (PlatformUtils.isDesktop) {
       try {
         await _mediaKitChannel.invokeMethod('Utils.ExitNativeFullscreen');
@@ -454,12 +495,14 @@ class LiveController extends GetxController {
       await windowManager.setFullScreen(false);
       await windowManager.setTitleBarStyle(TitleBarStyle.normal);
     } else {
-      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+      try {
+        await _mediaKitChannel.invokeMethod('Utils.ExitNativeFullscreen');
+      } catch (_) {}
+      await portraitUpMode();
     }
 
     isFullScreen.value = false;
     showControls();
-    // 不自动恢复播放，保持用户当前操作状态
   }
 
   Future<void> toggleFullScreen(BuildContext context) async {
@@ -474,21 +517,8 @@ class LiveController extends GetxController {
   // 画面比例切换
   // ============================================================
 
-  void setVideoFit(BoxFit fit) {
+  void setVideoFit(VideoFitType fit) {
     videoFit.value = fit;
-  }
-
-  String getFitName(BoxFit fit) {
-    switch (fit) {
-      case BoxFit.contain:
-        return '适应';
-      case BoxFit.cover:
-        return '填充';
-      case BoxFit.fill:
-        return '拉伸';
-      default:
-        return '适应';
-    }
   }
 
   // ============================================================
@@ -520,11 +550,9 @@ class _FullScreenOverlay extends StatelessWidget {
   Widget build(BuildContext context) {
     final ctrl = Get.find<LiveController>(tag: 'live');
 
-    // 全屏时使用 PopScope 拦截返回键
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
-        // 返回键被拦截，退出全屏
         if (!didPop) {
           onExit();
         }
@@ -540,20 +568,7 @@ class _FullScreenOverlay extends StatelessWidget {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              // 全屏播放器（复用 LivePlayerView，isFullScreen = true）
               const LivePlayerView(isFullScreen: true),
-              // 退出全屏按钮（右上角）
-              Positioned(
-                top: 8,
-                right: 8,
-                child: IconButton(
-                  icon: const Icon(Icons.fullscreen_exit, color: Colors.white, size: 28),
-                  onPressed: onExit,
-                  tooltip: '退出全屏',
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                ),
-              ),
             ],
           ),
         ),

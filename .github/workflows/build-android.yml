@@ -25,7 +25,7 @@ jobs:
           distribution: 'zulu'
           java-version: '17'
 
-      # ===== 新增：Python 环境（serious_python 需要） =====
+      # Python 环境（serious_python 需要）
       - name: Setup Python
         uses: actions/setup-python@v5
         with:

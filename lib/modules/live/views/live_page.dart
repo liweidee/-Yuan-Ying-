@@ -44,7 +44,6 @@ class _LivePageState extends State<LivePage> {
       final bool removeSafeArea = PlayerPref.removeSafeArea;
       final double topPadding = isFullScreen ? 0.0 : (removeSafeArea ? 0.0 : viewPadding.top);
 
-      // 全屏时页面内容为空（Overlay 覆盖了整个屏幕）
       if (isFullScreen) {
         return const Scaffold(
           backgroundColor: Colors.transparent,
