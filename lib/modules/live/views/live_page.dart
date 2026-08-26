@@ -5,6 +5,7 @@ import 'package:yuanying/modules/live/controllers/live_controller.dart';
 import 'package:yuanying/modules/live/widgets/live_player_view.dart';
 import 'package:yuanying/modules/live/widgets/live_group_list.dart';
 import 'package:yuanying/modules/live/widgets/live_channel_list.dart';
+import 'package:yuanying/plugin/pl_player/player_pref.dart';
 
 class LivePage extends StatefulWidget {
   const LivePage({super.key});
@@ -15,11 +16,14 @@ class LivePage extends StatefulWidget {
 
 class _LivePageState extends State<LivePage> {
   late final LiveController controller;
+  final GlobalKey _playerKey = GlobalKey();
 
   @override
   void initState() {
     super.initState();
-    Get.lazyPut<LiveController>(() => LiveController(), tag: 'live');
+    if (!Get.isRegistered<LiveController>(tag: 'live')) {
+      Get.put(LiveController(), tag: 'live', permanent: true);
+    }
     controller = Get.find<LiveController>(tag: 'live');
     controller.ensurePlayerInitialized();
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -29,61 +33,55 @@ class _LivePageState extends State<LivePage> {
 
   @override
   void dispose() {
-    // 如果当前正在播放，暂停并标记为用户主动暂停，阻止自动恢复
-    if (controller.isPlaying.value) {
-      controller.pause(markUserPaused: true);
-    }
-    // 如果已经暂停，不做任何操作，保留 userPaused 状态（可能已经是 true）
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    // 每次 build 后尝试恢复播放，但仅当不是用户主动暂停时
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!controller.userPaused.value && 
-          controller.currentChannel.value != null && 
-          !controller.isPlaying.value) {
-        controller.resumeIfNeeded();
-      }
-    });
+    return Obx(() {
+      final bool isFullScreen = controller.isFullScreen.value;
+      final EdgeInsets viewPadding = MediaQuery.viewPaddingOf(context);
+      final bool removeSafeArea = PlayerPref.removeSafeArea;
+      final double topPadding = isFullScreen ? 0.0 : (removeSafeArea ? 0.0 : viewPadding.top);
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Obx(() {
-          final config = controller.currentConfig.value;
-          return Text(config != null ? '${config.name}' : '直播');
-        }),
-        centerTitle: false,
-        elevation: 0,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: controller.refreshChannels,
-            tooltip: '刷新频道',
-          ),
-        ],
-      ),
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          final isDesktop = constraints.maxWidth > 800;
-          if (isDesktop) {
-            return _buildDesktopLayout(context);
-          } else {
-            return _buildMobileLayout(context);
-          }
-        },
-      ),
-    );
+      // 全屏时页面内容为空（Overlay 覆盖了整个屏幕）
+      if (isFullScreen) {
+        return const Scaffold(
+          backgroundColor: Colors.transparent,
+          body: SizedBox.shrink(),
+        );
+      }
+
+      return Scaffold(
+        appBar: null,
+        resizeToAvoidBottomInset: false,
+        body: LayoutBuilder(
+          builder: (context, constraints) {
+            final bool isDesktop = constraints.maxWidth > 800;
+            final Widget playerWidget = LivePlayerView(
+              key: _playerKey,
+              isFullScreen: false,
+            );
+
+            if (isDesktop) {
+              return _buildDesktopLayout(playerWidget);
+            } else {
+              return _buildMobileLayout(playerWidget, topPadding);
+            }
+          },
+        ),
+      );
+    });
   }
 
-  Widget _buildMobileLayout(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
+  Widget _buildMobileLayout(Widget playerWidget, double topPadding) {
+    final ColorScheme colorScheme = Theme.of(context).colorScheme;
     return Column(
       children: [
-        const AspectRatio(
+        if (topPadding > 0) SizedBox(height: topPadding),
+        AspectRatio(
           aspectRatio: 16 / 9,
-          child: LivePlayerView(showFullscreenBtn: true),
+          child: playerWidget,
         ),
         const SizedBox(height: 6),
         Expanded(
@@ -91,7 +89,7 @@ class _LivePageState extends State<LivePage> {
             padding: const EdgeInsets.symmetric(horizontal: 8.0),
             child: Row(
               children: [
-                LiveGroupList(width: 76, isDesktop: false),
+                LiveGroupList(width: 110, isDesktop: false),
                 const SizedBox(width: 4),
                 Expanded(
                   child: Container(
@@ -113,10 +111,9 @@ class _LivePageState extends State<LivePage> {
     );
   }
 
-  Widget _buildDesktopLayout(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final shadowColor = Theme.of(context).shadowColor;
-
+  Widget _buildDesktopLayout(Widget playerWidget) {
+    final ColorScheme colorScheme = Theme.of(context).colorScheme;
+    final Color shadowColor = Theme.of(context).shadowColor;
     return Padding(
       padding: const EdgeInsets.all(16.0),
       child: Row(
@@ -139,7 +136,7 @@ class _LivePageState extends State<LivePage> {
               borderRadius: BorderRadius.circular(12),
               child: Row(
                 children: [
-                  LiveGroupList(width: 90, isDesktop: true),
+                  LiveGroupList(width: 120, isDesktop: true),
                   Expanded(
                     child: Container(
                       color: colorScheme.surface,
@@ -166,7 +163,7 @@ class _LivePageState extends State<LivePage> {
               ),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(12),
-                child: const LivePlayerView(showFullscreenBtn: true),
+                child: playerWidget,
               ),
             ),
           ),

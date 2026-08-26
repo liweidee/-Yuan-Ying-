@@ -69,14 +69,13 @@ class _ChannelItemState extends State<_ChannelItem> {
             borderRadius: BorderRadius.circular(4),
             onTap: () => controller.playChannel(widget.channel),
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12), // 只改这里：7→12
               decoration: BoxDecoration(
                 color: getBgColor(),
                 borderRadius: BorderRadius.circular(4),
               ),
               child: Row(
                 children: [
-                  // 小圆点指示器
                   if (isCurrent)
                     Container(
                       width: 5,

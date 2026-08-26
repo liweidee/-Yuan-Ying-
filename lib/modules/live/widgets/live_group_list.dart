@@ -71,7 +71,7 @@ class _GroupItem extends StatelessWidget {
           borderRadius: BorderRadius.circular(6),
           onTap: () => controller.selectedGroup.value = group,
           child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12), // 只改这里：8→12
             decoration: BoxDecoration(
               color: isSelected
                   ? colorScheme.primaryContainer.withOpacity(0.35)
@@ -81,7 +81,6 @@ class _GroupItem extends StatelessWidget {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // 小圆点指示器
                 if (isSelected)
                   Container(
                     width: 6,

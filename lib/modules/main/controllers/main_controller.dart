@@ -1,8 +1,10 @@
+// lib/modules/main/controllers/main_controller.dart
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:yuanying/models/common/bar_hide_type.dart';
 import 'package:yuanying/models/common/nav_bar_config.dart';
 import 'package:yuanying/modules/setting/models/setting_pref.dart';
+import 'package:yuanying/modules/live/controllers/live_controller.dart';
 
 class MainController extends GetxController {
   // ===== 导航配置 =====
@@ -18,7 +20,7 @@ class MainController extends GetxController {
   // ===== 底部栏 Instant 模式专用状态 =====
   final RxBool showBottomBar = true.obs;
 
-  // ===== 同步模式共享偏移（顶部和底部共享） =====
+  // ===== 同步模式共享偏移 =====
   final RxDouble barOffset = 0.0.obs;
 
   // ===== 底栏收齐设置 =====
@@ -37,28 +39,39 @@ class MainController extends GetxController {
 
   final RxDouble bottomBarHeight = 56.0.obs;
 
-  // ===== 是否需要进行滚动校正（仅当顶部栏可隐藏时） =====
   bool get needsCorrection => hideTopBar.value;
 
   // ============================================================
+  // 获取直播 Tab 的索引
+  // ============================================================
 
-  // void setNavBarConfig() {
-  //   final List<int>? navBarSort = SettingPref.navBarSort;
-  //   if (navBarSort == null || navBarSort.isEmpty) {
-  //     navigationBars = NavigationBarType.values.toList();
-  //   } else {
-  //     navigationBars = navBarSort
-  //         .map((i) => NavigationBarType.values[i])
-  //         .whereType<NavigationBarType>()
-  //         .toList();
-  //     if (navigationBars.isEmpty) {
-  //       navigationBars = NavigationBarType.values.toList();
-  //     }
-  //   }
-  //   final defPage = SettingPref.defaultHomePage;
-  //   final index = navigationBars.indexOf(defPage);
-  //   selectedIndex.value = index >= 0 ? index : 0;
-  // }
+  int get liveTabIndex {
+    for (int i = 0; i < navigationBars.length; i++) {
+      if (navigationBars[i] == NavigationBarType.live) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  // ============================================================
+  // 通知 LiveController
+  // ============================================================
+
+  void _notifyLiveController({required bool pause}) {
+    try {
+      final LiveController liveController = Get.find<LiveController>(tag: 'live');
+      if (pause) {
+        liveController.pauseBySystem();
+      } else {
+        liveController.resumeBySystem();
+      }
+    } catch (_) {
+      // LiveController 未注册，静默忽略
+    }
+  }
+
+  // ============================================================
 
   void setNavBarConfig() {
     final List<int>? savedSort = SettingPref.navBarSort;
@@ -67,36 +80,30 @@ class MainController extends GetxController {
     if (savedSort == null || savedSort.isEmpty) {
       navigationBars = allValues;
     } else {
-      // 从保存的索引恢复
       navigationBars = savedSort
           .map((i) => NavigationBarType.values[i])
           .whereType<NavigationBarType>()
           .toList();
 
-      // 迁移逻辑：检查是否有遗漏的枚举项（如新增的 live）
       final Set<int> savedIndices = savedSort.toSet();
       bool hasMissing = false;
       for (int i = 0; i < allValues.length; i++) {
         if (!savedIndices.contains(i)) {
-          // 缺失的枚举项追加到末尾
           navigationBars.add(allValues[i]);
           savedSort.add(i);
           hasMissing = true;
         }
       }
 
-      // 如果列表为空（理论上不会），降级为全部
       if (navigationBars.isEmpty) {
         navigationBars = allValues;
       }
 
-      // 如果有缺失项，保存更新后的排序
       if (hasMissing) {
         SettingPref.navBarSort = savedSort;
       }
     }
 
-    // 设置默认选中的页面
     final defPage = SettingPref.defaultHomePage;
     final index = navigationBars.indexOf(defPage);
     selectedIndex.value = index >= 0 ? index : 0;
@@ -134,10 +141,30 @@ class MainController extends GetxController {
     return width < 600 || height >= width;
   }
 
+  // ============================================================
+  // switchPage：添加直播通知
+  // ============================================================
+
   void switchPage(int index) {
     if (selectedIndex.value == index) return;
+
+    final int oldIndex = selectedIndex.value;
+    final int liveIdx = liveTabIndex;
+
+    // 如果从直播 Tab 切出去 → 暂停直播
+    if (liveIdx != -1 && oldIndex == liveIdx) {
+      _notifyLiveController(pause: true);
+    }
+
     selectedIndex.value = index;
+
+    // 如果切到直播 Tab → 恢复直播（仅当用户没有手动暂停时）
+    if (liveIdx != -1 && index == liveIdx) {
+      _notifyLiveController(pause: false);
+    }
   }
+
+  // ============================================================
 
   NavigationBarStyle get currentNavBarStyle => SettingPref.navigationBarStyle;
 
