@@ -27,8 +27,9 @@ class _LivePageState extends State<LivePage> {
     }
     controller = Get.find<LiveController>(tag: 'live');
     controller.ensurePlayerInitialized();
+    // 首次进入：显示 loading
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      controller.refreshChannels();
+      controller.refreshChannels(showLoading: true);
     });
   }
 
@@ -45,6 +46,7 @@ class _LivePageState extends State<LivePage> {
       final String errorMsg = controller.errorMessage.value;
       final bool hasChannels = controller.channels.isNotEmpty;
 
+      // 全屏时直接返回空白（由 Overlay 覆盖）
       if (isFullScreen) {
         return const Scaffold(
           backgroundColor: Colors.transparent,
@@ -52,6 +54,7 @@ class _LivePageState extends State<LivePage> {
         );
       }
 
+      // ---------- 加载中 ----------
       if (isLoading) {
         return Scaffold(
           appBar: null,
@@ -68,22 +71,17 @@ class _LivePageState extends State<LivePage> {
         );
       }
 
-      // 错误页
-      if (errorMsg.isNotEmpty) {
-        return _buildErrorPage(context, errorMsg);
+      // ---------- 错误状态 ----------
+      if (errorMsg.isNotEmpty || !hasChannels) {
+        return _buildErrorPage(context);
       }
 
-      // 空状态页
-      if (!hasChannels) {
-        return _buildEmptyPage(context);
-      }
-
-      // 正常内容
+      // ---------- 正常内容 ----------
       return _buildNormalContent(context);
     });
   }
 
-  Widget _buildErrorPage(BuildContext context, String errorMsg) {
+  Widget _buildErrorPage(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     return Scaffold(
       appBar: null,
@@ -109,7 +107,9 @@ class _LivePageState extends State<LivePage> {
               ),
               const SizedBox(height: 8),
               Text(
-                errorMsg,
+                controller.errorMessage.value.isNotEmpty
+                    ? controller.errorMessage.value
+                    : '请检查网络或配置',
                 style: TextStyle(
                   fontSize: 14,
                   color: colorScheme.outline,
@@ -120,63 +120,8 @@ class _LivePageState extends State<LivePage> {
               FilledButton(
                 onPressed: () async {
                   await Get.toNamed(AppPages.liveConfig);
-                  controller.refreshChannels();
-                },
-                style: FilledButton.styleFrom(
-                  backgroundColor: colorScheme.primary,
-                  foregroundColor: colorScheme.onPrimary,
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-                child: const Text('直播配置'),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildEmptyPage(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Scaffold(
-      appBar: null,
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 32),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                Icons.tv_off,
-                size: 48,
-                color: colorScheme.outline,
-              ),
-              const SizedBox(height: 16),
-              Text(
-                '暂无直播频道',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w500,
-                  color: colorScheme.onSurface,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                '请检查网络或配置是否正确',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: colorScheme.outline,
-                ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 20),
-              FilledButton(
-                onPressed: () async {
-                  await Get.toNamed(AppPages.liveConfig);
-                  controller.refreshChannels();
+                  // 从配置页返回，强制显示 loading 重新加载
+                  controller.refreshChannels(showLoading: true);
                 },
                 style: FilledButton.styleFrom(
                   backgroundColor: colorScheme.primary,

@@ -25,13 +25,18 @@ jobs:
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           echo "Extracted version: $VERSION"
 
-      - name: Build macOS app
-        run: flutter build macos --release --no-pub
+      - name: Install dependencies and build macOS app
+        run: |
+          # 确保当前目录是项目根目录
+          pwd
+          ls -la
+          flutter pub get
+          flutter build macos --release --no-pub
 
       - name: Create DMG
         run: |
           npm install --global create-dmg
-          # 假设 .app 名称为 yuanying.app（如果不同请修改）
+          # 如果 app 名称不是 yuanying.app，请修改为实际名称
           create-dmg build/macos/Build/Products/Release/yuanying.app || true
         continue-on-error: true
 
