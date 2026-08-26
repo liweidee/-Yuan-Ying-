@@ -1,6 +1,7 @@
 // lib/modules/live/views/live_page.dart
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:yuanying/core/routes/app_pages.dart';
 import 'package:yuanying/modules/live/controllers/live_controller.dart';
 import 'package:yuanying/modules/live/widgets/live_player_view.dart';
 import 'package:yuanying/modules/live/widgets/live_group_list.dart';
@@ -40,9 +41,9 @@ class _LivePageState extends State<LivePage> {
   Widget build(BuildContext context) {
     return Obx(() {
       final bool isFullScreen = controller.isFullScreen.value;
-      final EdgeInsets viewPadding = MediaQuery.viewPaddingOf(context);
-      final bool removeSafeArea = PlayerPref.removeSafeArea;
-      final double topPadding = isFullScreen ? 0.0 : (removeSafeArea ? 0.0 : viewPadding.top);
+      final bool isLoading = controller.isLoading.value;
+      final String errorMsg = controller.errorMessage.value;
+      final bool hasChannels = controller.channels.isNotEmpty;
 
       if (isFullScreen) {
         return const Scaffold(
@@ -51,26 +52,173 @@ class _LivePageState extends State<LivePage> {
         );
       }
 
-      return Scaffold(
-        appBar: null,
-        resizeToAvoidBottomInset: false,
-        body: LayoutBuilder(
-          builder: (context, constraints) {
-            final bool isDesktop = constraints.maxWidth > 800;
-            final Widget playerWidget = LivePlayerView(
-              key: _playerKey,
-              isFullScreen: false,
-            );
+      if (isLoading) {
+        return Scaffold(
+          appBar: null,
+          body: Center(
+            child: SizedBox(
+              width: 40,
+              height: 40,
+              child: CircularProgressIndicator(
+                strokeWidth: 3,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+            ),
+          ),
+        );
+      }
 
-            if (isDesktop) {
-              return _buildDesktopLayout(playerWidget);
-            } else {
-              return _buildMobileLayout(playerWidget, topPadding);
-            }
-          },
-        ),
-      );
+      // 错误页
+      if (errorMsg.isNotEmpty) {
+        return _buildErrorPage(context, errorMsg);
+      }
+
+      // 空状态页
+      if (!hasChannels) {
+        return _buildEmptyPage(context);
+      }
+
+      // 正常内容
+      return _buildNormalContent(context);
     });
+  }
+
+  Widget _buildErrorPage(BuildContext context, String errorMsg) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Scaffold(
+      appBar: null,
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.error_outline,
+                size: 48,
+                color: colorScheme.error,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                '直播接口请求失败',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                  color: colorScheme.onSurface,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                errorMsg,
+                style: TextStyle(
+                  fontSize: 14,
+                  color: colorScheme.outline,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 20),
+              FilledButton(
+                onPressed: () async {
+                  await Get.toNamed(AppPages.liveConfig);
+                  controller.refreshChannels();
+                },
+                style: FilledButton.styleFrom(
+                  backgroundColor: colorScheme.primary,
+                  foregroundColor: colorScheme.onPrimary,
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                child: const Text('直播配置'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmptyPage(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Scaffold(
+      appBar: null,
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.tv_off,
+                size: 48,
+                color: colorScheme.outline,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                '暂无直播频道',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                  color: colorScheme.onSurface,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '请检查网络或配置是否正确',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: colorScheme.outline,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 20),
+              FilledButton(
+                onPressed: () async {
+                  await Get.toNamed(AppPages.liveConfig);
+                  controller.refreshChannels();
+                },
+                style: FilledButton.styleFrom(
+                  backgroundColor: colorScheme.primary,
+                  foregroundColor: colorScheme.onPrimary,
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                child: const Text('直播配置'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildNormalContent(BuildContext context) {
+    final viewPadding = MediaQuery.viewPaddingOf(context);
+    final removeSafeArea = PlayerPref.removeSafeArea;
+    final double topPadding = removeSafeArea ? 0.0 : viewPadding.top;
+
+    return Scaffold(
+      appBar: null,
+      resizeToAvoidBottomInset: false,
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final bool isDesktop = constraints.maxWidth > 800;
+          final Widget playerWidget = LivePlayerView(
+            key: _playerKey,
+            isFullScreen: false,
+          );
+
+          if (isDesktop) {
+            return _buildDesktopLayout(playerWidget);
+          } else {
+            return _buildMobileLayout(playerWidget, topPadding);
+          }
+        },
+      ),
+    );
   }
 
   Widget _buildMobileLayout(Widget playerWidget, double topPadding) {

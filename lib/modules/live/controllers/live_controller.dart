@@ -41,6 +41,9 @@ class LiveController extends GetxController {
   final RxBool isLoading = false.obs;
   final RxBool isBuffering = false.obs;
 
+  // ===== 错误信息 =====
+  final RxString errorMessage = ''.obs;
+
   // ===== 全屏状态 =====
   final RxBool isFullScreen = false.obs;
 
@@ -58,7 +61,7 @@ class LiveController extends GetxController {
   // ===== 用户主动暂停标志 =====
   final RxBool userPaused = false.obs;
 
-  // ===== 音量 & 亮度（手势用） =====
+  // ===== 音量 & 亮度 =====
   final RxDouble volume = 1.0.obs;
   final RxDouble brightness = (-1.0).obs;
 
@@ -289,66 +292,89 @@ class LiveController extends GetxController {
   // ============================================================
 
   Future<void> _loadConfigAndChannels() async {
-    final configKey = StorageManager.getSetting<String>(SettingBoxKey.liveCurrentKey);
-    if (configKey == null || configKey.isEmpty) {
+    errorMessage.value = '';
+    isLoading.value = true;
+
+    try {
+      final configKey = StorageManager.getSetting<String>(SettingBoxKey.liveCurrentKey);
       final configs = StorageManager.getSetting<List<dynamic>>(SettingBoxKey.liveConfigs) ?? [];
-      if (configs.isNotEmpty) {
-        final first = LiveConfig.fromJson(Map<String, dynamic>.from(configs.first));
-        currentConfig.value = first;
-        await _loadChannelsFromRemote(first);
-      } else {
-        currentConfig.value = null;
+
+      if (configs.isEmpty) {
+        errorMessage.value = '暂无直播配置，请添加配置';
+        isLoading.value = false;
         resetPlayer();
+        return;
       }
-    } else {
-      final configs = StorageManager.getSetting<List<dynamic>>(SettingBoxKey.liveConfigs) ?? [];
+
       LiveConfig? found;
-      for (var item in configs) {
-        final config = LiveConfig.fromJson(Map<String, dynamic>.from(item));
-        if (config.key == configKey) {
-          found = config;
-          break;
+      if (configKey != null && configKey.isNotEmpty) {
+        for (var item in configs) {
+          final config = LiveConfig.fromJson(Map<String, dynamic>.from(item));
+          if (config.key == configKey) {
+            found = config;
+            break;
+          }
         }
       }
-      if (found != null) {
-        currentConfig.value = found;
-        await _loadChannelsFromRemote(found);
-      } else {
-        currentConfig.value = null;
-        resetPlayer();
+
+      if (found == null && configs.isNotEmpty) {
+        found = LiveConfig.fromJson(Map<String, dynamic>.from(configs.first));
       }
+
+      if (found == null) {
+        errorMessage.value = '暂无有效的直播配置';
+        isLoading.value = false;
+        resetPlayer();
+        return;
+      }
+
+      currentConfig.value = found;
+      await _loadChannelsFromRemote(found);
+
+    } catch (e) {
+      errorMessage.value = '加载直播配置失败: $e';
+      isLoading.value = false;
+      resetPlayer();
     }
   }
 
   Future<void> _loadChannelsFromRemote(LiveConfig config) async {
     if (config.url.isEmpty) {
+      errorMessage.value = '直播源地址为空，请检查配置';
+      isLoading.value = false;
       resetPlayer();
       return;
     }
 
-    isLoading.value = true;
     try {
       final response = await Dio().get(
         config.url,
         options: Options(
           headers: config.ua != null ? {'User-Agent': config.ua} : null,
+          sendTimeout: const Duration(seconds: 30),
+          receiveTimeout: const Duration(seconds: 30),
         ),
       );
       final content = response.data is String ? response.data as String : response.data.toString();
       final parsed = LiveParserService.parse(content);
+
       if (parsed.isEmpty) {
-        SmartDialog.showToast('未解析到任何频道，请检查直播源');
+        errorMessage.value = '未解析到任何频道，请检查直播源';
+        isLoading.value = false;
         resetPlayer();
         return;
       }
+
+      errorMessage.value = '';
       channels.assignAll(parsed);
       _updateGroups();
 
       if (channels.isNotEmpty && currentChannel.value == null) {
         _playChannelInternal(channels.first);
       }
+
     } catch (e) {
-      SmartDialog.showToast('加载直播源失败: $e');
+      errorMessage.value = '加载直播源失败: $e';
       resetPlayer();
     } finally {
       isLoading.value = false;
@@ -389,7 +415,7 @@ class LiveController extends GetxController {
   }
 
   // ============================================================
-  // 频道播放
+  // 频道播放（切换频道不触发全局 loading）
   // ============================================================
 
   void playChannel(LiveChannel channel) {
@@ -406,7 +432,8 @@ class LiveController extends GetxController {
     if (_isPlayingChannel) return;
     _isPlayingChannel = true;
     currentChannel.value = channel;
-    isLoading.value = true;
+
+    // 注意：切换频道不设置 isLoading，只使用 isBuffering 表示加载状态
 
     try {
       await _player!.stop();
@@ -446,7 +473,7 @@ class LiveController extends GetxController {
       SmartDialog.showToast('播放失败: $e');
     } finally {
       _isPlayingChannel = false;
-      isLoading.value = false;
+      // 注意：不设置 isLoading.value = false，因为切换频道时不使用全局 loading
     }
   }
 

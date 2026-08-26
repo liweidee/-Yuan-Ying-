@@ -13,31 +13,30 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup flutter
+      - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
           flutter-version-file: pubspec.yaml
 
-      - name: Set and Extract version
-        shell: pwsh
-        run: lib/scripts/build.ps1
+      - name: Extract version from pubspec.yaml
+        run: |
+          VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: //' | sed 's/+.*//')
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "Extracted version: $VERSION"
 
-      - name: Apply Patch
-        shell: pwsh
-        run: lib/scripts/patch.ps1 macOS
-
-      - name: Build Mac
+      - name: Build macOS app
         run: flutter build macos --release --no-pub
 
-      - name: Prepare DMG
+      - name: Create DMG
         run: |
           npm install --global create-dmg
+          # 假设 .app 名称为 yuanying.app（如果不同请修改）
           create-dmg build/macos/Build/Products/Release/yuanying.app || true
         continue-on-error: true
 
       - name: Rename DMG
-        run: mv yuanying*.dmg yuanying_macos_${{ env.version }}.dmg
+        run: mv yuanying*.dmg yuanying_macos_${{ env.VERSION }}.dmg
 
       - name: Upload DMG
         uses: actions/upload-artifact@v7
