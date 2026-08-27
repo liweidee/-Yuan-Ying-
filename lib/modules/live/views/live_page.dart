@@ -27,9 +27,19 @@ class _LivePageState extends State<LivePage> {
     }
     controller = Get.find<LiveController>(tag: 'live');
     controller.ensurePlayerInitialized();
-    // 首次进入：显示 loading
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      controller.refreshChannels(showLoading: true);
+      // 有数据则静默刷新，无数据则显示 loading
+      final hasData = controller.channels.isNotEmpty;
+      final hasError = controller.errorMessage.value.isNotEmpty;
+
+      if (hasData && !hasError) {
+        // 已有数据：静默刷新（不显示 loading）
+        controller.refreshChannels(showLoading: false);
+      } else {
+        // 首次进入或错误状态：显示 loading
+        controller.refreshChannels(showLoading: true);
+      }
     });
   }
 
@@ -46,7 +56,6 @@ class _LivePageState extends State<LivePage> {
       final String errorMsg = controller.errorMessage.value;
       final bool hasChannels = controller.channels.isNotEmpty;
 
-      // 全屏时直接返回空白（由 Overlay 覆盖）
       if (isFullScreen) {
         return const Scaffold(
           backgroundColor: Colors.transparent,
@@ -54,7 +63,6 @@ class _LivePageState extends State<LivePage> {
         );
       }
 
-      // ---------- 加载中 ----------
       if (isLoading) {
         return Scaffold(
           appBar: null,
@@ -71,12 +79,10 @@ class _LivePageState extends State<LivePage> {
         );
       }
 
-      // ---------- 错误状态 ----------
       if (errorMsg.isNotEmpty || !hasChannels) {
         return _buildErrorPage(context);
       }
 
-      // ---------- 正常内容 ----------
       return _buildNormalContent(context);
     });
   }
