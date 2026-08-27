@@ -298,50 +298,59 @@ class LiveController extends GetxController {
   ///   - true: 强制显示 loading（切换配置时使用）
   ///   - false: 如果有数据则静默刷新（切换 Tab 时使用）
   Future<void> _loadConfigAndChannels({bool forceLoading = false}) async {
-    // 检查当前配置是否变化
     final configKey = StorageManager.getSetting<String>(SettingBoxKey.liveCurrentKey);
     final configs = StorageManager.getSetting<List<dynamic>>(SettingBoxKey.liveConfigs) ?? [];
 
-    // 获取当前实际使用的配置 key
+    // ===== 获取目标配置 =====
     String? targetConfigKey;
+    LiveConfig? targetConfig;
+
     if (configKey != null && configKey.isNotEmpty) {
-      // 检查 key 是否有效
-      final found = configs.any((item) {
+      for (var item in configs) {
         final config = LiveConfig.fromJson(Map<String, dynamic>.from(item));
-        return config.key == configKey;
-      });
-      if (found) {
-        targetConfigKey = configKey;
+        if (config.key == configKey) {
+          targetConfigKey = config.key;
+          targetConfig = config;
+          break;
+        }
       }
     }
     if (targetConfigKey == null && configs.isNotEmpty) {
       final first = LiveConfig.fromJson(Map<String, dynamic>.from(configs.first));
       targetConfigKey = first.key;
+      targetConfig = first;
     }
 
-    final bool configChanged = _currentConfigKey != targetConfigKey;
+    final bool configKeyChanged = _currentConfigKey != targetConfigKey;
+
+    // ===== 检测配置内容是否变化（URL 变了也算） =====
+    bool configContentChanged = false;
+    if (!configKeyChanged && currentConfig.value != null && targetConfig != null) {
+      configContentChanged = currentConfig.value!.url != targetConfig.url;
+    }
+
+    final bool configChanged = configKeyChanged || configContentChanged;
 
     // ===== 场景判断 =====
-    // 1. 有数据 + 配置没变 + 无错误 + 不强制加载 → 静默刷新（不显示 loading）
+    // 1. 有数据 + 配置没变 + 无错误 + 不强制加载 → 静默刷新
     if (channels.isNotEmpty && 
         errorMessage.value.isEmpty && 
         !configChanged && 
         !forceLoading) {
-      // 静默刷新：只刷新数据，不显示 loading
       _silentRefreshChannels();
       return;
     }
 
-    // 2. 其他情况：显示 loading（首次加载、配置切换、强制加载、错误恢复）
+    // 2. 其他情况：显示 loading
     errorMessage.value = '';
     isLoading.value = true;
-    _currentConfigKey = targetConfigKey;
 
-    // 切换配置时，清空当前频道，以便加载完成后自动播放第一个
-    if (forceLoading) {
+    // ===== 配置变化时，清空当前频道并停止播放 =====
+    if (configChanged || forceLoading) {
+      _currentConfigKey = targetConfigKey;
       currentChannel.value = null;
-      // 停止当前播放，避免旧流继续
       _player?.stop();
+      isPlaying.value = false;
     }
 
     try {
@@ -352,17 +361,7 @@ class LiveController extends GetxController {
         return;
       }
 
-      LiveConfig? found;
-      if (targetConfigKey != null && targetConfigKey.isNotEmpty) {
-        for (var item in configs) {
-          final config = LiveConfig.fromJson(Map<String, dynamic>.from(item));
-          if (config.key == targetConfigKey) {
-            found = config;
-            break;
-          }
-        }
-      }
-
+      LiveConfig? found = targetConfig;
       if (found == null && configs.isNotEmpty) {
         found = LiveConfig.fromJson(Map<String, dynamic>.from(configs.first));
         _currentConfigKey = found.key;
@@ -412,7 +411,6 @@ class LiveController extends GetxController {
       }
 
       // 更新频道列表
-      final oldChannels = List<LiveChannel>.from(channels);
       channels.assignAll(parsed);
       _updateGroups();
 
@@ -512,9 +510,16 @@ class LiveController extends GetxController {
     return channels.where((ch) => ch.group == selectedGroup.value).toList();
   }
 
-  /// 刷新频道（用户手动触发）
+  /// 刷新频道（用户手动触发，或切换配置时调用）
   /// [showLoading] 是否显示 loading，默认 true
   Future<void> refreshChannels({bool showLoading = true}) async {
+    // ===== 配置切换或手动刷新时，立即清除播放状态 =====
+    if (showLoading) {
+      _player?.stop();
+      currentChannel.value = null;
+      isPlaying.value = false;
+      userPaused.value = false;
+    }
     await _loadConfigAndChannels(forceLoading: showLoading);
   }
 

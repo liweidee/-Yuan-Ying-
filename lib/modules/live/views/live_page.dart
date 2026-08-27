@@ -29,7 +29,7 @@ class _LivePageState extends State<LivePage> {
     controller.ensurePlayerInitialized();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      // 有数据则静默刷新，无数据则显示 loading
+      // ===== 判断是否需要显示 loading =====
       final hasData = controller.channels.isNotEmpty;
       final hasError = controller.errorMessage.value.isNotEmpty;
 
