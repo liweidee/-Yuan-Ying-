@@ -31,10 +31,9 @@ jobs:
           flutter pub get
           flutter build macos --release --no-pub
 
-      - name: Create DMG
+      - name: Create DMG using hdiutil
         run: |
-          npm install --global create-dmg
-          # 找到生成的 .app（可能包含中文）
+          # 1. 找到生成的 .app（名称可能为"源影.app"）
           APP_PATH=$(find build/macos/Build/Products/Release -name "*.app" -type d | head -1)
           if [ -z "$APP_PATH" ]; then
             echo "❌ No .app found"
@@ -42,24 +41,43 @@ jobs:
           fi
           echo "✅ Found app: $APP_PATH"
 
-          # 创建临时目录，复制 .app 并重命名为纯英文名称
+          # 2. 获取 .app 大小（单位 MB），并设定 DMG 大小（+100MB 余量）
+          APP_SIZE=$(du -sm "$APP_PATH" | cut -f1)
+          DMG_SIZE=$((APP_SIZE + 100))
+          echo "App size: ${APP_SIZE}MB, DMG size: ${DMG_SIZE}MB"
+
+          # 3. 创建临时目录（纯英文路径）
           TEMP_DIR=$(mktemp -d)
-          cp -R "$APP_PATH" "$TEMP_DIR/Yuanying.app"
-          echo "✅ Copied to temporary directory with English name"
+          DMG_NAME="Yuanying.dmg"
+          DMG_PATH="$TEMP_DIR/$DMG_NAME"
 
-          # 生成 DMG（跳过签名，避免证书错误）
-          create-dmg --skip-sign "$TEMP_DIR/Yuanying.app"
+          # 4. 创建空 DMG 文件（HFS+ 格式，卷标为英文）
+          hdiutil create -size "${DMG_SIZE}m" -fs HFS+ -volname "Yuanying" "$DMG_PATH"
 
-          # 默认生成的 DMG 名称为 Yuanying.dmg
-          DMG_FILE="Yuanying.dmg"
-          if [ ! -f "$DMG_FILE" ]; then
-            echo "❌ DMG creation failed - Yuanying.dmg not found"
+          # 5. 挂载 DMG（读写模式）
+          MOUNT_OUTPUT=$(hdiutil attach "$DMG_PATH" -readwrite)
+          MOUNT_DIR=$(echo "$MOUNT_OUTPUT" | grep -E '/Volumes/' | tail -1 | awk '{print $NF}')
+          if [ -z "$MOUNT_DIR" ]; then
+            echo "❌ Failed to mount DMG"
             exit 1
           fi
+          echo "✅ Mounted at: $MOUNT_DIR"
 
-          # 重命名为带版本号的最终文件名
-          mv "$DMG_FILE" "Yuanying_macos_${{ env.VERSION }}.dmg"
-          echo "✅ Renamed to Yuanying_macos_${{ env.VERSION }}.dmg"
+          # 6. 复制 .app 到挂载卷（保留原中文名）
+          cp -R "$APP_PATH" "$MOUNT_DIR/"
+
+          # 7. 创建 Applications 快捷方式（方便拖拽安装）
+          ln -s /Applications "$MOUNT_DIR/Applications"
+
+          # 8. 卸载 DMG
+          hdiutil detach "$MOUNT_DIR" -force
+
+          # 9. 将生成的 DMG 移动到当前工作目录，并重命名为带版本号的英文名
+          mv "$DMG_PATH" "Yuanying_macos_${{ env.VERSION }}.dmg"
+          echo "✅ DMG created: Yuanying_macos_${{ env.VERSION }}.dmg"
+
+          # 清理临时目录
+          rm -rf "$TEMP_DIR"
 
       - name: Upload DMG
         uses: actions/upload-artifact@v7
