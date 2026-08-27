@@ -40,21 +40,15 @@ jobs:
             exit 1
           fi
           echo "✅ Found app: $APP_PATH"
-
-          # 不指定输出文件名，让 create-dmg 自动生成（默认名称通常为“源影 2.0.8.dmg”）
-          create-dmg "$APP_PATH"
-
-          # 用 find 捕获生成的 .dmg 文件（确保无论文件名含中文或空格都能找到）
+          # 关键修改：跳过签名
+          create-dmg --skip-sign "$APP_PATH"
           DMG_FILE=$(find . -maxdepth 1 -name "*.dmg" -type f | head -1)
           if [ -z "$DMG_FILE" ]; then
             echo "❌ No DMG created"
             exit 1
           fi
-          # 去除路径中的 "./"
           DMG_FILE=${DMG_FILE#./}
           echo "✅ Generated: $DMG_FILE"
-
-          # 重命名为英文标准文件名
           mv "$DMG_FILE" "Yuanying_macos_${{ env.VERSION }}.dmg"
           echo "✅ Renamed to Yuanying_macos_${{ env.VERSION }}.dmg"
 
