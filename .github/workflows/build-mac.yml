@@ -31,24 +31,33 @@ jobs:
           flutter pub get
           flutter build macos --release --no-pub
 
-      - name: Create and rename DMG
+      - name: Create DMG
         run: |
           npm install --global create-dmg
+          # 找到生成的 .app（可能包含中文）
           APP_PATH=$(find build/macos/Build/Products/Release -name "*.app" -type d | head -1)
           if [ -z "$APP_PATH" ]; then
             echo "❌ No .app found"
             exit 1
           fi
           echo "✅ Found app: $APP_PATH"
-          # 关键修改：跳过签名
-          create-dmg --skip-sign "$APP_PATH"
-          DMG_FILE=$(find . -maxdepth 1 -name "*.dmg" -type f | head -1)
-          if [ -z "$DMG_FILE" ]; then
-            echo "❌ No DMG created"
+
+          # 创建临时目录，复制 .app 并重命名为纯英文名称
+          TEMP_DIR=$(mktemp -d)
+          cp -R "$APP_PATH" "$TEMP_DIR/Yuanying.app"
+          echo "✅ Copied to temporary directory with English name"
+
+          # 生成 DMG（跳过签名，避免证书错误）
+          create-dmg --skip-sign "$TEMP_DIR/Yuanying.app"
+
+          # 默认生成的 DMG 名称为 Yuanying.dmg
+          DMG_FILE="Yuanying.dmg"
+          if [ ! -f "$DMG_FILE" ]; then
+            echo "❌ DMG creation failed - Yuanying.dmg not found"
             exit 1
           fi
-          DMG_FILE=${DMG_FILE#./}
-          echo "✅ Generated: $DMG_FILE"
+
+          # 重命名为带版本号的最终文件名
           mv "$DMG_FILE" "Yuanying_macos_${{ env.VERSION }}.dmg"
           echo "✅ Renamed to Yuanying_macos_${{ env.VERSION }}.dmg"
 
