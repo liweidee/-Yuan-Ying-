@@ -34,15 +34,27 @@ jobs:
         run: |
           npm install --global create-dmg
           APP_PATH=$(find build/macos/Build/Products/Release -name "*.app" -type d | head -1)
-          create-dmg "$APP_PATH" || true
+          if [ -z "$APP_PATH" ]; then
+            echo "❌ No .app found in build output"
+            exit 1
+          fi
+          echo "Found app: $APP_PATH"
+
+          # 显式指定输出文件名为 yuanying.dmg，并覆盖已有
+          create-dmg --overwrite "$APP_PATH" "yuanying.dmg"
+          if [ ! -f "yuanying.dmg" ]; then
+            echo "❌ DMG creation failed"
+            exit 1
+          fi
+          echo "✅ DMG created: yuanying.dmg"
 
       - name: Rename DMG
-        run: mv Yuanying*.dmg Yuanying_macos_${{ env.VERSION }}.dmg
+        run: mv yuanying.dmg yuanying_macos_${{ env.VERSION }}.dmg
 
       - name: Upload DMG
         uses: actions/upload-artifact@v7
         with:
           archive: false
           name: macOS-dmg
-          path: Yuanying_macos_*.dmg
+          path: yuanying_macos_*.dmg
           retention-days: 30
