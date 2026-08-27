@@ -294,7 +294,6 @@ class LiveController extends GetxController {
   // 加载配置和频道
   // ============================================================
 
-  /// 加载配置和频道数据
   /// [forceLoading] 是否强制显示全局 loading
   ///   - true: 强制显示 loading（切换配置时使用）
   ///   - false: 如果有数据则静默刷新（切换 Tab 时使用）
@@ -337,6 +336,13 @@ class LiveController extends GetxController {
     errorMessage.value = '';
     isLoading.value = true;
     _currentConfigKey = targetConfigKey;
+
+    // 切换配置时，清空当前频道，以便加载完成后自动播放第一个
+    if (forceLoading) {
+      currentChannel.value = null;
+      // 停止当前播放，避免旧流继续
+      _player?.stop();
+    }
 
     try {
       if (configs.isEmpty) {
