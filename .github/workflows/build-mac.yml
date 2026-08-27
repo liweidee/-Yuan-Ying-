@@ -23,6 +23,7 @@ jobs:
         run: |
           VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: //' | sed 's/+.*//')
           echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "✅ Version: $VERSION"
 
       - name: Build macOS app
         run: |
@@ -30,7 +31,7 @@ jobs:
           flutter pub get
           flutter build macos --release --no-pub
 
-      - name: Create DMG
+      - name: Create and rename DMG
         run: |
           npm install --global create-dmg
           APP_PATH=$(find build/macos/Build/Products/Release -name "*.app" -type d | head -1)
@@ -38,17 +39,24 @@ jobs:
             echo "❌ No .app found"
             exit 1
           fi
-          echo "Found app: $APP_PATH"
-          # 正确顺序：create-dmg [options] <输出.dmg> <源.app>
-          create-dmg --overwrite --volname "Yuanying" "Yuanying.dmg" "$APP_PATH"
-          if [ ! -f "Yuanying.dmg" ]; then
-            echo "❌ DMG creation failed"
+          echo "✅ Found app: $APP_PATH"
+
+          # 不指定输出文件名，让 create-dmg 自动生成（默认名称通常为“源影 2.0.8.dmg”）
+          create-dmg "$APP_PATH"
+
+          # 用 find 捕获生成的 .dmg 文件（确保无论文件名含中文或空格都能找到）
+          DMG_FILE=$(find . -maxdepth 1 -name "*.dmg" -type f | head -1)
+          if [ -z "$DMG_FILE" ]; then
+            echo "❌ No DMG created"
             exit 1
           fi
-          echo "✅ DMG created"
+          # 去除路径中的 "./"
+          DMG_FILE=${DMG_FILE#./}
+          echo "✅ Generated: $DMG_FILE"
 
-      - name: Rename DMG
-        run: mv Yuanying.dmg Yuanying_macos_${{ env.VERSION }}.dmg
+          # 重命名为英文标准文件名
+          mv "$DMG_FILE" "Yuanying_macos_${{ env.VERSION }}.dmg"
+          echo "✅ Renamed to Yuanying_macos_${{ env.VERSION }}.dmg"
 
       - name: Upload DMG
         uses: actions/upload-artifact@v7
