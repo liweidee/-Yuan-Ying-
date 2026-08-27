@@ -19,32 +19,14 @@ jobs:
           channel: stable
           flutter-version-file: pubspec.yaml
 
-      - name: Extract version from pubspec.yaml
+      - name: Read version from pubspec.yaml
         run: |
           VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: //' | sed 's/+.*//')
           echo "VERSION=$VERSION" >> $GITHUB_ENV
-          echo "Extracted version: $VERSION"
 
-      # 提升 macOS 部署目标至 11.0
-      - name: Set macOS deployment target to 11.0
+      - name: Build macOS app
         run: |
-          # 1. 修改 Podfile 中的平台版本
-          if [ -f "macos/Podfile" ]; then
-            sed -i '' 's/platform :osx, .*/platform :osx, '\''11.0'\''/' macos/Podfile
-          fi
-
-          # 2. 修改 Xcode 项目中的部署目标
-          PROJECT_FILE="macos/Runner.xcodeproj/project.pbxproj"
-          if [ -f "$PROJECT_FILE" ]; then
-            # 将所有 MACOSX_DEPLOYMENT_TARGET = 10.15 替换为 11.0
-            sed -i '' 's/MACOSX_DEPLOYMENT_TARGET = 10\.15;/MACOSX_DEPLOYMENT_TARGET = 11.0;/g' "$PROJECT_FILE"
-            # 同时将 SDKROOT 可能也需调整，但通常会自动处理
-          fi
-
-          echo "macOS deployment target set to 11.0"
-
-      - name: Install dependencies and build macOS app
-        run: |
+          flutter clean
           flutter pub get
           flutter build macos --release --no-pub
 
@@ -52,20 +34,15 @@ jobs:
         run: |
           npm install --global create-dmg
           APP_PATH=$(find build/macos/Build/Products/Release -name "*.app" -type d | head -1)
-          if [ -n "$APP_PATH" ]; then
-            create-dmg "$APP_PATH" || true
-          else
-            echo "No .app found, skipping DMG creation"
-            exit 1
-          fi
+          create-dmg "$APP_PATH" || true
 
       - name: Rename DMG
-        run: mv yuanying*.dmg yuanying_macos_${{ env.VERSION }}.dmg
+        run: mv Yuanying*.dmg Yuanying_macos_${{ env.VERSION }}.dmg
 
       - name: Upload DMG
         uses: actions/upload-artifact@v7
         with:
           archive: false
           name: macOS-dmg
-          path: yuanying_macos_*.dmg
+          path: Yuanying_macos_*.dmg
           retention-days: 30

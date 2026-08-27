@@ -71,7 +71,6 @@ dependencies:
   flutter_js: ^0.8.2
   shelf: ^1.4.0
   shelf_static: ^1.1.0
-  serious_python: ^4.3.3
   video_player: ^2.13.0
   fvp: ^0.37.3
   flutter_smart_dialog:

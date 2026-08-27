@@ -403,13 +403,18 @@ class _LivePlayerViewState extends State<LivePlayerView> {
   // 手势事件处理
   // ============================================================
 
-  /// 单击：切换播放/暂停，同时显示控制条
+  /// 单击：控制栏隐藏时显示；控制栏显示时切换播放/暂停
   void _onTap() {
-    ctrl.togglePlayPause();
-    ctrl.showControls();
+    if (ctrl.controlsVisible.value) {
+      // 控制栏已显示：切换播放/暂停
+      ctrl.togglePlayPause();
+    } else {
+      // 控制栏隐藏：显示控制栏
+      ctrl.showControls();
+    }
   }
 
-  /// 移动端双击：播放/暂停（与单击相同效果，避免双击时触发两次）
+  /// 移动端双击：播放/暂停
   void _onDoubleTapMobile() {
     ctrl.togglePlayPause();
     ctrl.showControls();
