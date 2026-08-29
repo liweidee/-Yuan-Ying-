@@ -93,6 +93,7 @@ abstract final class ThemeUtils {
       textTheme: baseTextTheme,  // 应用字重
       appBarTheme: AppBarTheme(
         elevation: 0,
+        scrolledUnderElevation: 0.0,  // 禁用滚动颜色变化
         centerTitle: false,
         backgroundColor: colorScheme.surface,
         foregroundColor: colorScheme.onSurface,

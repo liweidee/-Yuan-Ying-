@@ -52,6 +52,7 @@ dependencies:
   dio_http2_adapter: ^2.7.1
   dio_brotli_transformer: ^2.0.0
   dlna_dart: ^0.1.0
+  flutter_tts: ^4.2.5
   dynamic_color: ^1.8.1
   easy_debounce: ^2.0.3
   encrypt: ^5.0.3

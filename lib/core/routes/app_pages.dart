@@ -26,6 +26,11 @@ import 'package:yuanying/modules/setting/views/danmaku_config_page.dart';
 import 'package:yuanying/modules/setting/views/tmdb_config_page.dart';
 import 'package:yuanying/modules/setting/views/tmdb_match_page.dart';
 import 'package:yuanying/modules/setting/views/live_config_page.dart';
+import 'package:yuanying/modules/novel/views/novel_detail_page.dart';
+import 'package:yuanying/modules/novel/views/novel_reader_page.dart';
+import 'package:yuanying/modules/transfer/views/transfer_page.dart';
+import 'package:yuanying/modules/manga/views/manga_detail_page.dart';
+import 'package:yuanying/modules/manga/views/manga_reader_page.dart';
 
 class AppPages {
   static const String initial = '/';
@@ -53,6 +58,11 @@ class AppPages {
   static const String tmdbConfig = '/tmdbConfig';
   static const String tmdbMatch = '/tmdbMatch';
   static const String liveConfig = '/liveConfig';
+  static const String novelDetail = '/novelDetail';
+  static const String novelReader = '/novelReader';
+  static const String transfer = '/transfer';
+  static const String mangaDetail = '/mangaDetail';
+  static const String mangaReader = '/mangaReader';
 
 
   static final List<GetPage> routes = [
@@ -92,5 +102,10 @@ class AppPages {
     GetPage(name: tmdbConfig, page: () => const TmdbConfigPage()),
     GetPage(name: tmdbMatch, page: () => const TmdbMatchPage()),
     GetPage(name: liveConfig, page: () => const LiveConfigPage()),
+    GetPage(name: novelDetail, page: () => const NovelDetailPage()),
+    GetPage(name: novelReader, page: () => const NovelReaderPage()),
+    GetPage(name: transfer, page: () => const TransferPage()),
+    GetPage(name: mangaDetail, page: () => const MangaDetailPage()),
+    GetPage(name: mangaReader, page: () => const MangaReaderPage()),
   ];
 }

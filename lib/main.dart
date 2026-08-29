@@ -43,6 +43,8 @@ import 'package:yuanying/services/debug_log_service.dart';
 import 'package:yuanying/nodejs/nodejs_service.dart';
 import 'package:yuanying/t4/services/nodejs_spider_service.dart';
 import 'package:yuanying/services/catvod_log_service.dart';
+import 'package:yuanying/modules/novel/services/novel_tts_service.dart';
+import 'package:yuanying/modules/novel/services/novel_font_service.dart';
 
 // ============================================================================
 // 全局变量
@@ -240,6 +242,8 @@ void main() async {
   Get.put(ActionRenderer(), permanent: true);
   Get.put(SearchFilterService(), permanent: true);
   Get.put(DebugLogService());
+  Get.put(NovelTtsService(), permanent: true);
+  await NovelFontService.init();
 
   // ==========================================================================
   // 第十步：启动应用

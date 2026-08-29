@@ -59,9 +59,40 @@ class _HomePageState extends CommonPageState<HomePage>
 
   // 跳转详情
   void _navigateToDetail(VideoItem item) {
-    // 猫影视 nodejs_baseset 配置中心
     final site = sourceManager.currentSite.value;
     final siteKey = site?['key']?.toString() ?? '';
+    final siteName = site?['name']?.toString() ?? '';
+    final pwd = site?['ext'] is Map
+      ? (site!['ext'] as Map)['pwd']?.toString() ?? 'tinydust'
+      : 'tinydust';
+    
+    // ---- 小说判断（优先） ----
+    if (siteKey.contains('[书]') || siteName.contains('[书]')) {
+      Get.toNamed(
+        '/novelDetail',
+        arguments: {
+          'vodId': item.vodId,
+          'pwd': pwd,
+          'site': site,
+        },
+      );
+      return;
+    }
+
+    // ---- 判断是否为漫画 ----
+    if (siteKey.contains('[画]') || siteName.contains('[画]')) {
+      Get.toNamed(
+        AppPages.mangaDetail,
+        arguments: {
+          'vodId': item.vodId,
+          'pwd': pwd,
+          'site': site,
+        },
+      );
+      return;
+    }
+
+    // 猫影视 nodejs_baseset 配置中心
     if (sourceManager.currentConfigType.value == 'catvod' && siteKey == 'nodejs_baseset' && item.vodId == 'config-center') {
       Get.to(() => WebviewPage(
         url: 'http://127.0.0.1:9988/website',
@@ -98,7 +129,6 @@ class _HomePageState extends CommonPageState<HomePage>
     }
 
     // 豆瓣/TMDB 源
-    final siteName = site?['name']?.toString() ?? '';
     if (siteName.contains('豆瓣[官]') || siteName.contains('TMDB[官]')) {
       final filterService = Get.find<SearchFilterService>();
       List<String> sourceKeys;
@@ -129,9 +159,6 @@ class _HomePageState extends CommonPageState<HomePage>
     }
 
     // 普通视频
-    final pwd = site?['ext'] is Map
-        ? (site!['ext'] as Map)['pwd']?.toString() ?? 'tinydust'
-        : 'tinydust';
     Get.toNamed(
       AppPages.detail,
       arguments: {

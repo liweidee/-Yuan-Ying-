@@ -176,6 +176,34 @@ abstract final class SettingBoxKey {
   // 直播配置
   static const String liveConfigs = 'live_configs';
   static const String liveCurrentKey = 'live_current_key';
+
+  // 小说阅读器设置
+  static const String novelFontSize = 'novelFontSize';
+  static const String novelLineHeight = 'novelLineHeight';
+  static const String novelThemeIndex = 'novelThemeIndex';
+  static const String novelParagraphGap = 'novelParagraphGap';
+  static const String novelPagedMode = 'novelPagedMode';
+  static const String novelLetterSpacing = 'novelLetterSpacing';
+  static const String novelPagePadding = 'novelPagePadding';
+  static const String novelFontKey = 'novelFontKey';
+  static const String novelCustomFontFamily = 'novelCustomFontFamily';
+  static const String novelScreenDim = 'novelScreenDim';
+  static const String novelPageAnim = 'novelPageAnim';
+  static const String ttsRate = 'ttsRate';
+  static const String ttsVoiceKey = 'ttsVoiceKey';
+  static const String novelBookmarksPrefix = 'novel_bookmarks_';
+  static const String novelPurifyRulesPrefix = 'novel_purify_rules_';
+
+  // ===== WiFi 互传 =====
+  static const String transferAutoStart = 'transfer_auto_start';
+
+  // ===== 漫画阅读器设置 =====
+  static const String mangaReadMode = 'manga_read_mode'; // 0=纵向, 1=横向, 2=条漫
+  static const String mangaAutoScroll = 'manga_auto_scroll';
+  static const String mangaAutoScrollSpeed = 'manga_auto_scroll_speed';
+  static const String mangaZoomLevel = 'manga_zoom_level';
+  static const String mangaPageIndex = 'manga_page_index_';
+  static const String mangaScrollOffset = 'manga_scroll_offset_';
 }
 
 abstract final class VideoBoxKey {

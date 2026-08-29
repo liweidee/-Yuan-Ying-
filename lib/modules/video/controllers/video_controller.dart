@@ -1716,6 +1716,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     }
 
     try {
+      autoPlay.value = true;
       await playerController.setDataSource(
         dataSource,
         autoplay: true,
@@ -1727,6 +1728,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
       await playerController.play();
       isPlaying.value = true;
     } catch (e) {
+      autoPlay.value = false;
       detailError.value = '播放失败: ${e.toString()}';
       isLoadingDetail.value = false;
     }

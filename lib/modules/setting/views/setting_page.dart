@@ -96,6 +96,14 @@ class SettingPage extends StatelessWidget {
             onTap: () => Get.toNamed(AppPages.webdav),
           ),
           const SizedBox(height: 8),
+          _buildSettingItem(
+            context: context,
+            icon: Icons.wifi,
+            title: 'WiFi 互传',
+            subtitle: '通过 WiFi 传输文件到本机',
+            onTap: () => Get.toNamed('/transfer'),
+          ),
+          const SizedBox(height: 8),
           // _buildSettingItem(
           //   context: context,
           //   icon: Icons.delete_outline,
