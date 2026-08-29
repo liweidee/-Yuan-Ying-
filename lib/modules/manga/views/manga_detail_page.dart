@@ -179,7 +179,7 @@ class _MangaDetailPageState extends State<MangaDetailPage> {
                           label: const Text('开始阅读'),
                           style: FilledButton.styleFrom(
                             padding: const EdgeInsets.symmetric(vertical: 10),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(19)),
                           ),
                         ),
                       ),
@@ -190,7 +190,7 @@ class _MangaDetailPageState extends State<MangaDetailPage> {
             ),
           ),
         ),
-        const SliverToBoxAdapter(child: Divider(height: 1)),
+        // const SliverToBoxAdapter(child: Divider(height: 1)),
         SliverToBoxAdapter(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
