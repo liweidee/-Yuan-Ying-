@@ -653,11 +653,13 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
   // ----- 覆盖动画 -----
   Widget _buildCoverAnimation(Widget child, double delta) {
     final absDelta = delta.abs();
-    return ClipRect(
-      child: Align(
-        alignment: delta > 0 ? Alignment.centerLeft : Alignment.centerRight,
-        widthFactor: 1 - absDelta,
-        child: child,
+    return RepaintBoundary(
+      child: ClipRect(
+        child: Align(
+          alignment: Alignment.topLeft,
+          widthFactor: 1 - absDelta,
+          child: child,
+        ),
       ),
     );
   }
@@ -666,14 +668,16 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
   Widget _buildSimulationAnimation(Widget child, double delta) {
     final absDelta = delta.abs();
     final angle = (delta > 0 ? -1 : 1) * absDelta * 3.1415926 * 0.36;
-    return Transform(
-      alignment: delta > 0 ? Alignment.centerLeft : Alignment.centerRight,
-      transform: Matrix4.identity()
-        ..setEntry(3, 2, 0.0015)
-        ..rotateY(angle),
-      child: Opacity(
-        opacity: (1 - absDelta * 0.3).clamp(0.3, 1.0),
-        child: child,
+    return RepaintBoundary(
+      child: Transform(
+        alignment: delta > 0 ? Alignment.centerLeft : Alignment.centerRight,
+        transform: Matrix4.identity()
+          ..setEntry(3, 2, 0.0015)
+          ..rotateY(angle),
+        child: Opacity(
+          opacity: (1 - absDelta * 0.3).clamp(0.3, 1.0),
+          child: child,
+        ),
       ),
     );
   }
@@ -681,28 +685,53 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
   // ----- 滑动动画 -----
   Widget _buildSlideAnimation(Widget child, double delta) {
     final absDelta = delta.abs();
-    return Transform.translate(
-      offset: Offset(
-        (delta > 0 ? -1 : 1) * absDelta * 60,
-        0,
-      ),
-      child: Opacity(
-        opacity: (1 - absDelta * 0.4).clamp(0.2, 1.0),
-        child: child,
-      ),
-    );
+    if (delta > 0) {
+      // 下一页：从右侧滑入，显示左侧部分，宽度 0→1
+      return ClipRect(
+        child: Align(
+          alignment: Alignment.topLeft,
+          widthFactor: absDelta,
+          child: child,
+        ),
+      );
+    } else if (delta < 0) {
+      // 当前页：向左滑出，显示右侧部分，宽度 1→0
+      return ClipRect(
+        child: Align(
+          alignment: Alignment.topRight,
+          widthFactor: 1 - absDelta,
+          child: child,
+        ),
+      );
+    } else {
+      return child;
+    }
   }
 
   // ----- 滚动动画 -----
   Widget _buildScrollAnimation(Widget child, double delta) {
     final absDelta = delta.abs();
-    return Transform.translate(
-      offset: Offset(0, (delta > 0 ? -1 : 1) * absDelta * 40),
-      child: Opacity(
-        opacity: (1 - absDelta * 0.3).clamp(0.3, 1.0),
-        child: child,
-      ),
-    );
+    if (delta > 0) {
+      // 下一页：从底部滑入
+      return Transform.translate(
+        offset: Offset(0, (1 - absDelta) * 150),
+        child: Opacity(
+          opacity: absDelta.clamp(0.0, 1.0),
+          child: child,
+        ),
+      );
+    } else if (delta < 0) {
+      // 当前页：向上滑出
+      return Transform.translate(
+        offset: Offset(0, -absDelta * 150),
+        child: Opacity(
+          opacity: (1 - absDelta).clamp(0.0, 1.0),
+          child: child,
+        ),
+      );
+    } else {
+      return child;
+    }
   }
 
   // ---------- 搜索跳转辅助 ----------
