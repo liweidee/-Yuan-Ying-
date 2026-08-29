@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
-import 'package:json5/json5.dart';
 import 'package:yuanying/t4/models/video_detail.dart';
 import 'package:yuanying/t4/services/source_manager.dart';
 import 'package:yuanying/t4/services/i_spider_service.dart';
@@ -17,13 +16,11 @@ import 'package:yuanying/core/constants/storage_keys.dart';
 
 class MangaReaderPage extends StatefulWidget {
   const MangaReaderPage({super.key});
-
   @override
   State<MangaReaderPage> createState() => _MangaReaderPageState();
 }
 
 class _MangaReaderPageState extends State<MangaReaderPage> with WidgetsBindingObserver {
-  // ===== 参数 =====
   late String _vodId;
   late String _vodName;
   late String _vodPic;
@@ -32,11 +29,8 @@ class _MangaReaderPageState extends State<MangaReaderPage> with WidgetsBindingOb
   late String _pwd;
   late Map<String, dynamic>? _site;
   late String _sourceName;
-
-  // ===== 服务 =====
   late ISpiderService _apiService;
 
-  // ===== 图片数据 =====
   List<String> _imageUrls = [];
   int _currentPage = 0;
   int _totalPages = 0;
@@ -44,30 +38,19 @@ class _MangaReaderPageState extends State<MangaReaderPage> with WidgetsBindingOb
   String? _error;
   int _currentChapterIdx = 0;
 
-  // ===== 缩放 =====
   double _scale = 1.0;
-
-  // ===== 自动翻页 =====
   Timer? _autoScrollTimer;
   static const double _tapSlop = 20.0;
 
-  // ===== 工具栏状态 =====
   bool _toolbar = false;
   double _pendingRestore = -1;
 
-  // ===== 阅读主题 =====
   NovelReaderTheme get _theme => NovelReaderTheme.getThemeByIndex(NovelReaderSettings.themeIndex);
-
-  // ===== 阅读模式 =====
   MangaReadMode get _readMode => MangaReaderSettings.readMode;
 
-  // ===== 滚动控制器（条漫模式） =====
   final ScrollController _stripScrollController = ScrollController();
-
-  // ===== PageController（纵向/横向模式） =====
   PageController? _pageController;
 
-  // ===== 缓存键 =====
   String get _progressKey => '${SettingBoxKey.mangaPageIndex}$_vodId';
   String get _offsetKey => '${SettingBoxKey.mangaScrollOffset}$_vodId';
 
@@ -131,7 +114,15 @@ class _MangaReaderPageState extends State<MangaReaderPage> with WidgetsBindingOb
     if (mounted) Navigator.pop(context);
   }
 
-  // ===== 加载章节 =====
+  // 安全重置条漫滚动位置（等布局完成后再跳，避免 controller 未 attach）
+  void _resetStripScroll() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_stripScrollController.hasClients) {
+        _stripScrollController.jumpTo(0);
+      }
+    });
+  }
+
   Future<void> _loadChapter(int idx) async {
     if (idx < 0 || idx >= _episodes.length) return;
     _currentChapterIdx = idx;
@@ -153,37 +144,25 @@ class _MangaReaderPageState extends State<MangaReaderPage> with WidgetsBindingOb
         );
         if (playUrl == null) {
           SmartDialog.showToast('获取图片地址失败');
-          setState(() {
-            _loading = false;
-            _error = '获取图片地址失败';
-          });
+          setState(() { _loading = false; _error = '获取图片地址失败'; });
           return;
         }
         final url = playUrl.defaultUrl;
         if (url == null || url.isEmpty) {
           SmartDialog.showToast('图片地址为空');
-          setState(() {
-            _loading = false;
-            _error = '图片地址为空';
-          });
+          setState(() { _loading = false; _error = '图片地址为空'; });
           return;
         }
         if (!url.startsWith('pics://')) {
           SmartDialog.showToast('非漫画协议');
-          setState(() {
-            _loading = false;
-            _error = '非漫画协议';
-          });
+          setState(() { _loading = false; _error = '非漫画协议'; });
           return;
         }
         final raw = url.substring(7);
         urls = raw.split('&&').where((u) => u.trim().isNotEmpty).toList();
         if (urls.isEmpty) {
           SmartDialog.showToast('未解析到图片');
-          setState(() {
-            _loading = false;
-            _error = '未解析到图片';
-          });
+          setState(() { _loading = false; _error = '未解析到图片'; });
           return;
         }
         StorageManager.setCache(cacheKey, jsonEncode(urls));
@@ -202,12 +181,7 @@ class _MangaReaderPageState extends State<MangaReaderPage> with WidgetsBindingOb
           _loading = false;
         });
         if (_readMode == MangaReadMode.strip) {
-          final savedOffset = StorageManager.getCache<double>(_offsetKey) ?? 0;
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (_stripScrollController.hasClients) {
-              _stripScrollController.jumpTo(savedOffset);
-            }
-          });
+          _resetStripScroll(); // 安全重置，不会崩
         }
         _pageController?.dispose();
         _pageController = PageController(initialPage: _currentPage);
@@ -239,9 +213,7 @@ class _MangaReaderPageState extends State<MangaReaderPage> with WidgetsBindingOb
 
   void _onPageChanged(int index) {
     if (index < 0 || index >= _totalPages) return;
-    setState(() {
-      _currentPage = index;
-    });
+    setState(() { _currentPage = index; });
     _saveProgress();
   }
 
@@ -255,11 +227,7 @@ class _MangaReaderPageState extends State<MangaReaderPage> with WidgetsBindingOb
       return;
     }
     if (_currentPage > 0) {
-      _pageController?.animateToPage(
-        _currentPage - 1,
-        duration: const Duration(milliseconds: 200),
-        curve: Curves.easeOut,
-      );
+      _pageController?.animateToPage(_currentPage - 1, duration: const Duration(milliseconds: 200), curve: Curves.easeOut);
     } else {
       _prevChapter();
     }
@@ -275,11 +243,7 @@ class _MangaReaderPageState extends State<MangaReaderPage> with WidgetsBindingOb
       return;
     }
     if (_currentPage < _totalPages - 1) {
-      _pageController?.animateToPage(
-        _currentPage + 1,
-        duration: const Duration(milliseconds: 200),
-        curve: Curves.easeOut,
-      );
+      _pageController?.animateToPage(_currentPage + 1, duration: const Duration(milliseconds: 200), curve: Curves.easeOut);
     } else {
       _nextChapter();
     }
@@ -303,11 +267,7 @@ class _MangaReaderPageState extends State<MangaReaderPage> with WidgetsBindingOb
 
   void _openToc() async {
     final titles = _episodes.map((e) => e.name).toList();
-    final picked = await showChapterSheet(
-      context,
-      titles: titles,
-      current: _currentChapterIdx,
-    );
+    final picked = await showChapterSheet(context, titles: titles, current: _currentChapterIdx);
     if (picked != null && picked != _currentChapterIdx) {
       _loadChapter(picked);
     }
@@ -316,17 +276,11 @@ class _MangaReaderPageState extends State<MangaReaderPage> with WidgetsBindingOb
   void _toggleReadMode() {
     MangaReaderSettings.toggleReadMode();
     MangaReaderSettings.save();
-    setState(() {
-      _currentPage = 0;
-    });
+    setState(() { _currentPage = 0; });
     _pageController?.dispose();
     _pageController = PageController(initialPage: 0);
     if (_readMode == MangaReadMode.strip) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (_stripScrollController.hasClients) {
-          _stripScrollController.jumpTo(0);
-        }
-      });
+      _resetStripScroll(); // 安全重置
     }
     SmartDialog.showToast('已切换为: ${_readMode.displayName}');
     _saveProgress();
@@ -350,17 +304,13 @@ class _MangaReaderPageState extends State<MangaReaderPage> with WidgetsBindingOb
     if (speed <= 0) return;
     _autoScrollTimer = Timer.periodic(
       Duration(milliseconds: (speed * 1000).round()),
-          (timer) {
+      (timer) {
         if (_readMode == MangaReadMode.strip) {
           if (_stripScrollController.hasClients) {
             final max = _stripScrollController.position.maxScrollExtent;
             final current = _stripScrollController.position.pixels;
             if (current < max) {
-              _stripScrollController.animateTo(
-                current + MediaQuery.of(context).size.height * 0.8,
-                duration: const Duration(milliseconds: 300),
-                curve: Curves.easeOut,
-              );
+              _stripScrollController.animateTo(current + MediaQuery.of(context).size.height * 0.05, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
             } else {
               _nextChapter();
             }
@@ -376,26 +326,16 @@ class _MangaReaderPageState extends State<MangaReaderPage> with WidgetsBindingOb
     );
   }
 
-  // ===== 缩放控制 =====
   void _zoomIn() {
-    setState(() {
-      _scale = (_scale + 0.1).clamp(0.3, 3.0);
-      _saveProgress();
-    });
+    setState(() { _scale = (_scale + 0.1).clamp(0.3, 3.0); _saveProgress(); });
   }
 
   void _zoomOut() {
-    setState(() {
-      _scale = (_scale - 0.1).clamp(0.3, 3.0);
-      _saveProgress();
-    });
+    setState(() { _scale = (_scale - 0.1).clamp(0.3, 3.0); _saveProgress(); });
   }
 
   void _resetZoom() {
-    setState(() {
-      _scale = 1.0;
-      _saveProgress();
-    });
+    setState(() { _scale = 1.0; _saveProgress(); });
   }
 
   void _showSettings() {
@@ -403,40 +343,20 @@ class _MangaReaderPageState extends State<MangaReaderPage> with WidgetsBindingOb
       context: context,
       isScrollControlled: true,
       backgroundColor: Theme.of(context).colorScheme.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
       builder: (ctx) {
         return StatefulBuilder(
           builder: (ctx, setSheet) {
-            void refresh() {
-              setSheet(() {});
-              setState(() {});
-              MangaReaderSettings.save();
-            }
+            void refresh() { setSheet(() {}); setState(() {}); MangaReaderSettings.save(); }
             return Container(
               padding: EdgeInsets.fromLTRB(22, 18, 22, 28 + MediaQuery.of(ctx).padding.bottom),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    '漫画设置',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w600,
-                      color: Theme.of(ctx).colorScheme.onSurface,
-                    ),
-                  ),
+                  Text('漫画设置', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Theme.of(ctx).colorScheme.onSurface)),
                   const SizedBox(height: 20),
-                  Text(
-                    '阅读模式',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                      color: Theme.of(ctx).colorScheme.onSurface,
-                    ),
-                  ),
+                  Text('阅读模式', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: Theme.of(ctx).colorScheme.onSurface)),
                   const SizedBox(height: 8),
                   Row(
                     children: MangaReadMode.values.map((mode) {
@@ -444,10 +364,7 @@ class _MangaReaderPageState extends State<MangaReaderPage> with WidgetsBindingOb
                       return Padding(
                         padding: const EdgeInsets.only(right: 10),
                         child: ChoiceChip(
-                          label: Text(
-                            mode.displayName,
-                            style: const TextStyle(fontSize: 13),
-                          ),
+                          label: Text(mode.displayName, style: const TextStyle(fontSize: 13)),
                           selected: isSelected,
                           onSelected: (_) {
                             MangaReaderSettings.readMode = mode;
@@ -457,21 +374,13 @@ class _MangaReaderPageState extends State<MangaReaderPage> with WidgetsBindingOb
                               _pageController?.dispose();
                               _pageController = PageController(initialPage: 0);
                               if (mode == MangaReadMode.strip) {
-                                WidgetsBinding.instance.addPostFrameCallback((_) {
-                                  if (_stripScrollController.hasClients) {
-                                    _stripScrollController.jumpTo(0);
-                                  }
-                                });
+                                _resetStripScroll(); // 安全重置
                               }
                             });
                             SmartDialog.showToast('已切换到: ${mode.displayName}');
                           },
                           selectedColor: Theme.of(ctx).colorScheme.primaryContainer,
-                          labelStyle: TextStyle(
-                            color: isSelected
-                                ? Theme.of(ctx).colorScheme.primary
-                                : Theme.of(ctx).colorScheme.onSurface,
-                          ),
+                          labelStyle: TextStyle(color: isSelected ? Theme.of(ctx).colorScheme.primary : Theme.of(ctx).colorScheme.onSurface),
                         ),
                       );
                     }).toList(),
@@ -479,27 +388,13 @@ class _MangaReaderPageState extends State<MangaReaderPage> with WidgetsBindingOb
                   const SizedBox(height: 16),
                   Row(
                     children: [
-                      Expanded(
-                        child: Text(
-                          '自动翻页',
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w500,
-                            color: Theme.of(ctx).colorScheme.onSurface,
-                          ),
-                        ),
-                      ),
+                      Expanded(child: Text('自动翻页', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: Theme.of(ctx).colorScheme.onSurface))),
                       Switch(
                         value: MangaReaderSettings.autoScroll,
                         onChanged: (v) {
                           MangaReaderSettings.autoScroll = v;
                           refresh();
-                          if (v) {
-                            _startAutoScroll();
-                          } else {
-                            _autoScrollTimer?.cancel();
-                            _autoScrollTimer = null;
-                          }
+                          if (v) _startAutoScroll(); else { _autoScrollTimer?.cancel(); _autoScrollTimer = null; }
                         },
                         activeColor: Theme.of(ctx).colorScheme.primary,
                       ),
@@ -511,28 +406,17 @@ class _MangaReaderPageState extends State<MangaReaderPage> with WidgetsBindingOb
                       Expanded(
                         child: Slider(
                           value: MangaReaderSettings.autoScrollSpeed,
-                          min: 1.0,
-                          max: 10.0,
-                          divisions: 18,
+                          min: 1.0, max: 10.0, divisions: 18,
                           onChanged: (v) {
                             MangaReaderSettings.autoScrollSpeed = v;
                             refresh();
-                            if (MangaReaderSettings.autoScroll) {
-                              _startAutoScroll();
-                            }
+                            if (MangaReaderSettings.autoScroll) _startAutoScroll();
                           },
                           activeColor: Theme.of(ctx).colorScheme.primary,
                           inactiveColor: Theme.of(ctx).colorScheme.outline.withOpacity(0.3),
                         ),
                       ),
-                      Text(
-                        '${MangaReaderSettings.autoScrollSpeed.toStringAsFixed(1)}s',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                          color: Theme.of(ctx).colorScheme.primary,
-                        ),
-                      ),
+                      Text('${MangaReaderSettings.autoScrollSpeed.toStringAsFixed(1)}s', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: Theme.of(ctx).colorScheme.primary)),
                     ],
                   ),
                   Wrap(
@@ -540,24 +424,15 @@ class _MangaReaderPageState extends State<MangaReaderPage> with WidgetsBindingOb
                     children: MangaReaderSettings.speedPresets.map((speed) {
                       final isSelected = (MangaReaderSettings.autoScrollSpeed - speed).abs() < 0.01;
                       return ChoiceChip(
-                        label: Text(
-                          '${speed.toInt()}s',
-                          style: const TextStyle(fontSize: 12),
-                        ),
+                        label: Text('${speed.toInt()}s', style: const TextStyle(fontSize: 12)),
                         selected: isSelected,
                         onSelected: (_) {
                           MangaReaderSettings.autoScrollSpeed = speed;
                           refresh();
-                          if (MangaReaderSettings.autoScroll) {
-                            _startAutoScroll();
-                          }
+                          if (MangaReaderSettings.autoScroll) _startAutoScroll();
                         },
                         selectedColor: Theme.of(ctx).colorScheme.primaryContainer,
-                        labelStyle: TextStyle(
-                          color: isSelected
-                              ? Theme.of(ctx).colorScheme.primary
-                              : Theme.of(ctx).colorScheme.onSurface,
-                        ),
+                        labelStyle: TextStyle(color: isSelected ? Theme.of(ctx).colorScheme.primary : Theme.of(ctx).colorScheme.onSurface),
                       );
                     }).toList(),
                   ),
@@ -585,13 +460,9 @@ class _MangaReaderPageState extends State<MangaReaderPage> with WidgetsBindingOb
   }
 
   void _toggleToolbar() {
-    setState(() {
-      _toolbar = !_toolbar;
-    });
+    setState(() { _toolbar = !_toolbar; });
     try {
-      SystemChrome.setEnabledSystemUIMode(
-        _toolbar ? SystemUiMode.edgeToEdge : SystemUiMode.immersiveSticky,
-      );
+      SystemChrome.setEnabledSystemUIMode(_toolbar ? SystemUiMode.edgeToEdge : SystemUiMode.immersiveSticky);
     } catch (_) {}
   }
 
@@ -602,10 +473,9 @@ class _MangaReaderPageState extends State<MangaReaderPage> with WidgetsBindingOb
     final safePadding = MediaQuery.of(context).padding;
     final screenSize = MediaQuery.sizeOf(context);
 
-    // 定义深色模式下的颜色
     const Color darkBackground = Colors.black;
     const Color appBarIconColor = Colors.white;
-    const Color appBarTextColor = Colors.white70; // 偏白色的灰
+    const Color appBarTextColor = Colors.white70;
     const Color appBarSubTextColor = Colors.white60;
 
     return PopScope(
@@ -615,10 +485,9 @@ class _MangaReaderPageState extends State<MangaReaderPage> with WidgetsBindingOb
         await _onBackPressed();
       },
       child: Scaffold(
-        backgroundColor: darkBackground, // 深色背景
+        backgroundColor: darkBackground,
         body: Stack(
           children: [
-            // ---- 内容区域 ----
             Positioned.fill(
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
@@ -628,225 +497,112 @@ class _MangaReaderPageState extends State<MangaReaderPage> with WidgetsBindingOb
                   child: _loading
                       ? Center(child: CircularProgressIndicator(color: theme.primaryColor))
                       : _error != null
-                      ? _errorView(_error!, retry: () => _loadChapter(_currentChapterIdx))
-                      : hasContent
-                      ? _buildContent(screenSize)
-                      : Center(child: Text('暂无图片', style: TextStyle(color: appBarTextColor))),
+                          ? _errorView(_error!, retry: () => _loadChapter(_currentChapterIdx))
+                          : hasContent
+                              ? _buildContent(screenSize)
+                              : Center(child: Text('暂无图片', style: TextStyle(color: appBarTextColor))),
                 ),
               ),
             ),
-            // ---- 亮度遮罩 ----
             if (NovelReaderSettings.screenDim > 0)
               Positioned.fill(
                 child: IgnorePointer(
-                  child: Container(
-                    color: Colors.black.withValues(alpha: NovelReaderSettings.screenDim),
-                  ),
+                  child: Container(color: Colors.black.withValues(alpha: NovelReaderSettings.screenDim)),
                 ),
               ),
-            // ---- 顶部栏 ----
+            // 顶部栏
             Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
+              top: 0, left: 0, right: 0,
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 200),
                 transform: Matrix4.translationValues(0, _toolbar ? 0 : -100, 0),
-                padding: EdgeInsets.only(
-                  top: safePadding.top,
-                  left: 8,
-                  right: 8,
-                  bottom: 8,
-                ),
+                padding: EdgeInsets.only(top: safePadding.top, left: 8, right: 8, bottom: 8),
                 decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.6), // 深色半透明背景
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.15),
-                      blurRadius: 12,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
+                  color: Colors.black.withValues(alpha: 0.6),
+                  boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.15), blurRadius: 12, offset: const Offset(0, 4))],
                 ),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    IconButton(
-                      icon: const Icon(Icons.arrow_back_ios_new, size: 19),
-                      color: appBarIconColor, // 白色图标
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
-                      onPressed: _onBackPressed,
-                    ),
+                    IconButton(icon: const Icon(Icons.arrow_back_ios_new, size: 19), color: appBarIconColor, padding: EdgeInsets.zero, constraints: const BoxConstraints(minWidth: 40, minHeight: 40), onPressed: _onBackPressed),
                     const SizedBox(width: 4),
                     Expanded(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            _vodName,
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                              color: appBarTextColor, // 偏白色的灰
-                              height: 1.2,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
+                          Text(_vodName, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: appBarTextColor, height: 1.2), maxLines: 1, overflow: TextOverflow.ellipsis),
                           if (_episodes.isNotEmpty)
-                            Text(
-                              _episodes[_currentChapterIdx].name,
-                              style: const TextStyle(
-                                fontSize: 12,
-                                color: appBarSubTextColor, // 更浅的灰
-                                height: 1.2,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
+                            Text(_episodes[_currentChapterIdx].name, style: const TextStyle(fontSize: 12, color: appBarSubTextColor, height: 1.2), maxLines: 1, overflow: TextOverflow.ellipsis),
                         ],
                       ),
                     ),
                     PopupMenuButton<String>(
-                      icon: const Icon(
-                        Icons.more_vert,
-                        color: appBarIconColor, // 白色图标
-                        size: 24,
-                      ),
+                      icon: const Icon(Icons.more_vert, color: appBarIconColor, size: 24),
                       tooltip: '阅读设置',
-                      color: Colors.grey[850], // 弹出菜单背景也用深色
-                      onSelected: (value) {
-                        if (value == 'settings') _showSettings();
-                      },
+                      color: Colors.grey[850],
+                      onSelected: (value) { if (value == 'settings') _showSettings(); },
                       itemBuilder: (context) => const [
-                        PopupMenuItem<String>(
-                          value: 'settings',
-                          child: Row(
-                            children: [
-                              Icon(Icons.settings_outlined, size: 20, color: Colors.white70),
-                              SizedBox(width: 10),
-                              Text('阅读设置', style: TextStyle(color: Colors.white70)),
-                            ],
-                          ),
-                        ),
+                        PopupMenuItem<String>(value: 'settings', child: Row(children: [Icon(Icons.settings_outlined, size: 20, color: Colors.white70), SizedBox(width: 10), Text('阅读设置', style: TextStyle(color: Colors.white70))])),
                       ],
                     ),
                   ],
                 ),
               ),
             ),
-            // ---- 底部栏 ----
+            // 底部栏
             Positioned(
-              bottom: 0,
-              left: 0,
-              right: 0,
+              bottom: 0, left: 0, right: 0,
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 200),
                 transform: Matrix4.translationValues(0, _toolbar ? 0 : 220, 0),
-                padding: EdgeInsets.fromLTRB(
-                  16,
-                  10,
-                  16,
-                  12 + safePadding.bottom,
-                ),
+                padding: EdgeInsets.fromLTRB(16, 10, 16, 12 + safePadding.bottom),
                 decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.6), // 深色半透明背景
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.12),
-                      blurRadius: 12,
-                      offset: const Offset(0, -4),
-                    ),
-                  ],
+                  color: Colors.black.withValues(alpha: 0.6),
+                  boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.12), blurRadius: 12, offset: const Offset(0, -4))],
                 ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // ---- 第一行：页码 | 进度条 | 总页数 ----
                     if (_readMode != MangaReadMode.strip) ...[
                       Row(
                         children: [
-                          Text(
-                            '${_currentPage + 1}',
-                            style: const TextStyle(
-                              fontSize: 13,
-                              color: appBarTextColor, // 偏白色的灰
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
+                          Text('${_currentPage + 1}', style: const TextStyle(fontSize: 13, color: appBarTextColor, fontWeight: FontWeight.w500)),
                           const SizedBox(width: 12),
                           Expanded(
                             child: Slider(
                               value: _totalPages > 1 ? _currentPage.toDouble() : 0,
-                              min: 0,
-                              max: (_totalPages - 1).toDouble().clamp(0, double.infinity),
+                              min: 0, max: (_totalPages - 1).toDouble().clamp(0, double.infinity),
                               onChanged: (v) {
                                 final target = v.round().clamp(0, _totalPages - 1);
                                 _pageController?.jumpToPage(target);
                                 _onPageChanged(target);
                               },
-                              activeColor: appBarTextColor, // 白色系
-                              inactiveColor: Colors.white30,
-                              thumbColor: Colors.white,
+                              activeColor: appBarTextColor, inactiveColor: Colors.white30, thumbColor: Colors.white,
                             ),
                           ),
                           const SizedBox(width: 12),
-                          Text(
-                            '$_totalPages',
-                            style: const TextStyle(
-                              fontSize: 13,
-                              color: appBarTextColor, // 偏白色的灰
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
+                          Text('$_totalPages', style: const TextStyle(fontSize: 13, color: appBarTextColor, fontWeight: FontWeight.w500)),
                         ],
                       ),
                     ] else ...[
                       Row(
                         children: [
-                          Text(
-                            '共 $_totalPages 页',
-                            style: const TextStyle(
-                              fontSize: 13,
-                              color: appBarSubTextColor, // 偏白色的灰
-                            ),
-                          ),
+                          Text('共 $_totalPages 页', style: const TextStyle(fontSize: 13, color: appBarSubTextColor)),
                           const Spacer(),
-                          Text(
-                            '条漫模式',
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: appBarTextColor, // 偏白色的灰
-                            ),
-                          ),
+                          Text('条漫模式', style: const TextStyle(fontSize: 12, color: appBarTextColor)),
                         ],
                       ),
                     ],
                     const SizedBox(height: 8),
-                    // ---- 第二行：缩放控制 ----
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const Text(
-                          '缩放',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: appBarSubTextColor, // 偏白色的灰
-                          ),
-                        ),
+                        const Text('缩放', style: TextStyle(fontSize: 12, color: appBarSubTextColor)),
                         const SizedBox(width: 16),
                         _buildZoomButton(Icons.remove, _zoomOut),
                         const SizedBox(width: 12),
-                        Text(
-                          '${(_scale * 100).toInt()}%',
-                          style: const TextStyle(
-                            fontSize: 13,
-                            color: Colors.white, // 百分比用纯白
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
+                        Text('${(_scale * 100).toInt()}%', style: const TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.w500)),
                         const SizedBox(width: 12),
                         _buildZoomButton(Icons.add, _zoomIn),
                         const SizedBox(width: 16),
@@ -854,46 +610,24 @@ class _MangaReaderPageState extends State<MangaReaderPage> with WidgetsBindingOb
                       ],
                     ),
                     const SizedBox(height: 8),
-                    // ---- 第三行：五个功能按钮 ----
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceAround,
                       children: [
+                        _buildActionBtn(icon: Icons.skip_previous, label: '上一话', onTap: _prevChapter, color: appBarTextColor),
+                        _buildActionBtn(icon: Icons.list_alt, label: '目录', onTap: _openToc, color: appBarTextColor),
                         _buildActionBtn(
-                          icon: Icons.skip_previous,
-                          label: '上一话',
-                          onTap: _prevChapter,
-                          color: appBarTextColor, // 偏白色的灰
-                        ),
-                        _buildActionBtn(
-                          icon: Icons.list_alt,
-                          label: '目录',
-                          onTap: _openToc,
-                          color: appBarTextColor,
-                        ),
-                        _buildActionBtn(
-                          icon: MangaReaderSettings.autoScroll
-                              ? Icons.pause_circle_outline
-                              : Icons.play_circle_outline,
+                          icon: MangaReaderSettings.autoScroll ? Icons.pause_circle_outline : Icons.play_circle_outline,
                           label: MangaReaderSettings.autoScroll ? '暂停' : '自动',
                           onTap: _toggleAutoScroll,
                           color: MangaReaderSettings.autoScroll ? theme.primaryColor : appBarTextColor,
                         ),
                         _buildActionBtn(
-                          icon: _readMode == MangaReadMode.horizontal
-                              ? Icons.swap_horiz
-                              : _readMode == MangaReadMode.vertical
-                                  ? Icons.swap_vert
-                                  : Icons.view_day, // 条漫模式用居中对齐图标
+                          icon: _readMode == MangaReadMode.horizontal ? Icons.swap_horiz : _readMode == MangaReadMode.vertical ? Icons.swap_vert : Icons.view_day,
                           label: '模式',
                           onTap: _toggleReadMode,
                           color: appBarTextColor,
                         ),
-                        _buildActionBtn(
-                          icon: Icons.skip_next,
-                          label: '下一话',
-                          onTap: _nextChapter,
-                          color: appBarTextColor,
-                        ),
+                        _buildActionBtn(icon: Icons.skip_next, label: '下一话', onTap: _nextChapter, color: appBarTextColor),
                       ],
                     ),
                   ],
@@ -906,50 +640,29 @@ class _MangaReaderPageState extends State<MangaReaderPage> with WidgetsBindingOb
     );
   }
 
-  // ===== 缩放按钮（圆形透明背景，白色图标） =====
   Widget _buildZoomButton(IconData icon, VoidCallback onTap) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 36,
-        height: 36,
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.15), // 白色半透明背景
-          shape: BoxShape.circle,
-        ),
-        child: Icon(icon, size: 18, color: Colors.white), // 白色图标
+        width: 36, height: 36,
+        decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.15), shape: BoxShape.circle),
+        child: Icon(icon, size: 18, color: Colors.white),
       ),
     );
   }
 
-  // ===== 重置按钮（胶囊透明背景，偏白灰文字） =====
   Widget _buildResetButton(VoidCallback onTap) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.15), // 白色半透明背景
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: const Text(
-          '重置',
-          style: TextStyle(
-            fontSize: 12,
-            color: Colors.white70, // 偏白色的灰
-            fontWeight: FontWeight.w500,
-          ),
-        ),
+        decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(20)),
+        child: const Text('重置', style: TextStyle(fontSize: 12, color: Colors.white70, fontWeight: FontWeight.w500)),
       ),
     );
   }
 
-  Widget _buildActionBtn({
-    required IconData icon,
-    required String label,
-    required VoidCallback? onTap,
-    required Color color,
-  }) {
+  Widget _buildActionBtn({required IconData icon, required String label, required VoidCallback? onTap, required Color color}) {
     final disabled = onTap == null;
     return InkWell(
       onTap: onTap,
@@ -959,26 +672,15 @@ class _MangaReaderPageState extends State<MangaReaderPage> with WidgetsBindingOb
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              icon,
-              size: 22,
-              color: disabled ? color.withValues(alpha: 0.25) : color,
-            ),
+            Icon(icon, size: 22, color: disabled ? color.withValues(alpha: 0.25) : color),
             const SizedBox(height: 2),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 10,
-                color: disabled ? color.withValues(alpha: 0.25) : color.withValues(alpha: 0.7),
-              ),
-            ),
+            Text(label, style: TextStyle(fontSize: 10, color: disabled ? color.withValues(alpha: 0.25) : color.withValues(alpha: 0.7))),
           ],
         ),
       ),
     );
   }
 
-  // ===== 内容构建 =====
   Widget _buildContent(Size screenSize) {
     switch (_readMode) {
       case MangaReadMode.vertical:
@@ -997,9 +699,7 @@ class _MangaReaderPageState extends State<MangaReaderPage> with WidgetsBindingOb
       itemCount: _totalPages,
       onPageChanged: _onPageChanged,
       scrollDirection: Axis.vertical,
-      itemBuilder: (context, index) {
-        return _buildImageItem(screenSize, index);
-      },
+      itemBuilder: (context, index) => _buildImageItem(screenSize, index),
     );
   }
 
@@ -1010,19 +710,42 @@ class _MangaReaderPageState extends State<MangaReaderPage> with WidgetsBindingOb
       itemCount: _totalPages,
       onPageChanged: _onPageChanged,
       scrollDirection: Axis.horizontal,
-      itemBuilder: (context, index) {
-        return _buildImageItem(screenSize, index);
-      },
+      itemBuilder: (context, index) => _buildImageItem(screenSize, index),
     );
   }
 
+  // 条漫模式：ClipRect + SingleChildScrollView + Transform.scale
   Widget _buildStripMode(Size screenSize) {
-    return SingleChildScrollView(
-      controller: _stripScrollController,
-      child: Column(
-        children: _imageUrls.asMap().entries.map((entry) {
-          return _buildImageItem(screenSize, entry.key);
-        }).toList(),
+    return ClipRect(
+      child: SingleChildScrollView(
+        controller: _stripScrollController,
+        child: Transform.scale(
+          scale: _scale,
+          alignment: Alignment.topCenter,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: _imageUrls.map((url) {
+              return Image.network(
+                url,
+                width: screenSize.width,
+                fit: BoxFit.fitWidth,
+                loadingBuilder: (context, child, loadingProgress) {
+                  if (loadingProgress == null) return child;
+                  return const Center(child: SizedBox(width: 40, height: 40, child: CircularProgressIndicator(strokeWidth: 3)));
+                },
+                errorBuilder: (context, error, stackTrace) {
+                  return Container(
+                    constraints: const BoxConstraints(minHeight: 100),
+                    width: screenSize.width,
+                    color: Colors.white.withValues(alpha: 0.05),
+                    child: const Center(child: Icon(Icons.broken_image_outlined, size: 48, color: Colors.white30)),
+                  );
+                },
+              );
+            }).toList(),
+          ),
+        ),
       ),
     );
   }
@@ -1030,14 +753,15 @@ class _MangaReaderPageState extends State<MangaReaderPage> with WidgetsBindingOb
   Widget _buildImageItem(Size screenSize, int index) {
     if (index >= _imageUrls.length) return const SizedBox.shrink();
     final url = _imageUrls[index];
-    final double availableWidth = screenSize.width;
-    final double availableHeight = screenSize.height;
-    final double height = _readMode == MangaReadMode.strip
-        ? availableHeight * 0.7
-        : availableHeight;
+    final bool isStrip = _readMode == MangaReadMode.strip;
+
+    if (isStrip) {
+      return const SizedBox.shrink();
+    }
+
     return Container(
-      width: availableWidth,
-      height: height,
+      width: screenSize.width,
+      height: screenSize.height,
       color: Colors.transparent,
       child: ClipRect(
         child: Center(
@@ -1051,12 +775,10 @@ class _MangaReaderPageState extends State<MangaReaderPage> with WidgetsBindingOb
                 if (loadingProgress == null) return child;
                 return Center(
                   child: SizedBox(
-                    width: 40,
-                    height: 40,
+                    width: 40, height: 40,
                     child: CircularProgressIndicator(
                       value: loadingProgress.expectedTotalBytes != null
-                          ? loadingProgress.cumulativeBytesLoaded /
-                          loadingProgress.expectedTotalBytes!
+                          ? loadingProgress.cumulativeBytesLoaded / loadingProgress.expectedTotalBytes!
                           : null,
                       color: _theme.primaryColor,
                       strokeWidth: 3,
@@ -1067,27 +789,14 @@ class _MangaReaderPageState extends State<MangaReaderPage> with WidgetsBindingOb
               errorBuilder: (context, error, stackTrace) {
                 return Container(
                   height: 200,
-                  width: availableWidth,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.05),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
+                  width: screenSize.width,
+                  decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(8)),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(
-                        Icons.broken_image_outlined,
-                        size: 48,
-                        color: Colors.white.withValues(alpha: 0.3),
-                      ),
+                      Icon(Icons.broken_image_outlined, size: 48, color: Colors.white.withValues(alpha: 0.3)),
                       const SizedBox(height: 8),
-                      Text(
-                        '图片加载失败',
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.3),
-                          fontSize: 13,
-                        ),
-                      ),
+                      Text('图片加载失败', style: TextStyle(color: Colors.white.withValues(alpha: 0.3), fontSize: 13)),
                     ],
                   ),
                 );
@@ -1108,18 +817,11 @@ class _MangaReaderPageState extends State<MangaReaderPage> with WidgetsBindingOb
           children: [
             Icon(Icons.error_outline, size: 44, color: Colors.white.withValues(alpha: 0.4)),
             const SizedBox(height: 14),
-            Text(
-              msg,
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: Colors.white70, fontSize: 14, height: 1.6),
-            ),
+            Text(msg, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white70, fontSize: 14, height: 1.6)),
             const SizedBox(height: 18),
             OutlinedButton(
               onPressed: retry,
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.white70,
-                side: const BorderSide(color: Colors.white70),
-              ),
+              style: OutlinedButton.styleFrom(foregroundColor: Colors.white70, side: const BorderSide(color: Colors.white70)),
               child: const Text('重试'),
             ),
           ],
