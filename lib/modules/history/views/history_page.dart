@@ -49,6 +49,7 @@ class _HistoryPageState extends State<HistoryPage> {
       body: Column(
         children: [
           _buildFilterBar(context),
+          const SizedBox(height: 8),
           Expanded(
             child: Obx(() {
               if (controller.isLoading.value) {
@@ -66,44 +67,70 @@ class _HistoryPageState extends State<HistoryPage> {
     );
   }
 
+  /// 筛选栏 – 分段控制器样式（与推送弹窗完全一致，居中显示）
   Widget _buildFilterBar(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    return Obx(() => Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      decoration: BoxDecoration(
-        color: colorScheme.surface,
-        border: Border(
-          // bottom: BorderSide(
-          //   color: colorScheme.outline.withOpacity(0.1),
-          //   width: 1,
-          // ),
-        ),
-      ),
-      child: SegmentedButton<String>(
-        segments: const [
-          ButtonSegment(value: 'all', label: Text('全部')),
-          ButtonSegment(value: 'video', label: Text('视频')),
-          ButtonSegment(value: 'novel', label: Text('小说')),
-          ButtonSegment(value: 'manga', label: Text('漫画')),
-        ],
-        selected: {controller.filterType.value},
-        onSelectionChanged: (Set<String> newSelection) {
-          controller.filterType.value = newSelection.first;
-        },
-        style: SegmentedButton.styleFrom(
-          backgroundColor: colorScheme.surfaceContainerHighest,
-          selectedBackgroundColor: colorScheme.primaryContainer,
-          selectedForegroundColor: colorScheme.primary,
-          foregroundColor: colorScheme.onSurface,
-          elevation: 0,
-          padding: const EdgeInsets.symmetric(horizontal: 4),
-          shape: RoundedRectangleBorder(
+    final filters = [
+      {'value': 'all', 'label': '全部', 'icon': Icons.apps},
+      {'value': 'video', 'label': '视频', 'icon': Icons.movie},
+      {'value': 'novel', 'label': '小说', 'icon': Icons.book},
+      {'value': 'manga', 'label': '漫画', 'icon': Icons.auto_stories},
+    ];
+
+    return Obx(() {
+      final current = controller.filterType.value;
+      return Center(
+        child: Container(
+          decoration: BoxDecoration(
+            border: Border.all(
+              color: colorScheme.outline.withOpacity(0.15),
+              width: 1,
+            ),
             borderRadius: BorderRadius.circular(8),
-            side: BorderSide.none,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: filters.map((item) {
+              final value = item['value'] as String;
+              final label = item['label'] as String;
+              final icon = item['icon'] as IconData;
+              final isSelected = current == value;
+              return GestureDetector(
+                onTap: () => controller.filterType.value = value,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? colorScheme.primary.withOpacity(0.12)
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        icon,
+                        size: 16,
+                        color: isSelected ? colorScheme.primary : colorScheme.outline,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        label,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                          color: isSelected ? colorScheme.primary : colorScheme.onSurface,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }).toList(),
           ),
         ),
-      ),
-    ));
+      );
+    });
   }
 
   Widget _buildEmptyState(BuildContext context) {

@@ -1152,43 +1152,54 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
                         ),
                       ],
                     ),
-                    // ---- 字体 ----
-                    Row(
+
+                    // ---- 字体（标签在上，选项水平滚动） ----
+                    Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Padding(
-                          padding: EdgeInsets.only(top: 8),
-                          child: Text('字体', style: TextStyle(fontSize: 13.5)),
-                        ),
-                        const SizedBox(width: 14),
-                        Expanded(
-                          child: Wrap(
-                            spacing: 8,
-                            runSpacing: 4,
-                            children: [
-                              for (final f in [
-                                ('system', '默认'),
-                                ('serif', '宋体'),
-                                ('kai', '楷体'),
-                                ('round', '圆体'),
-                                ('hei', '黑体'),
-                              ])
-                                ChoiceChip(
-                                  label: Text(
-                                    f.$2,
-                                    style: const TextStyle(fontSize: 12.5),
+                        const Text('字体', style: TextStyle(fontSize: 13.5)),
+                        const SizedBox(height: 8),
+                        SizedBox(
+                          height: 36,
+                          child: SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            physics: const BouncingScrollPhysics(),
+                            child: Row(
+                              children: [
+                                for (final f in [
+                                  ('system', '默认'),
+                                  ('serif', '宋体'),
+                                  ('kai', '楷体'),
+                                  ('round', '圆体'),
+                                  ('hei', '黑体'),
+                                ])
+                                  Padding(
+                                    padding: const EdgeInsets.only(right: 8),
+                                    child: ChoiceChip(
+                                      label: Text(
+                                        f.$2,
+                                        style: const TextStyle(fontSize: 12.5),
+                                      ),
+                                      selected: NovelReaderSettings.fontKey == f.$1,
+                                      onSelected: (_) {
+                                        NovelReaderSettings.fontKey = f.$1;
+                                        refresh();
+                                      },
+                                      selectedColor: Theme.of(ctx).colorScheme.primaryContainer,
+                                      labelStyle: TextStyle(
+                                        color: NovelReaderSettings.fontKey == f.$1
+                                            ? Theme.of(ctx).colorScheme.primary
+                                            : Theme.of(ctx).colorScheme.onSurface,
+                                      ),
+                                    ),
                                   ),
-                                  selected: NovelReaderSettings.fontKey == f.$1,
-                                  onSelected: (_) {
-                                    NovelReaderSettings.fontKey = f.$1;
-                                    refresh();
-                                  },
-                                ),
-                            ],
+                              ],
+                            ),
                           ),
                         ),
                       ],
                     ),
+
                     // ---- 在线字体 ----
                     const Divider(height: 20, indent: 0, endIndent: 0),
                     Padding(
@@ -1280,66 +1291,99 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
                         ),
                       ],
                     ),
-                    // ---- 翻页模式 ----
-                    Row(
+
+                    // ---- 翻页模式（标签在上，选项水平滚动） ----
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const Text('翻页模式', style: TextStyle(fontSize: 13.5)),
-                        const SizedBox(width: 14),
-                        ChoiceChip(
-                          label: const Text('滚动'),
-                          selected: !NovelReaderSettings.pagedMode,
-                          onSelected: (_) {
-                            NovelReaderSettings.pagedMode = false;
-                            refresh();
-                          },
-                        ),
-                        const SizedBox(width: 10),
-                        ChoiceChip(
-                          label: const Text('仿真分页'),
-                          selected: NovelReaderSettings.pagedMode,
-                          onSelected: (_) {
-                            NovelReaderSettings.pagedMode = true;
-                            refresh();
-                          },
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    // ---- 翻页动画（5种）----
-                    Row(
-                      children: [
-                        const Text('翻页动画', style: TextStyle(fontSize: 13.5)),
-                        const SizedBox(width: 14),
-                        Expanded(
-                          child: Wrap(
-                            spacing: 8,
-                            runSpacing: 4,
-                            children: NovelPageTurnMode.values.map((mode) {
-                              final isSelected = NovelReaderSettings.pageAnim == mode.storageKey;
-                              return ChoiceChip(
-                                label: Text(
-                                  mode.displayName,
-                                  style: const TextStyle(fontSize: 12.5),
+                        const SizedBox(height: 8),
+                        SizedBox(
+                          height: 36,
+                          child: SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            physics: const BouncingScrollPhysics(),
+                            child: Row(
+                              children: [
+                                ChoiceChip(
+                                  label: const Text('滚动'),
+                                  selected: !NovelReaderSettings.pagedMode,
+                                  onSelected: (_) {
+                                    NovelReaderSettings.pagedMode = false;
+                                    refresh();
+                                  },
+                                  selectedColor: Theme.of(ctx).colorScheme.primaryContainer,
+                                  labelStyle: TextStyle(
+                                    color: !NovelReaderSettings.pagedMode
+                                        ? Theme.of(ctx).colorScheme.primary
+                                        : Theme.of(ctx).colorScheme.onSurface,
+                                  ),
                                 ),
-                                selected: isSelected,
-                                onSelected: (_) {
-                                  NovelReaderSettings.pageAnim = mode.storageKey;
-                                  NovelReaderSettings.save();
-                                  refresh();
-                                },
-                                selectedColor: Theme.of(ctx).colorScheme.primaryContainer,
-                                labelStyle: TextStyle(
-                                  color: isSelected
-                                      ? Theme.of(ctx).colorScheme.primary
-                                      : Theme.of(ctx).colorScheme.onSurface,
+                                const SizedBox(width: 8),
+                                ChoiceChip(
+                                  label: const Text('仿真分页'),
+                                  selected: NovelReaderSettings.pagedMode,
+                                  onSelected: (_) {
+                                    NovelReaderSettings.pagedMode = true;
+                                    refresh();
+                                  },
+                                  selectedColor: Theme.of(ctx).colorScheme.primaryContainer,
+                                  labelStyle: TextStyle(
+                                    color: NovelReaderSettings.pagedMode
+                                        ? Theme.of(ctx).colorScheme.primary
+                                        : Theme.of(ctx).colorScheme.onSurface,
+                                  ),
                                 ),
-                              );
-                            }).toList(),
+                              ],
+                            ),
                           ),
                         ),
                       ],
                     ),
-                    // ---- 阅读主题（11种，横向滚动预览）----
+
+                    // ---- 翻页动画（标签在上，选项水平滚动） ----
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('翻页动画', style: TextStyle(fontSize: 13.5)),
+                        const SizedBox(height: 8),
+                        SizedBox(
+                          height: 36,
+                          child: SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            physics: const BouncingScrollPhysics(),
+                            child: Row(
+                              children: NovelPageTurnMode.values.map((mode) {
+                                final isSelected = NovelReaderSettings.pageAnim == mode.storageKey;
+                                return Padding(
+                                  padding: const EdgeInsets.only(right: 8),
+                                  child: ChoiceChip(
+                                    label: Text(
+                                      mode.displayName,
+                                      style: const TextStyle(fontSize: 12.5),
+                                    ),
+                                    selected: isSelected,
+                                    onSelected: (_) {
+                                      NovelReaderSettings.pageAnim = mode.storageKey;
+                                      NovelReaderSettings.save();
+                                      refresh();
+                                    },
+                                    selectedColor: Theme.of(ctx).colorScheme.primaryContainer,
+                                    labelStyle: TextStyle(
+                                      color: isSelected
+                                          ? Theme.of(ctx).colorScheme.primary
+                                          : Theme.of(ctx).colorScheme.onSurface,
+                                    ),
+                                  ),
+                                );
+                              }).toList(),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    // ---- 阅读主题 ----
                     const SizedBox(height: 10),
                     const Divider(height: 20),
                     Padding(

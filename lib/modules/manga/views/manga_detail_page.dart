@@ -234,7 +234,7 @@ class _MangaDetailPageState extends State<MangaDetailPage> {
                             borderRadius: BorderRadius.circular(12),
                             border: Border.all(color: colorScheme.primary.withValues(alpha: 0.2)),
                           ),
-                          child: Obx(() => Text('书源：${controller.sourceName.value}', style: TextStyle(fontSize: 10.5, color: colorScheme.primary))),
+                          child: Obx(() => Text('漫画源：${controller.sourceName.value}', style: TextStyle(fontSize: 10.5, color: colorScheme.primary))),
                         ),
                         const SizedBox(height: 8),
                         // ---- 简介：固定两行，点击弹窗 ----
@@ -248,7 +248,7 @@ class _MangaDetailPageState extends State<MangaDetailPage> {
                               style: TextStyle(fontSize: 12.5, color: colorScheme.outline, height: 1.7),
                             ),
                           ),
-                        // 原“开始阅读”按钮已移除，移至底部固定栏
+                        // 原“开始查看”按钮已移除，移至底部固定栏
                       ],
                     ),
                   ),
@@ -435,13 +435,13 @@ class _MangaDetailPageState extends State<MangaDetailPage> {
                 )),
               ),
               const SizedBox(width: 12),
-              // 开始阅读按钮 (flex:2)
+              // 开始查看按钮 (flex:2)
               Expanded(
                 flex: 2,
                 child: FilledButton.icon(
                   onPressed: () => controller.openReader(0),
                   icon: const Icon(Icons.menu_book, size: 18),
-                  label: const Text('开始阅读'),
+                  label: const Text('开始查看'),
                   style: FilledButton.styleFrom(
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     padding: const EdgeInsets.symmetric(vertical: 12),
