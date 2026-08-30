@@ -25,7 +25,6 @@ class _NovelDetailPageState extends State<NovelDetailPage> {
   bool _desc = false;
   bool _isGrid = false;
   int? _selectedGroup;
-  bool _isFav = false; // 临时收藏状态
 
   @override
   void initState() {
@@ -416,21 +415,17 @@ class _NovelDetailPageState extends State<NovelDetailPage> {
           ),
           child: Row(
             children: [
-              // 收藏按钮 (flex:1)
               Expanded(
                 flex: 1,
-                child: OutlinedButton.icon(
-                  onPressed: () {
-                    setState(() => _isFav = !_isFav);
-                    // 后续可调用 controller.toggleFavorite();
-                  },
+                child: Obx(() => OutlinedButton.icon(
+                  onPressed: controller.toggleFavorite,
                   icon: Icon(
-                    _isFav ? Icons.star : Icons.star_border,
+                    controller.isFavorite.value ? Icons.star : Icons.star_border,
                     size: 18,
                     color: colorScheme.primary,
                   ),
                   label: Text(
-                    _isFav ? '已收藏' : '收藏',
+                    controller.isFavorite.value ? '已收藏' : '收藏',
                     style: TextStyle(fontSize: 14, color: colorScheme.primary),
                   ),
                   style: OutlinedButton.styleFrom(
@@ -438,10 +433,9 @@ class _NovelDetailPageState extends State<NovelDetailPage> {
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     padding: const EdgeInsets.symmetric(vertical: 12),
                   ),
-                ),
+                )),
               ),
               const SizedBox(width: 12),
-              // 开始阅读按钮 (flex:2)
               Expanded(
                 flex: 2,
                 child: FilledButton.icon(

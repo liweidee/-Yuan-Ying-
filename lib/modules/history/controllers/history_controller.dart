@@ -3,19 +3,32 @@ import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:yuanying/t4/models/video_item.dart';
 import 'package:yuanying/t4/services/source_manager.dart';
 import 'package:yuanying/utils/storage.dart';
+import 'package:yuanying/core/constants/app_constants.dart';
 
 class HistoryController extends GetxController {
   final videoList = <VideoItem>[].obs;
   final progressMap = <String, String>{}.obs;
   final timeMap = <String, int>{}.obs;
-  final _apiUrlMap = <String, String>{}.obs;  // vodId -> api_url
-  final isLoading = false.obs;
+  final _apiUrlMap = <String, String>{}.obs;
   final _siteKeyMap = <String, String>{}.obs;
-  final _configKeyMap = <String, String>{}.obs;  // vodId -> config_key
+  final _configKeyMap = <String, String>{}.obs;
+  final _detailTypeMap = <String, String>{}.obs;
+
+  // 过滤类型
+  final filterType = 'all'.obs;  // 'all', 'video', 'novel', 'manga'
+  final isLoading = false.obs;
 
   String? getConfigKey(String vodId) => _configKeyMap[vodId];
 
   final SourceManager _sourceManager = Get.find<SourceManager>();
+
+  // 计算属性：过滤后的列表
+  List<VideoItem> get filteredList {
+    if (filterType.value == 'all') return videoList;
+    return videoList.where((item) {
+      return _detailTypeMap[item.vodId] == filterType.value;
+    }).toList();
+  }
 
   @override
   void onInit() {
@@ -50,6 +63,9 @@ class HistoryController extends GetxController {
         if (item['site_key'] != null) {
           siteKeyMap[videoItem.vodId] = item['site_key'].toString();
         }
+        // 解析 detail_type，兼容旧数据
+        final type = item['detail_type']?.toString() ?? 'video';
+        _detailTypeMap[videoItem.vodId] = type;
       }
       videoList.value = list;
       progressMap.value = progress;
@@ -106,17 +122,85 @@ class HistoryController extends GetxController {
     return '${days ~/ 365}年前';
   }
 
-  // ===== 跳转时使用存储的 api_url =====
+  // ===== 跳转时使用存储的 api_url，并根据类型路由 =====
   void navigateToDetail(VideoItem item) {
+    final type = _detailTypeMap[item.vodId] ?? 'video';
+
+    // ---- 小说路由 ----
+    if (type == 'novel') {
+      final storedConfigKey = getConfigKey(item.vodId);
+      final currentConfigKey = _sourceManager.currentConfigKey.value;
+      if (storedConfigKey != null && storedConfigKey != currentConfigKey) {
+        SmartDialog.showToast('该小说所属配置接口 "$storedConfigKey" 已切换，请切换回该配置后重试');
+        return;
+      }
+      final siteKey = getSiteKey(item.vodId);
+      Map<String, dynamic>? targetSite;
+      if (siteKey != null && siteKey.isNotEmpty) {
+        try {
+          targetSite = _sourceManager.sites.firstWhere(
+            (s) => s['key']?.toString() == siteKey,
+          );
+        } catch (_) {
+          targetSite = null;
+        }
+      }
+      if (targetSite == null) {
+        SmartDialog.showToast('该记录已失效');
+        return;
+      }
+      String pwd = 'tinydust';
+      final ext = targetSite['ext'];
+      if (ext is Map && ext['pwd'] != null) pwd = ext['pwd'].toString();
+      Get.toNamed('/novelDetail', arguments: {
+        'vodId': item.vodId,
+        'pwd': pwd,
+        'site': targetSite,
+      });
+      return;
+    }
+
+    // ---- 漫画路由 ----
+    if (type == 'manga') {
+      final storedConfigKey = getConfigKey(item.vodId);
+      final currentConfigKey = _sourceManager.currentConfigKey.value;
+      if (storedConfigKey != null && storedConfigKey != currentConfigKey) {
+        SmartDialog.showToast('该漫画所属配置接口 "$storedConfigKey" 已切换，请切换回该配置后重试');
+        return;
+      }
+      final siteKey = getSiteKey(item.vodId);
+      Map<String, dynamic>? targetSite;
+      if (siteKey != null && siteKey.isNotEmpty) {
+        try {
+          targetSite = _sourceManager.sites.firstWhere(
+            (s) => s['key']?.toString() == siteKey,
+          );
+        } catch (_) {
+          targetSite = null;
+        }
+      }
+      if (targetSite == null) {
+        SmartDialog.showToast('该记录已失效');
+        return;
+      }
+      String pwd = 'tinydust';
+      final ext = targetSite['ext'];
+      if (ext is Map && ext['pwd'] != null) pwd = ext['pwd'].toString();
+      Get.toNamed('/mangaDetail', arguments: {
+        'vodId': item.vodId,
+        'pwd': pwd,
+        'site': targetSite,
+      });
+      return;
+    }
+
     // 配置一致性检查
     final storedConfigKey = getConfigKey(item.vodId);
     final currentConfigKey = _sourceManager.currentConfigKey.value;
-    if (storedConfigKey != null && storedConfigKey.isNotEmpty && 
-        storedConfigKey != currentConfigKey) {
+    if (storedConfigKey != null && storedConfigKey != currentConfigKey) {
       SmartDialog.showToast('该收藏所属配置接口 "$storedConfigKey" 已切换，请切换回该配置后重试');
       return;
     }
-  
     // 1. 优先使用存储的 site_key 查找完整站点
     final siteKey = getSiteKey(item.vodId);
     Map<String, dynamic>? targetSite;
@@ -135,12 +219,10 @@ class HistoryController extends GetxController {
         targetSite = null;
       }
     }
-
-    // 2. 如果找不到站点，尝试用 api_url 回退（仅对 T4 有效）
+    // 2. 如果找不到站点，尝试用 api_url 回退
     if (targetSite == null) {
       final apiUrl = getApiUrl(item.vodId);
       if (apiUrl != null && apiUrl.isNotEmpty) {
-        // 使用当前全局服务，但设置 baseUrl（仅 T4 有效，其他类型可能失败）
         Get.toNamed('/detail', arguments: {
           'vodId': item.vodId,
           'apiUrl': apiUrl,
@@ -150,7 +232,6 @@ class HistoryController extends GetxController {
       SmartDialog.showToast('该历史记录已失效，请重新播放生成新记录');
       return;
     }
-
     // 3. 判断是否为 drpy2 / Catvod 且非当前源
     final isDrpy2 = SourceManager.isDrpy2Site(targetSite);
     final isCatvod = SourceManager.isCatVodOpenSite(targetSite);
@@ -158,25 +239,21 @@ class HistoryController extends GetxController {
       SmartDialog.showToast('该源暂不支持跳转，请切换到该源后重试');
       return;
     }
-
     // 4. 提取 pwd
     String pwd = 'tinydust';
     final ext = targetSite['ext'];
     if (ext is Map && ext['pwd'] != null) {
       pwd = ext['pwd'].toString();
     }
-
     // 5. 构建路由参数
     final args = <String, dynamic>{
       'vodId': item.vodId,
       'pwd': pwd,
     };
-
     // 非当前源且非 drpy2/catvod → 传入 site
     if (!isCurrent && !isDrpy2 && !isCatvod) {
       args['site'] = targetSite;
     }
-
     Get.toNamed('/detail', arguments: args);
   }
 }

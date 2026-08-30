@@ -46,16 +46,64 @@ class _HistoryPageState extends State<HistoryPage> {
             ),
         ],
       ),
-      body: Obx(() {
-        if (controller.isLoading.value) {
-          return const Center(child: CircularProgressIndicator(strokeWidth: 2));
-        }
-        if (controller.videoList.isEmpty) {
-          return _buildEmptyState(context);
-        }
-        return _buildContent(context, screenWidth);
-      }),
+      body: Column(
+        children: [
+          _buildFilterBar(context),
+          Expanded(
+            child: Obx(() {
+              if (controller.isLoading.value) {
+                return const Center(child: CircularProgressIndicator(strokeWidth: 2));
+              }
+              final list = controller.filteredList;
+              if (list.isEmpty) {
+                return _buildEmptyState(context);
+              }
+              return _buildContent(context, screenWidth, list);
+            }),
+          ),
+        ],
+      ),
     );
+  }
+
+  Widget _buildFilterBar(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Obx(() => Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        border: Border(
+          // bottom: BorderSide(
+          //   color: colorScheme.outline.withOpacity(0.1),
+          //   width: 1,
+          // ),
+        ),
+      ),
+      child: SegmentedButton<String>(
+        segments: const [
+          ButtonSegment(value: 'all', label: Text('全部')),
+          ButtonSegment(value: 'video', label: Text('视频')),
+          ButtonSegment(value: 'novel', label: Text('小说')),
+          ButtonSegment(value: 'manga', label: Text('漫画')),
+        ],
+        selected: {controller.filterType.value},
+        onSelectionChanged: (Set<String> newSelection) {
+          controller.filterType.value = newSelection.first;
+        },
+        style: SegmentedButton.styleFrom(
+          backgroundColor: colorScheme.surfaceContainerHighest,
+          selectedBackgroundColor: colorScheme.primaryContainer,
+          selectedForegroundColor: colorScheme.primary,
+          foregroundColor: colorScheme.onSurface,
+          elevation: 0,
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+            side: BorderSide.none,
+          ),
+        ),
+      ),
+    ));
   }
 
   Widget _buildEmptyState(BuildContext context) {
@@ -73,7 +121,7 @@ class _HistoryPageState extends State<HistoryPage> {
     );
   }
 
-  Widget _buildContent(BuildContext context, double screenWidth) {
+  Widget _buildContent(BuildContext context, double screenWidth, List<VideoItem> list) {
     final maxCrossAxisExtent = screenWidth < 600 ? 130.0 : 200.0;
 
     return Padding(
@@ -86,9 +134,9 @@ class _HistoryPageState extends State<HistoryPage> {
           mainAxisSpacing: 12,
           childAspectRatio: 0.6,
         ),
-        itemCount: controller.videoList.length,
+        itemCount: list.length,
         itemBuilder: (context, index) {
-          final item = controller.videoList[index];
+          final item = list[index];
           final progress = controller.getProgress(item.vodId) ?? '';
           final watchTime = controller.getWatchTime(item.vodId);
           final timeAgo = watchTime != null ? controller.formatTimeAgo(watchTime) : '';

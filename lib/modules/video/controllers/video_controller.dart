@@ -21,6 +21,7 @@ import 'package:yuanying/services/parser_service.dart';
 import 'package:yuanying/t4/models/play_url.dart';
 import 'package:yuanying/t4/models/video_detail.dart';
 import 'package:yuanying/t4/services/t4_api_service.dart';
+import 'package:yuanying/core/constants/app_constants.dart';
 import 'package:yuanying/t4/services/source_manager.dart';
 import 'package:yuanying/modules/audio/controllers/audio_controller.dart';
 import 'package:yuanying/modules/audio/views/audio_page.dart';
@@ -1123,6 +1124,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
       final sourceName = site?['name']?.toString() ?? (detail.typeName ?? '');
       final currentApiUrl = site?['api']?.toString() ?? '';
       final siteKey = site?['key']?.toString() ?? '';
+      final detailType = SourceManager.getDetailTypeFromSite(site);
 
       if (currentApiUrl.isEmpty) {
         print('添加历史记录失败: api_url 为空');
@@ -1156,6 +1158,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
           'config_key': Get.find<SourceManager>().currentConfigKey.value,
           'progress': '00:00 / 00:00',
           'watchTime': DateTime.now().millisecondsSinceEpoch,
+          'detail_type': detailType,
         };
         existingHistory.insert(0, historyItem);
         if (existingHistory.length > 500) {

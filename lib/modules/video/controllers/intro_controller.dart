@@ -1,5 +1,6 @@
 import 'package:get/get.dart';
 import 'package:yuanying/t4/models/video_detail.dart';
+import 'package:yuanying/core/constants/app_constants.dart';
 import 'package:yuanying/t4/services/source_manager.dart';
 import 'package:yuanying/utils/storage.dart';
 
@@ -64,6 +65,7 @@ class IntroController extends GetxController {
     final sourceName = site?['name']?.toString() ?? (detail.typeName ?? '');
     final apiUrl = currentApiUrl ?? site?['api']?.toString() ?? '';
     final siteKey = site?['key']?.toString() ?? '';
+    final detailType = SourceManager.getDetailTypeFromSite(site);
 
     if (isFavorite.value) {
       GStorage.removeFavorite(detail.vodId);
@@ -79,6 +81,7 @@ class IntroController extends GetxController {
         'api_url': apiUrl,
         'site_key': siteKey,
         'config_key': Get.find<SourceManager>().currentConfigKey.value,
+        'detail_type': detailType,
       };
       GStorage.addFavorite(item);
       isFavorite.value = true;

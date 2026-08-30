@@ -18,3 +18,10 @@ abstract final class AppConstants {
   /// 分页大小
   static const int pageSize = 20;
 }
+
+/// 详情类型常量（用于收藏/历史记录区分）
+class DetailType {
+  static const String video = 'video';
+  static const String novel = 'novel';
+  static const String manga = 'manga';
+}

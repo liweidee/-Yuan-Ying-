@@ -17,6 +17,7 @@ import 'package:yuanying/t4/services/nodejs_spider_service.dart';
 import 'package:yuanying/nodejs/nodejs_service.dart';
 import 'package:yuanying/utils/platform_utils.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
+import 'package:yuanying/core/constants/app_constants.dart';
 
 class SourceManager extends GetxController {
   final T4ApiService _apiService = Get.find<T4ApiService>();
@@ -88,6 +89,16 @@ class SourceManager extends GetxController {
     final type = site['type']?.toString() ?? '';
     final key = site['key']?.toString() ?? '';
     return type == '3' && key.startsWith('nodejs_');
+  }
+
+  /// 根据站点配置判断详情类型（video / novel / manga）
+  static String getDetailTypeFromSite(Map<String, dynamic>? site) {
+    if (site == null) return DetailType.video;
+    final key = site['key']?.toString() ?? '';
+    final name = site['name']?.toString() ?? '';
+    if (key.contains('[书]') || name.contains('[书]')) return DetailType.novel;
+    if (key.contains('[画]') || name.contains('[画]')) return DetailType.manga;
+    return DetailType.video;
   }
 
   ISpiderService get currentApiService {
