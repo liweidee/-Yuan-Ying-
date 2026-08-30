@@ -1340,6 +1340,7 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
                         ),
                       ],
                     ),
+                    const SizedBox(height: 10),
 
                     // ---- 翻页动画（标签在上，选项水平滚动） ----
                     Column(
