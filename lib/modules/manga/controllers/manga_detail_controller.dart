@@ -4,6 +4,7 @@ import 'package:yuanying/t4/models/video_detail.dart';
 import 'package:yuanying/t4/services/source_manager.dart';
 import 'package:yuanying/t4/services/i_spider_service.dart';
 import 'package:yuanying/utils/storage.dart';
+import 'package:yuanying/utils/storage_manager.dart';  // 新增导入
 import 'package:yuanying/core/constants/app_constants.dart';
 
 class MangaDetailController extends GetxController {
@@ -13,6 +14,10 @@ class MangaDetailController extends GetxController {
   final RxList<Episode> episodes = <Episode>[].obs;
   final RxString sourceName = ''.obs;
   final RxBool isFavorite = false.obs;
+
+  // ===== 阅读进度状态 =====
+  final RxInt savedChapter = 0.obs;
+  final RxBool hasProgress = false.obs;
 
   late String vodId;
   late String pwd;
@@ -43,6 +48,17 @@ class MangaDetailController extends GetxController {
         episodes.value = result.playSources.first.episodes;
         sourceName.value = result.playSources.first.name;
         _loadFavoriteStatus();
+
+        // ===== 读取阅读进度（只读章节索引） =====
+        final progressKey = 'manga_progress_$vodId';
+        final progress = StorageManager.getCache<Map>(progressKey);
+        if (progress != null && progress['chapter'] != null) {
+          final chapter = progress['chapter'] as int;
+          if (chapter >= 0 && chapter < episodes.length) {
+            savedChapter.value = chapter;
+            hasProgress.value = true;
+          }
+        }
       } else {
         error.value = '未获取到章节信息';
       }
@@ -90,8 +106,11 @@ class MangaDetailController extends GetxController {
     }
   }
 
-  void openReader(int index) {
+  void openReader([int? chapterIndex]) {
     if (detail.value == null || episodes.isEmpty) return;
+    final index = chapterIndex ?? savedChapter.value;
+    if (index < 0 || index >= episodes.length) return;
+
     _addToHistory(index);
 
     Get.toNamed(
@@ -132,7 +151,7 @@ class MangaDetailController extends GetxController {
       'api_url': apiUrl,
       'site_key': site?['key']?.toString() ?? '',
       'config_key': Get.find<SourceManager>().currentConfigKey.value,
-      'progress': '第${index+1}话',   // 漫画用“话”
+      'progress': '第${index+1}话',
       'watchTime': DateTime.now().millisecondsSinceEpoch,
       'detail_type': SourceManager.getDetailTypeFromSite(site),
     };

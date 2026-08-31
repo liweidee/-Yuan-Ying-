@@ -333,6 +333,7 @@ class _MangaDetailPageState extends State<MangaDetailPage> {
                 delegate: SliverChildBuilderDelegate(
                   (context, i) {
                     final idx = indices[i];
+                    final isSaved = idx == controller.savedChapter.value;
                     return InkWell(
                       onTap: () => controller.openReader(idx),
                       borderRadius: BorderRadius.circular(10),
@@ -340,14 +341,23 @@ class _MangaDetailPageState extends State<MangaDetailPage> {
                         alignment: Alignment.center,
                         padding: const EdgeInsets.symmetric(horizontal: 4),
                         decoration: BoxDecoration(
-                          color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                          color: isSaved
+                              ? colorScheme.primaryContainer
+                              : colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
                           borderRadius: BorderRadius.circular(10),
+                          border: isSaved
+                              ? Border.all(color: colorScheme.primary, width: 1.5)
+                              : null,
                         ),
                         child: Text(
                           episodes[idx].name,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: 11, color: colorScheme.onSurface),
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: isSaved ? colorScheme.primary : colorScheme.onSurface,
+                            fontWeight: isSaved ? FontWeight.w600 : FontWeight.normal,
+                          ),
                         ),
                       ),
                     );
@@ -363,6 +373,7 @@ class _MangaDetailPageState extends State<MangaDetailPage> {
               delegate: SliverChildBuilderDelegate(
                 (context, i) {
                   final idx = indices[i];
+                  final isSaved = idx == controller.savedChapter.value;
                   return Column(
                     children: [
                       ListTile(
@@ -371,9 +382,15 @@ class _MangaDetailPageState extends State<MangaDetailPage> {
                           episodes[idx].name,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: 13.5, color: colorScheme.onSurface),
+                          style: TextStyle(
+                            fontSize: 13.5,
+                            color: isSaved ? colorScheme.primary : colorScheme.onSurface,
+                            fontWeight: isSaved ? FontWeight.w600 : FontWeight.normal,
+                          ),
                         ),
-                        trailing: Icon(Icons.chevron_right, size: 18, color: colorScheme.outline.withValues(alpha: 0.5)),
+                        trailing: isSaved
+                            ? Icon(Icons.check_circle, size: 18, color: colorScheme.primary)
+                            : Icon(Icons.chevron_right, size: 18, color: colorScheme.outline.withValues(alpha: 0.5)),
                         onTap: () => controller.openReader(idx),
                       ),
                       Divider(height: 1, indent: 16, color: colorScheme.outline.withValues(alpha: 0.1)),
@@ -438,15 +455,18 @@ class _MangaDetailPageState extends State<MangaDetailPage> {
               // 开始查看按钮 (flex:2)
               Expanded(
                 flex: 2,
-                child: FilledButton.icon(
-                  onPressed: () => controller.openReader(0),
+                child: Obx(() => FilledButton.icon(
+                  onPressed: () => controller.openReader(),
                   icon: const Icon(Icons.menu_book, size: 18),
-                  label: const Text('开始查看'),
+                  label: Text(
+                    controller.hasProgress.value ? '继续查看' : '开始查看',
+                    style: const TextStyle(fontSize: 14),
+                  ),
                   style: FilledButton.styleFrom(
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     padding: const EdgeInsets.symmetric(vertical: 12),
                   ),
-                ),
+                )),
               ),
             ],
           ),

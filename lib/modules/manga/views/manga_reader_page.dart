@@ -51,9 +51,6 @@ class _MangaReaderPageState extends State<MangaReaderPage> with WidgetsBindingOb
   final ScrollController _stripScrollController = ScrollController();
   PageController? _pageController;
 
-  String get _progressKey => '${SettingBoxKey.mangaPageIndex}$_vodId';
-  String get _offsetKey => '${SettingBoxKey.mangaScrollOffset}$_vodId';
-
   @override
   void initState() {
     super.initState();
@@ -167,12 +164,18 @@ class _MangaReaderPageState extends State<MangaReaderPage> with WidgetsBindingOb
         }
         StorageManager.setCache(cacheKey, jsonEncode(urls));
       }
-      int savedPage = StorageManager.getCache<int>(_progressKey) ?? 0;
+
+      // 使用 _pendingRestore 恢复书签位置（如果有）
+      int savedPage = 0;
       if (_pendingRestore > 0) {
         savedPage = (_pendingRestore * urls.length).round().clamp(0, urls.length - 1);
         _pendingRestore = -1;
+      } else {
+        // 否则默认从第一页开始（因为章节切换时总是从头开始）
+        savedPage = 0;
       }
       savedPage = savedPage.clamp(0, urls.length - 1);
+
       if (mounted) {
         setState(() {
           _imageUrls = urls;
@@ -181,14 +184,14 @@ class _MangaReaderPageState extends State<MangaReaderPage> with WidgetsBindingOb
           _loading = false;
         });
         if (_readMode == MangaReadMode.strip) {
-          _resetStripScroll(); // 安全重置，不会崩
+          _resetStripScroll();
         }
         _pageController?.dispose();
         _pageController = PageController(initialPage: _currentPage);
         if (MangaReaderSettings.autoScroll) {
           _startAutoScroll();
         }
-        _saveProgress();
+        _saveProgress();   // 保存当前章节
       }
     } catch (e) {
       SmartDialog.showToast('加载章节异常: $e');
@@ -202,19 +205,14 @@ class _MangaReaderPageState extends State<MangaReaderPage> with WidgetsBindingOb
   }
 
   void _saveProgress() {
-    if (_imageUrls.isEmpty) return;
-    StorageManager.setCache(_progressKey, _currentPage);
-    if (_readMode == MangaReadMode.strip && _stripScrollController.hasClients) {
-      StorageManager.setCache(_offsetKey, _stripScrollController.position.pixels);
-    }
-    MangaReaderSettings.zoomLevel = _scale;
-    MangaReaderSettings.save();
+    final key = 'manga_progress_$_vodId';
+    final progress = {'chapter': _currentChapterIdx};
+    StorageManager.setCache(key, progress);
   }
 
   void _onPageChanged(int index) {
     if (index < 0 || index >= _totalPages) return;
     setState(() { _currentPage = index; });
-    _saveProgress();
   }
 
   void _prevPage() {

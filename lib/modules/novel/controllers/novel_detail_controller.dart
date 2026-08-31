@@ -4,6 +4,7 @@ import 'package:yuanying/t4/models/video_detail.dart';
 import 'package:yuanying/t4/services/source_manager.dart';
 import 'package:yuanying/t4/services/i_spider_service.dart';
 import 'package:yuanying/utils/storage.dart';
+import 'package:yuanying/utils/storage_manager.dart';
 import 'package:yuanying/core/constants/app_constants.dart';
 
 class NovelDetailController extends GetxController {
@@ -13,6 +14,10 @@ class NovelDetailController extends GetxController {
   final RxList<Episode> episodes = <Episode>[].obs;
   final RxString sourceName = ''.obs;
   final RxBool isFavorite = false.obs;
+
+  // ===== 阅读进度状态 =====
+  final RxInt savedChapter = 0.obs;
+  final RxBool hasProgress = false.obs;
 
   late String vodId;
   late String pwd;
@@ -28,7 +33,6 @@ class NovelDetailController extends GetxController {
   @override
   void onInit() {
     super.onInit();
-    // 加载收藏状态在 init 中调用，但 init 由外部调用，所以我们在 loadDetail 之后调用
   }
 
   Future<void> loadDetail() async {
@@ -43,7 +47,18 @@ class NovelDetailController extends GetxController {
         detail.value = result;
         episodes.value = result.playSources.first.episodes;
         sourceName.value = result.playSources.first.name;
-        _loadFavoriteStatus();   // 加载收藏状态
+        _loadFavoriteStatus();
+
+        // ===== 读取阅读进度（只读章节索引） =====
+        final progressKey = 'novel_progress_$vodId';
+        final progress = StorageManager.getCache<Map>(progressKey);
+        if (progress != null && progress['chapter'] != null) {
+          final chapter = progress['chapter'] as int;
+          if (chapter >= 0 && chapter < episodes.length) {
+            savedChapter.value = chapter;
+            hasProgress.value = true;
+          }
+        }
       } else {
         error.value = '未获取到章节信息';
       }
@@ -91,8 +106,11 @@ class NovelDetailController extends GetxController {
     }
   }
 
-  void openReader(int index) {
+  void openReader([int? chapterIndex]) {
     if (detail.value == null || episodes.isEmpty) return;
+    final index = chapterIndex ?? savedChapter.value;
+    if (index < 0 || index >= episodes.length) return;
+
     _addToHistory(index);
 
     Get.toNamed(

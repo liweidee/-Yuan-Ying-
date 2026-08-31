@@ -79,7 +79,7 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
   final Battery _battery = Battery();
   Timer? _footerTimer;
   int _batteryLevel = -1;
-  Timer? _statTimer;
+  // Timer? _statTimer;
 
   // 书签
   List<NovelBookmark> _bookmarks = [];
@@ -96,6 +96,8 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
   @override
   void initState() {
     super.initState();
+    // 加载阅读器设置
+    NovelReaderSettings.load();
     _ttsService = Get.find<NovelTtsService>();
     WidgetsBinding.instance.addObserver(this);
     final args = Get.arguments as Map?;
@@ -131,7 +133,7 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     _refreshBattery();
     _footerTimer = Timer.periodic(const Duration(seconds: 30), (_) => _refreshBattery());
-    _statTimer = Timer.periodic(const Duration(seconds: 30), (_) {});
+    // _statTimer = Timer.periodic(const Duration(seconds: 30), (_) {});
   }
 
   @override
@@ -139,7 +141,7 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     _sleepTimer?.cancel();
     _footerTimer?.cancel();
-    _statTimer?.cancel();
+    // _statTimer?.cancel();
     _saveProgress();
     _scroll.dispose();
     _pageCtrl?.dispose();
@@ -403,15 +405,21 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
     }
   }
 
+  // Future<void> _saveProgress() async {
+  //   final key = 'novel_progress_$_vodId';
+  //   double offset = 0;
+  //   if (_paged && _pagedReady && _pageUnits.length > 1) {
+  //     offset = _pageIndex / (_pageUnits.length - 1);
+  //   } else if (_scroll.hasClients && _scroll.position.maxScrollExtent > 0) {
+  //     offset = _scroll.position.pixels / _scroll.position.maxScrollExtent;
+  //   }
+  //   final progress = {'chapter': _index, 'offset': offset};
+  //   await StorageManager.setCache(key, progress);
+  // }
+
   Future<void> _saveProgress() async {
     final key = 'novel_progress_$_vodId';
-    double offset = 0;
-    if (_paged && _pagedReady && _pageUnits.length > 1) {
-      offset = _pageIndex / (_pageUnits.length - 1);
-    } else if (_scroll.hasClients && _scroll.position.maxScrollExtent > 0) {
-      offset = _scroll.position.pixels / _scroll.position.maxScrollExtent;
-    }
-    final progress = {'chapter': _index, 'offset': offset};
+    final progress = {'chapter': _index};
     await StorageManager.setCache(key, progress);
   }
 
@@ -772,9 +780,8 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
   // ---------- 工具栏 ----------
   void _toggleToolbar() {
     setState(() => _toolbar = !_toolbar);
-    SystemChrome.setEnabledSystemUIMode(
-      _toolbar ? SystemUiMode.edgeToEdge : SystemUiMode.immersiveSticky,
-    );
+    // 始终保持 immersiveSticky，不因工具栏切换而改变
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
   }
 
   // ---------- 目录 ----------
