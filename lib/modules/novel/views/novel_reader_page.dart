@@ -1719,7 +1719,11 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
               right: 0,
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 200),
-                transform: Matrix4.translationValues(0, _toolbar ? 0 : 160, 0),
+                transform: Matrix4.translationValues(
+                  0,
+                  _toolbar ? 0 : 160 + safePadding.bottom + 20,
+                  0,
+                ),
                 padding: EdgeInsets.fromLTRB(
                   16,
                   10,

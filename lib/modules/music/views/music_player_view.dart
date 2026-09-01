@@ -5,7 +5,7 @@ import 'package:yuanying/core/routes/app_pages.dart';
 import 'package:yuanying/modules/music/controllers/music_player_controller.dart';
 import 'package:yuanying/modules/music/widgets/player_list.dart';
 import 'package:yuanying/utils/toast_utils.dart';
-import 'package:yuanying/common/widgets/marquee.dart'; // 跑马灯组件
+import 'package:yuanying/common/widgets/marquee.dart';
 import 'package:yuanying/utils/storage.dart';
 import 'package:yuanying/core/constants/app_constants.dart';
 import 'package:yuanying/t4/services/source_manager.dart';
@@ -20,6 +20,15 @@ class MusicPlayerView extends StatelessWidget {
   Widget build(BuildContext context) {
     final controller = Get.find<MusicPlayerController>();
     final colorScheme = Theme.of(context).colorScheme;
+    final bottomPadding = MediaQuery.of(context).padding.bottom;
+    // 是否有底部安全区域（刘海屏）
+    final hasBottomSafeArea = bottomPadding > 0;
+    // 额外间距：cancelMargin=false 时保留 34px，否则为 0
+    final extraMargin = cancelMargin ? 0.0 : 34.0;
+    // 播放条主体高度（不含安全区域）
+    const barHeight = 50.0;
+    // 总高度 = 主体 + 额外间距 + (有安全区域时增加安全区域高度)
+    final totalHeight = barHeight + extraMargin + (hasBottomSafeArea ? bottomPadding : 0);
 
     return Obx(() {
       final hasSong = controller.currentEpisode != null;
@@ -30,17 +39,12 @@ class MusicPlayerView extends StatelessWidget {
       final isFirst = controller.currentIndex.value == 0;
       final isLast = controller.currentIndex.value == controller.playlist.length - 1;
 
-      return GestureDetector(
-        onTap: () => _showPlayerCard(context),
-        child: Container(
-          height: 50,
-          width: double.infinity,
-          margin: EdgeInsets.only(
-            bottom: (cancelMargin ? 0 : 34) + MediaQuery.of(context).padding.bottom,
-          ),
+      // ===== 构建播放条主体 Widget =====
+      Widget buildBarContent() {
+        return Container(
+          height: barHeight + extraMargin,
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.zero,
             color: colorScheme.surface,
             boxShadow: [
               BoxShadow(
@@ -52,7 +56,7 @@ class MusicPlayerView extends StatelessWidget {
           ),
           child: Row(
             children: [
-              // ===== 封面图（圆角 + 阴影） =====
+              // ===== 封面图 =====
               Container(
                 width: 36,
                 height: 36,
@@ -93,8 +97,8 @@ class MusicPlayerView extends StatelessWidget {
                         ),
                 ),
               ),
-              const SizedBox(width: 10),
-              // ===== 歌曲名（跑马灯） =====
+              const SizedBox(width: 8),
+              // ===== 歌曲名（跑马灯），使用 Expanded 撑满剩余空间 =====
               Expanded(
                 child: MarqueeText(
                   controller.currentSongName,
@@ -107,14 +111,15 @@ class MusicPlayerView extends StatelessWidget {
                   spacing: 30,
                 ),
               ),
-              const SizedBox(width: 10),
-              // ===== 控制按钮 =====
+              const SizedBox(width: 8),
+              // ===== 控制按钮区 =====
               Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   // 收藏按钮
                   Obx(() {
                     final controller = Get.find<MusicPlayerController>();
-                    final _ = controller.favoriteVersion.value; // 依赖刷新
+                    final _ = controller.favoriteVersion.value;
                     final vodId = controller.currentVodId;
                     bool isFav = false;
                     if (vodId != null && vodId.isNotEmpty) {
@@ -122,11 +127,11 @@ class MusicPlayerView extends StatelessWidget {
                       isFav = favorites.any((item) => item['vod_id'] == vodId);
                     }
                     return IconButton(
-                      iconSize: 24,
+                      iconSize: 22,
                       padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(),
+                      constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
                       color: isFav ? colorScheme.primary : colorScheme.outline.withOpacity(0.6),
-                      icon: Icon(isFav ? Icons.favorite : Icons.favorite_border),
+                      icon: Icon(isFav ? Icons.favorite : Icons.favorite_border, size: 20),
                       onPressed: () async {
                         if (vodId == null || vodId.isEmpty) {
                           ToastUtils.show('无法获取歌曲ID');
@@ -161,18 +166,18 @@ class MusicPlayerView extends StatelessWidget {
                           GStorage.addFavorite(item);
                           ToastUtils.show('已收藏');
                         }
-                        controller.notifyFavoriteChanged(); // 刷新所有界面
+                        controller.notifyFavoriteChanged();
                       },
                     );
                   }),
-                  const SizedBox(width: 4),
-                  // 上一曲（第一首时置灰）
+                  const SizedBox(width: 2),
+                  // 上一曲
                   IconButton(
-                    iconSize: 28,
+                    iconSize: 24,
                     padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
+                    constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
                     color: isFirst ? colorScheme.outline.withOpacity(0.3) : colorScheme.primary,
-                    icon: const Icon(Icons.skip_previous),
+                    icon: const Icon(Icons.skip_previous, size: 22),
                     onPressed: isFirst
                         ? null
                         : () {
@@ -183,26 +188,26 @@ class MusicPlayerView extends StatelessWidget {
                             controller.playPrev();
                           },
                   ),
-                  const SizedBox(width: 4),
+                  const SizedBox(width: 2),
                   // 播放/暂停
-                  IconButton(
-                    iconSize: 32,
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
-                    color: colorScheme.primary,
-                    icon: controller.playing.value
-                        ? const Icon(Icons.pause_circle_filled)
-                        : const Icon(Icons.play_circle_filled),
-                    onPressed: controller.togglePlay,
-                  ),
-                  const SizedBox(width: 4),
-                  // 下一曲（最后一首时置灰）
                   IconButton(
                     iconSize: 28,
                     padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
+                    constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                    color: colorScheme.primary,
+                    icon: controller.playing.value
+                        ? const Icon(Icons.pause_circle_filled, size: 28)
+                        : const Icon(Icons.play_circle_filled, size: 28),
+                    onPressed: controller.togglePlay,
+                  ),
+                  const SizedBox(width: 2),
+                  // 下一曲
+                  IconButton(
+                    iconSize: 24,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
                     color: isLast ? colorScheme.outline.withOpacity(0.3) : colorScheme.primary,
-                    icon: const Icon(Icons.skip_next),
+                    icon: const Icon(Icons.skip_next, size: 22),
                     onPressed: isLast
                         ? null
                         : () {
@@ -213,21 +218,54 @@ class MusicPlayerView extends StatelessWidget {
                             controller.playNext();
                           },
                   ),
-                  const SizedBox(width: 4),
+                  const SizedBox(width: 2),
                   // 播放列表
                   IconButton(
-                    iconSize: 28,
+                    iconSize: 24,
                     padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
+                    constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
                     color: colorScheme.primary,
-                    icon: const Icon(Icons.queue_music),
+                    icon: const Icon(Icons.queue_music, size: 22),
                     onPressed: () => _showPlayerList(context),
                   ),
                 ],
               ),
             ],
           ),
-        ),
+        );
+      }
+
+      // ===== 根据是否有安全区域选择布局方式 =====
+      // 有底部安全区域（刘海屏）：使用 Stack 分层，背景延伸到底部
+      if (hasBottomSafeArea) {
+        return SizedBox(
+          height: totalHeight,
+          width: double.infinity,
+          child: Stack(
+            children: [
+              // 底层：纯色背景延伸到底部（不镂空）
+              Positioned.fill(
+                child: Container(
+                  color: colorScheme.surface,
+                ),
+              ),
+              // 上层：播放条主体（底部对齐到安全区域上边缘）
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: bottomPadding,
+                child: buildBarContent(),
+              ),
+            ],
+          ),
+        );
+      }
+
+      // 无底部安全区域（非刘海屏）：直接返回播放条主体，无背景延伸
+      return SizedBox(
+        height: totalHeight,
+        width: double.infinity,
+        child: buildBarContent(),
       );
     });
   }
