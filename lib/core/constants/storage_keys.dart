@@ -204,6 +204,10 @@ abstract final class SettingBoxKey {
   static const String mangaZoomLevel = 'manga_zoom_level';
   static const String mangaPageIndex = 'manga_page_index_';
   static const String mangaScrollOffset = 'manga_scroll_offset_';
+
+  // ===== 音乐播放器设置 =====
+  static const String musicPlayMode = 'music_play_mode';
+  static const String musicPlayerPosition = 'music_player_position';
 }
 
 abstract final class VideoBoxKey {

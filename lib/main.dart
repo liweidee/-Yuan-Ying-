@@ -9,6 +9,7 @@ import 'package:get/get.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:media_kit/media_kit.dart' as media_kit;
 import 'package:fvp/fvp.dart' as fvp;
+import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -45,6 +46,10 @@ import 'package:yuanying/t4/services/nodejs_spider_service.dart';
 import 'package:yuanying/services/catvod_log_service.dart';
 import 'package:yuanying/modules/novel/services/novel_tts_service.dart';
 import 'package:yuanying/modules/novel/services/novel_font_service.dart';
+
+import 'package:yuanying/modules/music/controllers/music_player_controller.dart';
+import 'package:audio_service/audio_service.dart';
+import 'package:yuanying/modules/music/services/audio_player_handler.dart';
 
 // ============================================================================
 // 全局变量
@@ -107,6 +112,15 @@ void main() async {
   // 第四步：媒体播放器初始化
   // ==========================================================================
   media_kit.MediaKit.ensureInitialized();
+
+  JustAudioMediaKit.ensureInitialized(
+    android: true,
+    iOS: true,
+    windows: true,
+    linux: true,
+    macOS: true,
+  );
+
   if (!kIsWeb) {
     fvp.registerWith(options: {
       /// 全平台接管核心
@@ -244,6 +258,26 @@ void main() async {
   Get.put(DebugLogService());
   Get.put(NovelTtsService(), permanent: true);
   await NovelFontService.init();
+
+
+  // 音乐播放器初始化
+  final musicController = Get.put(MusicPlayerController(), permanent: true);
+  await musicController.init();
+
+  // 初始化 AudioService（桌面端或全平台）
+  if (PlatformUtils.isDesktop) {
+    // 桌面端需要初始化 AudioService
+    // 注意：AudioService.init 必须在 runApp 之前调用
+    // 但需要在 Controller 初始化之后
+    await AudioService.init(
+      builder: () => musicController.handler,
+      config: AudioServiceConfig(
+        androidNotificationChannelId: 'com.yuanying.music.channel',
+        androidNotificationChannelName: '音乐播放',
+        androidNotificationOngoing: true,
+      ),
+    );
+  }
 
   // ==========================================================================
   // 第十步：启动应用

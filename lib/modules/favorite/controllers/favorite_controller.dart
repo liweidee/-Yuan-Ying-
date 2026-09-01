@@ -13,7 +13,7 @@ class FavoriteController extends GetxController {
   final _detailTypeMap = <String, String>{}.obs;
 
   // 过滤类型
-  final filterType = 'all'.obs;  // 'all', 'video', 'novel', 'manga'
+  final filterType = 'all'.obs;  // 'all', 'video', 'audio', 'novel', 'manga'
   final isLoading = false.obs;
 
   String? getConfigKey(String vodId) => _configKeyMap[vodId];
@@ -165,6 +165,40 @@ class FavoriteController extends GetxController {
       final ext = targetSite['ext'];
       if (ext is Map && ext['pwd'] != null) pwd = ext['pwd'].toString();
       Get.toNamed('/mangaDetail', arguments: {
+        'vodId': item.vodId,
+        'pwd': pwd,
+        'site': targetSite,
+      });
+      return;
+    }
+
+    // ---- 音频 ----
+    if (type == 'audio') {
+      final storedConfigKey = getConfigKey(item.vodId);
+      final currentConfigKey = _sourceManager.currentConfigKey.value;
+      if (storedConfigKey != null && storedConfigKey != currentConfigKey) {
+        SmartDialog.showToast('该音频所属配置接口 "$storedConfigKey" 已切换，请切换回该配置后重试');
+        return;
+      }
+      final siteKey = getSiteKey(item.vodId);
+      Map<String, dynamic>? targetSite;
+      if (siteKey != null && siteKey.isNotEmpty) {
+        try {
+          targetSite = _sourceManager.sites.firstWhere(
+            (s) => s['key']?.toString() == siteKey,
+          );
+        } catch (_) {
+          targetSite = null;
+        }
+      }
+      if (targetSite == null) {
+        SmartDialog.showToast('该记录已失效');
+        return;
+      }
+      String pwd = 'tinydust';
+      final ext = targetSite['ext'];
+      if (ext is Map && ext['pwd'] != null) pwd = ext['pwd'].toString();
+      Get.toNamed('/musicDetail', arguments: {
         'vodId': item.vodId,
         'pwd': pwd,
         'site': targetSite,

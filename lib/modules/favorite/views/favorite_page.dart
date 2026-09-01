@@ -73,6 +73,7 @@ class _FavoritePageState extends State<FavoritePage> {
     final filters = [
       {'value': 'all', 'label': '全部', 'icon': Icons.apps},
       {'value': 'video', 'label': '视频', 'icon': Icons.movie},
+      {'value': 'audio', 'label': '音频', 'icon': Icons.audiotrack},
       {'value': 'novel', 'label': '小说', 'icon': Icons.book},
       {'value': 'manga', 'label': '漫画', 'icon': Icons.auto_stories},
     ];

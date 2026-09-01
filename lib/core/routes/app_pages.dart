@@ -31,6 +31,8 @@ import 'package:yuanying/modules/novel/views/novel_reader_page.dart';
 import 'package:yuanying/modules/transfer/views/transfer_page.dart';
 import 'package:yuanying/modules/manga/views/manga_detail_page.dart';
 import 'package:yuanying/modules/manga/views/manga_reader_page.dart';
+import 'package:yuanying/modules/music/views/music_detail_page.dart';
+import 'package:yuanying/modules/music/widgets/player_card.dart';
 
 class AppPages {
   static const String initial = '/';
@@ -63,6 +65,8 @@ class AppPages {
   static const String transfer = '/transfer';
   static const String mangaDetail = '/mangaDetail';
   static const String mangaReader = '/mangaReader';
+  static const String musicDetail = '/musicDetail';
+  static const String musicPlayer = '/musicPlayer';
 
 
   static final List<GetPage> routes = [
@@ -107,5 +111,10 @@ class AppPages {
     GetPage(name: transfer, page: () => const TransferPage()),
     GetPage(name: mangaDetail, page: () => const MangaDetailPage()),
     GetPage(name: mangaReader, page: () => const MangaReaderPage()),
+    GetPage(name: musicDetail, page: () => const MusicDetailPage()),
+    GetPage(
+      name: musicPlayer,
+      page: () => const PlayerCard()
+    ),
   ];
 }

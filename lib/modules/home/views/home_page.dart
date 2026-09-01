@@ -29,6 +29,7 @@ import 'package:yuanying/models/common/bar_hide_type.dart';
 import 'package:yuanying/modules/common/base/common_page.dart';
 import 'package:yuanying/common/widgets/scroll_physics.dart';
 import 'package:yuanying/modules/webview/views/webview_page.dart';
+import 'package:yuanying/modules/music/controllers/music_player_controller.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -91,6 +92,23 @@ class _HomePageState extends CommonPageState<HomePage>
       );
       return;
     }
+
+    if (siteKey.contains('[听]') || siteName.contains('[听]')) {
+      Get.toNamed(
+        AppPages.musicDetail,
+        arguments: {
+          'vodId': item.vodId,
+          'pwd': pwd,
+          'site': site,
+        },
+      );
+      return;
+    }
+
+    // if (siteKey.contains('[听]') || siteName.contains('[听]')) {
+    //   _jumpToMusicPlayer(item, site, pwd);
+    //   return;
+    // }
 
     // 猫影视 nodejs_baseset 配置中心
     if (sourceManager.currentConfigType.value == 'catvod' && siteKey == 'nodejs_baseset' && item.vodId == 'config-center') {
@@ -167,6 +185,60 @@ class _HomePageState extends CommonPageState<HomePage>
       },
     );
   }
+
+  // 直接跳转音乐播放页（跳过详情页）
+  // void _jumpToMusicPlayer(VideoItem item, Map<String, dynamic>? site, String pwd) async {
+  //   // 显示加载提示
+  //   SmartDialog.showLoading(msg: '加载中...');
+  //   try {
+  //     final sourceManager = Get.find<SourceManager>();
+  //     final api = site != null
+  //         ? sourceManager.createIndependentService(site!)
+  //         : sourceManager.currentApiService;
+
+  //     // 1. 获取详情
+  //     final detail = await api.getDetail(vodId: item.vodId, pwd: pwd);
+  //     if (detail == null || detail.playSources.isEmpty) {
+  //       SmartDialog.dismiss();
+  //       SmartDialog.showToast('未获取到歌曲列表');
+  //       return;
+  //     }
+
+  //     final episodes = detail.playSources.first.episodes;
+  //     final sourceName = detail.playSources.first.name;
+
+  //     // 2. 设置播放器数据
+  //     final controller = Get.find<MusicPlayerController>();
+  //     controller.setPlaylist(episodes, initialIndex: 0, vodId: item.vodId);
+  //     controller.updateSongInfo(
+  //       cover: detail.vodPic,
+  //       author: detail.vodActor ?? '',
+  //       album: detail.vodName,
+  //     );
+
+  //     // 数据准备好后立即关闭 loading，不再等待播放地址加载
+  //     SmartDialog.dismiss();
+
+  //     // 3. 跳转到播放页（此时列表和封面已就绪）
+  //     Get.toNamed(AppPages.musicPlayer);
+
+  //     // 4. 异步获取播放地址并播放（不阻塞UI，避免loading延迟）
+  //     final firstEpisode = episodes.first;
+  //     final playUrl = await api.getPlayUrl(
+  //       playParams: firstEpisode.url,
+  //       flag: sourceName,
+  //       pwd: pwd,
+  //     );
+  //     if (playUrl != null) {
+  //       await controller.playWithUrl(playUrl, index: 0);
+  //     } else {
+  //       SmartDialog.showToast('获取播放地址失败');
+  //     }
+  //   } catch (e) {
+  //     SmartDialog.dismiss();
+  //     SmartDialog.showToast('加载失败：$e');
+  //   }
+  // }
 
   void _showPushDialog() {
     showModalBottomSheet(

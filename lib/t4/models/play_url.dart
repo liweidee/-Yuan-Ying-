@@ -6,6 +6,7 @@ class PlayUrl {
   final Map<String, String>? headers;
   final String? danmaku;
   final String? script;
+  final String? lrc;
 
   PlayUrl({
     required this.parse,
@@ -14,6 +15,7 @@ class PlayUrl {
     this.headers,
     this.danmaku,
     this.script,
+    this.lrc,
   });
 
   // 是否直链
@@ -42,6 +44,7 @@ class PlayUrl {
       headers: headers,
       danmaku: json['danmaku']?.toString(),
       script: json['script']?.toString(),
+      lrc: json['lrc']?.toString(),
     );
   }
 

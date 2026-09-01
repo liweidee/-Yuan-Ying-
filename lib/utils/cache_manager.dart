@@ -1,23 +1,22 @@
 import 'dart:io';
-import 'package:cached_network_image_ce/cached_network_image.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter_cache_manager/flutter_cache_manager.dart'; // DefaultCacheManager 在这里
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 import 'package:yuanying/modules/setting/models/setting_pref.dart';
 import 'package:yuanying/utils/platform_utils.dart';
 
 abstract final class CacheManager {
-  static late final DefaultCacheManager manager;
+  static final DefaultCacheManager manager = DefaultCacheManager();
 
-  static Future<void> ensureInitialized() =>
-      DefaultCacheManager.init().then((i) => manager = i);
+  static Future<void> ensureInitialized() async {
+    // DefaultCacheManager 构造函数直接返回单例，无需 init()
+  }
 
   /// 加载应用缓存总大小
   static Future<int> loadApplicationCache() async {
     try {
       final tempDirectory = await getTemporaryDirectory();
-      if (PlatformUtils.isDesktop) {
-        return manager.getTotalLength();
-      }
       if (tempDirectory.existsSync()) {
         return await _getTotalSizeOfFilesInDir(tempDirectory);
       }
@@ -25,23 +24,17 @@ abstract final class CacheManager {
     return 0;
   }
 
-  static Future<int> _getTotalSizeOfFilesInDir(Directory file) async {
+  static Future<int> _getTotalSizeOfFilesInDir(Directory dir) async {
     int total = 0;
-    await for (final child in file.list(recursive: false)) {
-      if (child is File) {
-        total += await child.length();
-      } else if (child is Directory) {
-        if (path.equals(child.path, manager.cacheDir)) {
-          total += manager.getTotalLength();
-        } else {
-          await for (final i in child.list(recursive: true)) {
-            if (i is File) {
-              total += await i.length();
-            }
-          }
+    try {
+      await for (final child in dir.list(recursive: false)) {
+        if (child is File) {
+          total += await child.length();
+        } else if (child is Directory) {
+          total += await _getTotalSizeOfFilesInDir(child);
         }
       }
-    }
+    } catch (_) {}
     return total;
   }
 
@@ -57,19 +50,17 @@ abstract final class CacheManager {
     return '${v.toStringAsFixed(2)}${unitArr[index]}';
   }
 
-  /// 清空 Library/Caches 目录及文件缓存
+  /// 清空缓存
   static Future<void> clearLibraryCache() async {
     try {
       await manager.emptyCache();
-      if (PlatformUtils.isDesktop) return;
 
-      final tempDirectory = await getTemporaryDirectory();
-      if (tempDirectory.existsSync()) {
-        await for (final file in tempDirectory.list(recursive: false)) {
-          if (file is Directory && path.equals(file.path, manager.cacheDir)) {
-            continue;
+      if (!PlatformUtils.isDesktop) {
+        final tempDirectory = await getTemporaryDirectory();
+        if (tempDirectory.existsSync()) {
+          await for (final file in tempDirectory.list(recursive: false)) {
+            await file.delete(recursive: true);
           }
-          await file.delete(recursive: true);
         }
       }
     } catch (_) {}

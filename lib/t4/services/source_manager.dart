@@ -98,6 +98,7 @@ class SourceManager extends GetxController {
     final name = site['name']?.toString() ?? '';
     if (key.contains('[书]') || name.contains('[书]')) return DetailType.novel;
     if (key.contains('[画]') || name.contains('[画]')) return DetailType.manga;
+    if (key.contains('[听]') || name.contains('[听]')) return DetailType.audio;
     return DetailType.video;
   }
 
