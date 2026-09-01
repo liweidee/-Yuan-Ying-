@@ -111,6 +111,10 @@ class NovelDetailController extends GetxController {
     final index = chapterIndex ?? savedChapter.value;
     if (index < 0 || index >= episodes.length) return;
 
+    // 先尝试高亮（能亮就亮，不亮也不影响）
+    savedChapter.value = index;
+    hasProgress.value = true;
+
     _addToHistory(index);
 
     Get.toNamed(

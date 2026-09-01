@@ -126,6 +126,11 @@ class MusicPlayerController extends GetxController {
   // ===== 播放列表 =====
   void setPlaylist(List<Episode> episodes, {int initialIndex = 0, String? vodId}) {
     if (episodes.isEmpty) return;
+
+    // ===== 重置跳过片头片尾（新播放列表生命周期） =====
+    skipStartDuration.value = 0;
+    skipEndDuration.value = 0;
+  
     playlist.value = episodes;
     _currentVodId = vodId;
 

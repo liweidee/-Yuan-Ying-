@@ -139,7 +139,7 @@ class PlayerCardState extends State<PlayerCard> with SingleTickerProviderStateMi
     );
   }
 
-  // ===== 定时弹窗（一级，底部） =====
+  // ===== 定时弹窗 =====
   void _showTimerPicker(BuildContext context) {
     final controller = Get.find<MusicPlayerController>();
     final colorScheme = Theme.of(context).colorScheme;
@@ -162,49 +162,47 @@ class PlayerCardState extends State<PlayerCard> with SingleTickerProviderStateMi
       backgroundColor: Colors.transparent,
       builder: (context) {
         return Container(
-          margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          child: Material(
+          decoration: BoxDecoration(
             color: colorScheme.surface,
-            borderRadius: const BorderRadius.all(Radius.circular(12)),
-            clipBehavior: Clip.hardEdge,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const SizedBox(height: 8),
-                const Center(
-                  child: Text('定时关闭', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
-                ),
-                const SizedBox(height: 4),
-                ...presetOptions.map(
-                  (option) => ListTile(
-                    dense: true,
-                    leading: Icon(option['icon'] as IconData, size: 20, color: colorScheme.primary),
-                    onTap: () {
-                      Navigator.pop(context);
-                      controller.setTimer(option['value'] as int);
-                    },
-                    title: Text(option['label'] as String, style: const TextStyle(fontSize: 14)),
-                    trailing: Obx(() {
-                      final current = controller.timerMinutes.value;
-                      final selected = (current == option['value']);
-                      return selected
-                          ? Icon(Icons.done, size: 20, color: colorScheme.primary)
-                          : const SizedBox.shrink();
-                    }),
-                  ),
-                ),
-                ListTile(
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(16)), // 只保留顶部圆角
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 8),
+              const Center(
+                child: Text('定时关闭', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
+              ),
+              const SizedBox(height: 4),
+              ...presetOptions.map(
+                (option) => ListTile(
                   dense: true,
-                  leading: Icon(Icons.edit, size: 20, color: colorScheme.primary),
+                  leading: Icon(option['icon'] as IconData, size: 20, color: colorScheme.primary),
                   onTap: () {
                     Navigator.pop(context);
-                    _showCustomTimerPicker(context);
+                    controller.setTimer(option['value'] as int);
                   },
-                  title: const Text('自定义', style: TextStyle(fontSize: 14)),
+                  title: Text(option['label'] as String, style: const TextStyle(fontSize: 14)),
+                  trailing: Obx(() {
+                    final current = controller.timerMinutes.value;
+                    final selected = (current == option['value']);
+                    return selected
+                        ? Icon(Icons.done, size: 20, color: colorScheme.primary)
+                        : const SizedBox.shrink();
+                  }),
                 ),
-                const SizedBox(height: 4),
-              ],
-            ),
+              ),
+              ListTile(
+                dense: true,
+                leading: Icon(Icons.edit, size: 20, color: colorScheme.primary),
+                onTap: () {
+                  Navigator.pop(context);
+                  _showCustomTimerPicker(context);
+                },
+                title: const Text('自定义', style: TextStyle(fontSize: 14)),
+              ),
+              const SizedBox(height: 4),
+            ],
           ),
         );
       },

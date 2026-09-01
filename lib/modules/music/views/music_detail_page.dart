@@ -56,6 +56,10 @@ class _MusicDetailPageState extends State<MusicDetailPage> {
 
   // ===== 加载详情（保持状态逻辑） =====
   Future<void> _loadDetail() async {
+    // ===== 重置跳过片头片尾（新详情页生命周期） =====
+    _controller.skipStartDuration.value = 0;
+    _controller.skipEndDuration.value = 0;
+  
     try {
       // 获取当前站点名称（爬虫源）
       final sourceManager = Get.find<SourceManager>();
