@@ -35,7 +35,9 @@ class MusicPlayerView extends StatelessWidget {
         child: Container(
           height: 50,
           width: double.infinity,
-          margin: EdgeInsets.only(bottom: cancelMargin ? 0 : 34),
+          margin: EdgeInsets.only(
+            bottom: (cancelMargin ? 0 : 34) + MediaQuery.of(context).padding.bottom,
+          ),
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.zero,
