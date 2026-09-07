@@ -20,6 +20,8 @@ class Site {
   // 关联的配置包 key（仅本地缓存配置使用）
   final String? configPackageKey;
 
+  final String? zipFilePath;
+
   Site({
     required this.key,
     required this.name,
@@ -35,11 +37,13 @@ class Site {
     this.source,
     this.configPackageKey,
     this.configType = 'tvbox',  // 默认 TVBox
+    this.zipFilePath,
   });
 
   bool get isLocalConfig => source == 'local';
   bool get isLocalFile => source == 'local_file';
   bool get isCatVodConfig => configType == 'catvod';
+  bool get isCatVodLocalZip => source == 'catvod_local_zip' && zipFilePath != null;
 
   factory Site.fromJson(Map<String, dynamic> json) {
     return Site(
@@ -57,6 +61,7 @@ class Site {
       source: json['_source']?.toString(),
       configPackageKey: json['_configKey']?.toString(),
       configType: json['configType']?.toString() ?? 'tvbox',  // 兼容旧数据
+      zipFilePath: json['zipFilePath']?.toString(),
     );
   }
 
@@ -76,6 +81,7 @@ class Site {
       if (source != null) '_source': source,
       if (configPackageKey != null) '_configKey': configPackageKey,
       'configType': configType,
+      if (zipFilePath != null) 'zipFilePath': zipFilePath,
     };
   }
 }

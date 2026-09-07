@@ -4,6 +4,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:get/get.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:flutter/foundation.dart';
 import 'package:yuanying/utils/platform_utils.dart';
 import 'package:yuanying/services/catvod_log_service.dart';
@@ -245,6 +246,46 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
     } catch (e) {
       _log('loadSourceFromURL error: $e');
       _lastLoadedUrl = previousUrl;
+      return false;
+    }
+  }
+
+  /// 获取默认蜘蛛目录
+  Future<String> getDefaultSourcePath() async {
+    final dir = await getApplicationDocumentsDirectory();
+    return '${dir.path}/nodejs-project/src/source';
+  }
+
+  /// 强制重新加载固定目录中的蜘蛛（不下载，不校验 MD5）
+  /// 用于本地 ZIP 切换后的刷新
+  Future<bool> reloadLocalSpider() async {
+    if (_managementPort <= 0) {
+      await initialize();
+      if (_managementPort <= 0) {
+        _log('❌ reloadLocalSpider: managementPort 不可用');
+        return false;
+      }
+    }
+
+    final sourcePath = await getDefaultSourcePath();
+    _log('🔄 强制重载本地蜘蛛，路径: $sourcePath');
+
+    final url = 'http://127.0.0.1:$_managementPort/source/loadPath';
+    try {
+      final response = await http.post(
+        Uri.parse(url),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'path': sourcePath}),
+      ).timeout(const Duration(seconds: 10));
+      if (response.statusCode == 200) {
+        _log('✅ 本地蜘蛛重载成功');
+        return true;
+      } else {
+        _log('❌ 重载失败，状态码: ${response.statusCode}');
+        return false;
+      }
+    } catch (e) {
+      _log('❌ reloadLocalSpider 异常: $e');
       return false;
     }
   }

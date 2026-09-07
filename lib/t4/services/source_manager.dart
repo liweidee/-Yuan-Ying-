@@ -2,6 +2,9 @@ import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/widgets.dart';
 import 'package:get/get.dart';
+import 'package:archive/archive.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:yuanying/t4/models/site.dart';
 import 'package:yuanying/t4/services/t4_api_service.dart';
 import 'package:yuanying/modules/home/controllers/home_controller.dart';
 import 'package:yuanying/utils/storage.dart';
@@ -372,6 +375,39 @@ class SourceManager extends GetxController {
     }
   }
 
+  /// 导入 CatVod 本地 ZIP 配置（仅存储路径，不复制文件）
+  Future<void> importCatvodZip(String name, String zipFilePath) async {
+    // 1. 检查文件是否存在
+    final zipFile = File(zipFilePath);
+    if (!await zipFile.exists()) {
+      throw Exception('ZIP 文件不存在: $zipFilePath');
+    }
+
+    // 2. 生成唯一配置 Key
+    final key = 'catvod_${DateTime.now().millisecondsSinceEpoch}';
+
+    // 3. 创建 Site 配置（直接存储原始路径）
+    final newSite = Site(
+      key: key,
+      name: name,
+      api: 'local_zip', // 占位
+      searchable: 1,
+      filterable: 1,
+      quickSearch: 1,
+      lang: 'ds',
+      type: '3',
+      source: 'catvod_local_zip',
+      configType: 'catvod',
+      zipFilePath: zipFilePath,
+    );
+
+    GStorage.addCustomSite(newSite.toJson());
+    // 刷新列表
+    await loadConfig();
+    // 自动切换到该配置
+    await switchConfig(key);
+  }
+
   Future<void> _loadCatVodConfig(String configUrl, {int? loadId}) async {
     final currentLoadId = loadId ?? ++_configLoadId;
     try {
@@ -390,19 +426,19 @@ class SourceManager extends GetxController {
       }
       if (currentLoadId != _configLoadId) return;
 
-      // 复用判断：服务活着且源相同，跳过加载
-      bool needLoadSource = true;
-      if (nodejs.spiderPort > 0) {
-        final alive = await nodejs.isServiceAlive();
-        if (alive && nodejs.lastLoadedUrl == configUrl) {
-          print('[SourceManager] 服务存活且源未变，跳过加载源，直接复用');
-          needLoadSource = false;
-        }
-      }
+      // 本地 ZIP 分支
+      final site = currentSite.value;
+      final sourceType = site?['_source']?.toString() ?? 'remote';
+      final zipPath = site?['zipFilePath']?.toString();
 
-      if (needLoadSource) {
-        final success = await nodejs.loadSourceFromURL(configUrl);
-        if (!success) {
+      if (sourceType == 'catvod_local_zip' && zipPath != null && zipPath.isNotEmpty) {
+        print('检测到本地 CatVod ZIP，解压并覆盖到固定目录');
+        print('ZIP 文件路径: $zipPath');
+
+        // 检查 ZIP 文件是否存在（与 TVBox 本地文件行为一致）
+        final zipFile = File(zipPath);
+        if (!await zipFile.exists()) {
+          print('ZIP 文件不存在: $zipPath');
           configLoadError.value = true;
           if (currentLoadId == _configLoadId) {
             remoteSites.clear();
@@ -410,20 +446,91 @@ class SourceManager extends GetxController {
           }
           return;
         }
+
+        final sourceDirPath = await nodejs.getDefaultSourcePath();
+        final sourceDir = Directory(sourceDirPath);
+        await sourceDir.create(recursive: true); // 确保目录存在
+
+        try {
+          // 读取 ZIP 并解压（覆盖写入）
+          final zipBytes = await zipFile.readAsBytes();
+          final archive = ZipDecoder().decodeBytes(zipBytes);
+
+          for (final file in archive) {
+            if (file.isFile) {
+              final data = file.content as List<int>;
+              final targetPath = '${sourceDir.path}/${file.name}';
+              final targetFile = File(targetPath);
+              await targetFile.parent.create(recursive: true);
+              await targetFile.writeAsBytes(data, flush: true);
+            }
+          }
+          print('解压完成，共 ${archive.files.length} 个文件');
+
+          // 检查 index.js 是否存在
+          final indexFile = File('${sourceDir.path}/index.js');
+          if (!await indexFile.exists()) {
+            throw Exception('ZIP 包中未找到 index.js');
+          }
+
+          // 删除旧的 MD5 缓存（防止旧 MD5 干扰）
+          final md5File = File('${sourceDir.path}/index.js.md5');
+          if (await md5File.exists()) {
+            await md5File.delete();
+            print('已删除旧的 .md5 缓存');
+          }
+
+          // 通知 Node.js 重新加载
+          final loaded = await nodejs.reloadLocalSpider();
+          if (!loaded) {
+            throw Exception('Node.js 重载蜘蛛失败');
+          }
+        } catch (e) {
+          print('解压或加载失败: $e');
+          configLoadError.value = true;
+          if (currentLoadId == _configLoadId) {
+            remoteSites.clear();
+            remoteParses.clear();
+          }
+          return;
+        }
+      } else {
+        // 复用判断：服务活着且源相同，跳过加载
+        bool needLoadSource = true;
+        if (nodejs.spiderPort > 0) {
+          final alive = await nodejs.isServiceAlive();
+          if (alive && nodejs.lastLoadedUrl == configUrl) {
+            print('[SourceManager] 服务存活且源未变，跳过加载源，直接复用');
+            needLoadSource = false;
+          }
+        }
+
+        if (needLoadSource) {
+          final success = await nodejs.loadSourceFromURL(configUrl);
+          if (!success) {
+            configLoadError.value = true;
+            if (currentLoadId == _configLoadId) {
+              remoteSites.clear();
+              remoteParses.clear();
+            }
+            return;
+          }
+          if (currentLoadId != _configLoadId) return;
+        }
+
+        await nodejs.waitForSpiderPort();
+        if (nodejs.spiderPort == 0) {
+          configLoadError.value = true;
+          print('[SourceManager] spiderPort 未就绪，无法获取配置');
+          if (currentLoadId == _configLoadId) {
+            remoteSites.clear();
+          }
+          return;
+        }
         if (currentLoadId != _configLoadId) return;
       }
 
-      await nodejs.waitForSpiderPort();
-      if (nodejs.spiderPort == 0) {
-        configLoadError.value = true;
-        print('[SourceManager] spiderPort 未就绪，无法获取配置');
-        if (currentLoadId == _configLoadId) {
-          remoteSites.clear();
-        }
-        return;
-      }
-      if (currentLoadId != _configLoadId) return;
-
+      // 统一逻辑：获取配置列表（远程与本地共用）
       final result = await nodejs.getCatConfig();
       if (currentLoadId != _configLoadId) return;
 
@@ -455,7 +562,7 @@ class SourceManager extends GetxController {
     } catch (e) {
       configLoadError.value = true;
       print('[SourceManager] 加载猫影视配置失败: $e');
-      if (currentLoadId == _configLoadId) {
+      if (loadId == null || loadId == _configLoadId) {
         remoteSites.clear();
         remoteParses.clear();
       }

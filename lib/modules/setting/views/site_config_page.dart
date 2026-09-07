@@ -868,12 +868,8 @@ class SiteConfigPage extends StatelessWidget {
   }) {
     final nameController = TextEditingController(text: initialName ?? '');
     final apiController = TextEditingController(text: initialApi ?? '');
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
 
-    String selectedConfigType = 'tvbox';
-    final bool isDesktop = PlatformUtils.isDesktop;
-
+    // 从外部传入的 API 如果是本地文件路径，则标记为待处理文件
     if (initialApi != null && initialApi.isNotEmpty && File(initialApi).existsSync()) {
       _pendingFilePath = initialApi;
       _pendingConfigPackage = null;
@@ -882,188 +878,324 @@ class SiteConfigPage extends StatelessWidget {
       _pendingConfigPackage = null;
     }
 
+    // 新增：CatVod ZIP 相关状态
+    String selectedConfigType = 'tvbox';
+    String? pendingZipPath;
+    String? pendingZipName;
+
+    // 检查外部传入的是否为 ZIP 文件（用于恢复原有逻辑）
+    if (initialApi != null && initialApi.isNotEmpty && initialApi.endsWith('.zip')) {
+      final zipFile = File(initialApi);
+      if (zipFile.existsSync()) {
+        pendingZipPath = initialApi;
+        pendingZipName = initialApi.split('/').last;
+        // 如果名称未手动指定，从文件名提取
+        if ((initialName ?? '').isEmpty) {
+          nameController.text = pendingZipName!.replaceAll('.zip', '');
+        }
+        selectedConfigType = 'catvod';
+      }
+    }
+
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (dialogContext) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        backgroundColor: colorScheme.surface,
-        child: Container(
-          padding: const EdgeInsets.all(24),
-          constraints: const BoxConstraints(maxWidth: 400),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                initialApi != null && File(initialApi).existsSync() ? '添加本地文件配置' : '新增接口',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: colorScheme.onSurface),
-              ),
-              const SizedBox(height: 20),
-              TextField(
-                controller: nameController,
-                style: TextStyle(fontSize: 14, color: colorScheme.onSurface),
-                decoration: InputDecoration(
-                  labelText: '线路名称',
-                  labelStyle: TextStyle(fontSize: 13, color: colorScheme.outline),
-                  hintText: '请输入线路名称',
-                  hintStyle: TextStyle(fontSize: 13, color: colorScheme.outline.withOpacity(0.5)),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: BorderSide(color: colorScheme.outline.withOpacity(0.2)),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: BorderSide(color: colorScheme.primary, width: 1.5),
-                  ),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                ),
-              ),
-              const SizedBox(height: 14),
-              DropdownButtonFormField<String>(
-                value: selectedConfigType,
-                decoration: InputDecoration(
-                  labelText: '接口类型',
-                  labelStyle: TextStyle(fontSize: 13, color: colorScheme.outline),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: BorderSide(color: colorScheme.outline.withOpacity(0.2)),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: BorderSide(color: colorScheme.outline.withOpacity(0.2)),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: BorderSide(color: colorScheme.primary, width: 1.5),
-                  ),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                ),
-                dropdownColor: colorScheme.surface,
-                menuMaxHeight: 120,
-                iconSize: 20,
-                isExpanded: true,
-                style: TextStyle(fontSize: 14, color: colorScheme.onSurface),
-                items: [
-                  const DropdownMenuItem(
-                    value: 'tvbox',
-                    child: Text('TVBox', style: TextStyle(fontSize: 14)),
-                  ),
-                  if (!PlatformUtils.isDesktop)
-                    const DropdownMenuItem(
-                      value: 'catvod',
-                      child: Text('CatVod (猫影视)', style: TextStyle(fontSize: 14)),
-                    ),
-                ],
-                onChanged: (value) {
-                  if (value != null) selectedConfigType = value;
-                },
-              ),
-              const SizedBox(height: 14),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setState) {
+          final theme = Theme.of(context);
+          final colorScheme = theme.colorScheme;
+
+          return Dialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            backgroundColor: colorScheme.surface,
+            child: Container(
+              padding: const EdgeInsets.all(24),
+              constraints: const BoxConstraints(maxWidth: 400),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(
-                    child: TextField(
-                      controller: apiController,
-                      readOnly: _pendingFilePath != null,
-                      style: TextStyle(fontSize: 14, color: colorScheme.onSurface),
-                      decoration: InputDecoration(
-                        labelText: _pendingFilePath != null ? '配置文件路径' : '接口链接',
-                        labelStyle: TextStyle(fontSize: 13, color: colorScheme.outline),
-                        hintText: _pendingFilePath != null ? '' : '点击右侧文件夹选择配置文件',
-                        hintStyle: TextStyle(fontSize: 13, color: colorScheme.outline.withOpacity(0.5)),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10),
-                          borderSide: BorderSide(color: colorScheme.outline.withOpacity(0.2)),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10),
-                          borderSide: BorderSide(color: colorScheme.primary, width: 1.5),
-                        ),
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                      ),
+                  Text(
+                    initialApi != null &&
+                            initialApi.isNotEmpty &&
+                            File(initialApi).existsSync()
+                        ? '添加本地文件配置'
+                        : '新增接口',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                      color: colorScheme.onSurface,
                     ),
                   ),
-                  if (_pendingFilePath == null) ...[
-                    const SizedBox(width: 10),
-                    GestureDetector(
-                      onTap: () => _pickConfigFile(context, nameController, apiController),
-                      child: Container(
-                        width: 36,
-                        height: 36,
-                        decoration: BoxDecoration(
-                          color: colorScheme.primary,
-                          shape: BoxShape.circle,
+                  const SizedBox(height: 20),
+                  // ---- 线路名称 ----
+                  TextField(
+                    controller: nameController,
+                    style: TextStyle(fontSize: 14, color: colorScheme.onSurface),
+                    decoration: InputDecoration(
+                      labelText: '线路名称',
+                      labelStyle: TextStyle(fontSize: 13, color: colorScheme.outline),
+                      hintText: '请输入线路名称',
+                      hintStyle: TextStyle(
+                        fontSize: 13,
+                        color: colorScheme.outline.withOpacity(0.5),
+                      ),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: BorderSide(color: colorScheme.outline.withOpacity(0.2)),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: BorderSide(color: colorScheme.primary, width: 1.5),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  // ---- 接口类型下拉 ----
+                  DropdownButtonFormField<String>(
+                    value: selectedConfigType,
+                    decoration: InputDecoration(
+                      labelText: '接口类型',
+                      labelStyle: TextStyle(fontSize: 13, color: colorScheme.outline),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: BorderSide(color: colorScheme.outline.withOpacity(0.2)),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: BorderSide(color: colorScheme.outline.withOpacity(0.2)),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: BorderSide(color: colorScheme.primary, width: 1.5),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                    ),
+                    dropdownColor: colorScheme.surface,
+                    menuMaxHeight: 120,
+                    iconSize: 20,
+                    isExpanded: true,
+                    style: TextStyle(fontSize: 14, color: colorScheme.onSurface),
+                    items: [
+                      const DropdownMenuItem(value: 'tvbox', child: Text('TVBox', style: TextStyle(fontSize: 14))),
+                      if (!PlatformUtils.isDesktop)
+                        const DropdownMenuItem(value: 'catvod', child: Text('CatVod (猫影视)', style: TextStyle(fontSize: 14))),
+                    ],
+                    onChanged: (value) {
+                      setState(() {
+                        selectedConfigType = value!;
+                        // 切换类型时清空之前选择的文件状态
+                        if (value == 'tvbox') {
+                          pendingZipPath = null;
+                          pendingZipName = null;
+                          // 如果有待处理的 ZIP 文件路径，切换回 TVBox 时保留 apiController
+                          // 但允许用户手动修改
+                        } else {
+                          // 切到 CatVod 时，如果 apiController 有值且是 zip 路径，自动识别
+                          final api = apiController.text.trim();
+                          if (api.isNotEmpty && api.endsWith('.zip') && File(api).existsSync()) {
+                            pendingZipPath = api;
+                            pendingZipName = api.split('/').last;
+                          }
+                        }
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 14),
+                  // ---- 根据类型显示不同输入 ----
+                  if (selectedConfigType == 'tvbox') ...[
+                    // TVBox：输入框 + 选择文件按钮（json/txt）
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: apiController,
+                            readOnly: _pendingFilePath != null,
+                            style: TextStyle(fontSize: 14, color: colorScheme.onSurface),
+                            decoration: InputDecoration(
+                              labelText: _pendingFilePath != null ? '配置文件路径' : '接口链接',
+                              labelStyle: TextStyle(fontSize: 13, color: colorScheme.outline),
+                              hintText: _pendingFilePath != null ? '' : '点击右侧文件夹选择配置文件',
+                              hintStyle: TextStyle(
+                                fontSize: 13,
+                                color: colorScheme.outline.withOpacity(0.5),
+                              ),
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(10),
+                                borderSide: BorderSide(color: colorScheme.outline.withOpacity(0.2)),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(10),
+                                borderSide: BorderSide(color: colorScheme.primary, width: 1.5),
+                              ),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                            ),
+                          ),
                         ),
-                        child: Icon(
-                          Icons.folder_open_outlined,
-                          size: 18,
-                          color: colorScheme.onPrimary,
+                        if (_pendingFilePath == null) ...[
+                          const SizedBox(width: 10),
+                          GestureDetector(
+                            onTap: () => _pickConfigFile(context, nameController, apiController),
+                            child: Container(
+                              width: 36,
+                              height: 36,
+                              decoration: BoxDecoration(
+                                color: colorScheme.primary,
+                                shape: BoxShape.circle,
+                              ),
+                              child: Icon(
+                                Icons.folder_open_outlined,
+                                size: 18,
+                                color: colorScheme.onPrimary,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ] else if (selectedConfigType == 'catvod') ...[
+                    // CatVod：显示选择的 ZIP 文件 + 选择按钮
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            pendingZipName ?? '未选择 ZIP 文件',
+                            style: TextStyle(fontSize: 14, color: colorScheme.outline),
+                          ),
                         ),
+                        IconButton(
+                          icon: Icon(Icons.folder_zip, color: colorScheme.primary),
+                          onPressed: () async {
+                            final result = await FilePicker.pickFiles(
+                              type: FileType.custom,
+                              allowedExtensions: ['zip'],
+                            );
+                            if (result != null) {
+                              final file = result.files.first;
+                              if (file.path == null) {
+                                SmartDialog.showToast('无法获取文件路径');
+                                return;
+                              }
+                              setState(() {
+                                pendingZipPath = file.path!;
+                                pendingZipName = file.name;
+                                if (nameController.text.isEmpty) {
+                                  nameController.text = file.name.replaceAll('.zip', '');
+                                }
+                              });
+                              SmartDialog.showToast('已选择 ZIP 包: ${file.name}');
+                            }
+                          },
+                        ),
+                      ],
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        'CatVod 本地模式仅支持 ZIP 导入，远程 URL 请使用 TVBox 类型。',
+                        style: TextStyle(fontSize: 12, color: colorScheme.outline),
                       ),
                     ),
                   ],
+                  const SizedBox(height: 24),
+                  // ---- 确定/取消按钮 ----
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      GestureDetector(
+                        onTap: () => Navigator.pop(dialogContext),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          child: Text(
+                            '取消',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                              color: colorScheme.outline,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      GestureDetector(
+                        onTap: () async {
+                          final name = nameController.text.trim();
+                          if (name.isEmpty) {
+                            SmartDialog.showToast('请输入线路名称');
+                            return;
+                          }
+
+                          // ---- CatVod ZIP 分支 ----
+                          if (selectedConfigType == 'catvod') {
+                            if (pendingZipPath != null && pendingZipPath!.isNotEmpty) {
+                              try {
+                                await controller.sourceManager.importCatvodZip(name, pendingZipPath!);
+                                pendingZipPath = null;
+                                pendingZipName = null;
+                                SmartDialog.showToast('CatVod 本地配置导入成功');
+                              } catch (e) {
+                                SmartDialog.showToast('导入失败: $e');
+                                return;
+                              }
+                            } else {
+                              SmartDialog.showToast('请选择 ZIP 文件');
+                              return;
+                            }
+                          } else {
+                            // ---- TVBox 分支（保留原有逻辑） ----
+                            if (_pendingFilePath != null) {
+                              // 本地文件配置
+                              controller.addLocalFileSite(name, _pendingFilePath!);
+                              _pendingFilePath = null;
+                              _pendingFileName = null;
+                              SmartDialog.showToast('本地文件配置添加成功');
+                            } else if (_pendingConfigPackage != null) {
+                              // 从本地文件导入的配置包
+                              final fileName = _pendingFileName ??
+                                  (apiController.text.trim().isEmpty
+                                      ? 'config.json'
+                                      : apiController.text.trim());
+                              controller.addLocalConfig(name, fileName, _pendingConfigPackage!);
+                              _pendingConfigPackage = null;
+                              _pendingFileName = null;
+                              SmartDialog.showToast('本地配置添加成功');
+                            } else {
+                              final api = apiController.text.trim();
+                              if (api.isEmpty) {
+                                SmartDialog.showToast('请输入接口链接');
+                                return;
+                              }
+                              controller.addSite(name, api, configType: 'tvbox');
+                              SmartDialog.showToast('接口添加成功');
+                            }
+                          }
+
+                          Navigator.pop(dialogContext);
+                          controller.loadSites();
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          child: Text(
+                            '确定',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: colorScheme.primary,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ],
               ),
-              const SizedBox(height: 24),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  GestureDetector(
-                    onTap: () => Navigator.pop(dialogContext),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      child: Text('取消', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: colorScheme.outline)),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  GestureDetector(
-                    onTap: () {
-                      final name = nameController.text.trim();
-                      if (name.isEmpty) {
-                        SmartDialog.showToast('请输入线路名称');
-                        return;
-                      }
-
-                      if (_pendingFilePath != null) {
-                        // 本地文件配置：直接添加文件路径
-                        controller.addLocalFileSite(name, _pendingFilePath!);
-                        _pendingFilePath = null;
-                        _pendingFileName = null;
-                        SmartDialog.showToast('本地文件配置添加成功');
-                      } else if (_pendingConfigPackage != null) {
-                        // 从本地文件导入的配置包：作为本地缓存配置添加
-                        final fileName = _pendingFileName ?? (apiController.text.trim().isEmpty ? 'config.json' : apiController.text.trim());
-                        controller.addLocalConfig(name, fileName, _pendingConfigPackage!);
-                        _pendingConfigPackage = null;
-                        _pendingFileName = null;
-                        SmartDialog.showToast('本地配置添加成功');
-                      } else {
-                        final api = apiController.text.trim();
-                        if (api.isEmpty) {
-                          SmartDialog.showToast('请输入接口链接');
-                          return;
-                        }
-                        controller.addSite(name, api, configType: selectedConfigType);
-                        SmartDialog.showToast('接口添加成功');
-                      }
-
-                      Navigator.pop(dialogContext);
-                      controller.loadSites();
-                    },
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      child: Text('确定', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: colorScheme.primary)),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
+            ),
+          );
+        },
       ),
     );
   }

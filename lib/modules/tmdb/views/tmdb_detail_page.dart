@@ -44,6 +44,8 @@ class _TmdbDetailPageState extends State<TmdbDetailPage> {
   Map<String, dynamic>? _tmdbData;
   String? _mediaType;
 
+  bool _overviewExpanded = false;
+
   // 详情字段
   String? _title;
   String? _originalTitle;
@@ -1301,13 +1303,39 @@ class _TmdbDetailPageState extends State<TmdbDetailPage> {
                     ),
                   ),
                   const SizedBox(height: 6),
-                  Text(
-                    _overview!,
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: colorScheme.onSurfaceVariant,
-                      height: 1.6,
-                    ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _overview!,
+                        maxLines: _overviewExpanded ? null : 3,
+                        overflow: _overviewExpanded ? null : TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: colorScheme.onSurfaceVariant,
+                          height: 1.6,
+                        ),
+                      ),
+                      if (_overview!.length > 150)
+                        GestureDetector(
+                          onTap: () {
+                            setState(() {
+                              _overviewExpanded = !_overviewExpanded;
+                            });
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Text(
+                              _overviewExpanded ? '收起' : '展开全部',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: colorScheme.primary,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                   const SizedBox(height: 16),
                 ],

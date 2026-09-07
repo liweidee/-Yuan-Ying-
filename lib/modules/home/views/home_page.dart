@@ -82,7 +82,7 @@ class _HomePageState extends CommonPageState<HomePage>
       : 'tinydust';
     
     // ---- 小说判断（优先） ----
-    if (siteKey.contains('[书]') || siteName.contains('[书]')) {
+    if (siteKey.contains('[书]') || siteName.contains('[书]') || siteName.contains('小说')) {
       Get.toNamed(
         '/novelDetail',
         arguments: {
@@ -107,7 +107,7 @@ class _HomePageState extends CommonPageState<HomePage>
       return;
     }
 
-    if (siteKey.contains('[听]') || siteName.contains('[听]')) {
+    if (siteKey.contains('[听]') || siteName.contains('[听]') || siteName.contains('音乐') || siteName.contains('有声') || siteName.contains('听书')) {
       Get.toNamed(
         AppPages.musicDetail,
         arguments: {
