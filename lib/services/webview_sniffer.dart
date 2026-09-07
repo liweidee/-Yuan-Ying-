@@ -40,8 +40,11 @@ class WebViewSniffer {
 
     bool isVideoUrl(String resUrl) {
       final lower = resUrl.toLowerCase();
+      // 排除干扰项
       if (lower.contains('.ts') || lower.contains('.m4s') || lower.contains('.js') || lower.contains('.css')) return false;
+      // 扩展视频特征
       return lower.contains('.m3u8') || lower.contains('.mp4') || lower.contains('.flv') ||
+          lower.contains('.mpd') || lower.contains('.m4v') ||
           lower.contains('videoplayback') || lower.contains('video/') || lower.contains('stream/');
     }
 
@@ -75,17 +78,22 @@ class WebViewSniffer {
                   clearCache: false,
                   transparentBackground: true,
                   useShouldOverrideUrlLoading: true,
+                  useOnLoadResource: true,
+                  // ===== iOS 优化：开启 Ajax 和 Fetch 拦截 =====
+                  useShouldInterceptAjaxRequest: true,
+                  useShouldInterceptFetchRequest: true,
+                  interceptOnlyAsyncAjaxRequests: false, // 也拦截同步 Ajax
                 ),
                 onWebViewCreated: (controller) {
                   webViewController = controller;
-                  // 注册 JS 回调处理
+                  // 注册 JS 回调
                   controller.addJavaScriptHandler(
                     handlerName: 'onVideoFound',
-                    callback: (args) async {  // 改为异步
+                    callback: (args) async {
                       if (isCompleted) return null;
                       if (args.isNotEmpty && args[0] is String) {
                         var url = args[0] as String;
-                        // 获取当前页面基础 URL，用于补全相对路径
+                        // 补全相对路径
                         final currentWebUri = await controller.getUrl();
                         final base = currentWebUri?.toString();
                         if (base != null && !url.startsWith('http://') && !url.startsWith('https://')) {
@@ -101,6 +109,7 @@ class WebViewSniffer {
                     },
                   );
                 },
+                // 拦截页面导航
                 shouldOverrideUrlLoading: (controller, navigationAction) async {
                   if (isCompleted) return NavigationActionPolicy.CANCEL;
                   final requestUrl = navigationAction.request.url?.toString() ?? '';
@@ -110,18 +119,47 @@ class WebViewSniffer {
                   }
                   return NavigationActionPolicy.ALLOW;
                 },
+                // ===== iOS：拦截 Ajax 请求 =====
+                shouldInterceptAjaxRequest: (controller, ajaxRequest) async {
+                  if (isCompleted) return null;
+                  final url = ajaxRequest.url?.toString() ?? '';
+                  if (isVideoUrl(url)) {
+                    completeWithResult(url);
+                  }
+                  return null; // 不修改请求
+                },
+                // ===== iOS：拦截 Fetch 请求 =====
+                shouldInterceptFetchRequest: (controller, fetchRequest) async {
+                  if (isCompleted) return null;
+                  final url = fetchRequest.url?.toString() ?? '';
+                  if (isVideoUrl(url)) {
+                    completeWithResult(url);
+                  }
+                  return null; // 不修改请求
+                },
+                // 资源加载监听
+                onLoadResource: (controller, resource) {
+                  if (isCompleted) return;
+                  final resUrl = resource.url?.toString() ?? '';
+                  if (isVideoUrl(resUrl)) {
+                    completeWithResult(resUrl);
+                  }
+                },
                 onLoadStop: (controller, currentUrl) async {
                   if (isCompleted) return;
                   if (script != null && script.isNotEmpty) {
                     try { await controller.evaluateJavascript(source: script); } catch (_) {}
                   }
+                  // 注入兜底 JS（扫描 video 标签 + 响应体检测）
                   try {
                     await controller.evaluateJavascript(source: """
                       (function() {
+                        // 防止页面跳转
                         window.location.href = function() {};
                         window.location.replace = function() {};
                         window.location.assign = function() {};
 
+                        // Hook Fetch
                         const originalFetch = window.fetch;
                         window.fetch = function(input, init) {
                           return originalFetch.apply(this, arguments).then(function(response) {
@@ -139,6 +177,7 @@ class WebViewSniffer {
                           });
                         };
 
+                        // Hook XHR
                         const originalOpen = XMLHttpRequest.prototype.open;
                         XMLHttpRequest.prototype.open = function(method, url) {
                           this.addEventListener("readystatechange", function() {
@@ -154,6 +193,7 @@ class WebViewSniffer {
                           originalOpen.apply(this, arguments);
                         };
 
+                        // 定时扫描 video 标签
                         setInterval(function() {
                           document.querySelectorAll('video, source').forEach(function(el) {
                             if (el.src && !el.src.startsWith('blob:')) {
@@ -165,24 +205,10 @@ class WebViewSniffer {
                     """);
                   } catch (_) {}
                 },
-                onLoadResource: (controller, resource) {
-                  if (isCompleted) return;
-                  final resUrl = resource.url?.toString() ?? '';
-                  if (isVideoUrl(resUrl)) {
-                    completeWithResult(resUrl);
-                  }
-                },
                 onLoadError: (controller, currentUrl, code, message) {
                   if (!isCompleted) completeWithResult(null);
                 },
-                onProgressChanged: (controller, progress) {
-                  if (isCompleted) return;
-                  if (progress >= 95) {
-                    Future.delayed(const Duration(seconds: 2), () {
-                      if (!isCompleted) completeWithResult(null);
-                    });
-                  }
-                },
+                // 移除 onProgressChanged 自动结束，仅依赖总超时
               ),
             ),
           ),

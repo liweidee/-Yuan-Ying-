@@ -33,6 +33,8 @@ import 'package:yuanying/modules/manga/views/manga_detail_page.dart';
 import 'package:yuanying/modules/manga/views/manga_reader_page.dart';
 import 'package:yuanying/modules/music/views/music_detail_page.dart';
 import 'package:yuanying/modules/music/widgets/player_card.dart';
+import 'package:yuanying/modules/tmdb/views/tmdb_detail_page.dart';
+import 'package:yuanying/modules/tmdb/views/tmdb_person_page.dart';
 
 class AppPages {
   static const String initial = '/';
@@ -67,6 +69,8 @@ class AppPages {
   static const String mangaReader = '/mangaReader';
   static const String musicDetail = '/musicDetail';
   static const String musicPlayer = '/musicPlayer';
+  static const String tmdbDetail = '/tmdbDetail';
+  static const String tmdbPerson = '/tmdbPerson';
 
 
   static final List<GetPage> routes = [
@@ -115,6 +119,23 @@ class AppPages {
     GetPage(
       name: musicPlayer,
       page: () => const PlayerCard()
+    ),
+    GetPage(
+      name: AppPages.tmdbDetail,
+      page: () => TmdbDetailPage(
+        videoItem: Get.arguments['videoItem'],
+        site: Get.arguments['site'],
+        fromHome: Get.arguments['fromHome'] ?? false,
+        tmdbId: Get.arguments['tmdbId'],
+        mediaType: Get.arguments['mediaType'],
+      ),
+    ),
+    GetPage(
+      name: AppPages.tmdbPerson,
+      page: () => TmdbPersonPage(
+        personId: Get.arguments['personId'],
+        personName: Get.arguments['personName'],
+      ),
     ),
   ];
 }

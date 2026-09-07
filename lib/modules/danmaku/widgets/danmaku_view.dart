@@ -52,7 +52,8 @@ class _DanmakuViewState extends State<DanmakuView> {
   void dispose() {
     widget.playerController.removePositionListener(_onPosition);
     widget.playerController.removeStatusLister(_statusListener);
-    // 不调用 clear，让 DanmakuScreen 自行清理
+    // 清除 playerController 中的渲染控制器引用，避免悬空
+    widget.playerController.danmakuController = null;
     _canvasController = null;
     _lastPosition = -1;
     super.dispose();
@@ -172,6 +173,9 @@ class _DanmakuViewState extends State<DanmakuView> {
             // 无 Key，让 Flutter 复用
             createdController: (e) {
               _canvasController = e;
+              // 关键：将渲染控制器暴露给 playerController，供设置页调用
+              widget.playerController.danmakuController = e;
+              // 首次创建时应用当前配置
               e.updateOption(_buildOption());
             },
             option: _buildOption(),

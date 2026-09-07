@@ -30,6 +30,9 @@ import 'package:yuanying/modules/common/base/common_page.dart';
 import 'package:yuanying/common/widgets/scroll_physics.dart';
 import 'package:yuanying/modules/webview/views/webview_page.dart';
 import 'package:yuanying/modules/music/controllers/music_player_controller.dart';
+import 'package:yuanying/utils/storage_manager.dart';
+import 'package:yuanying/core/constants/storage_keys.dart';
+import 'package:yuanying/modules/tmdb/views/tmdb_detail_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -49,6 +52,17 @@ class _HomePageState extends CommonPageState<HomePage>
 
   @override
   bool get needsCorrection => controller.hideTopBar.value; // 覆写校正开关
+
+  bool _shouldUseTmdb(String siteKey) {
+    // 1. 检查 TMDB 总开关
+    final tmdbEnabled = StorageManager.getSetting<bool>(SettingBoxKey.tmdbEnabled) ?? false;
+    if (!tmdbEnabled) return false;
+
+    // 2. 检查当前站点是否在启用列表中
+    final rawMap = StorageManager.getSetting<Map<dynamic, dynamic>>(SettingBoxKey.tmdbSiteEnabledMap);
+    if (rawMap == null) return false;
+    return rawMap[siteKey] as bool? ?? false;
+  }
 
   @override
   void initState() {
@@ -172,6 +186,19 @@ class _HomePageState extends CommonPageState<HomePage>
           'sources': sourceKeys,
           'onlyDefault': onlyDefault,
         },
+      );
+      return;
+    }
+
+    // TMDB 集成拦截 - 首页进入（fromHome: true，不传 tmdbId）
+    if (_shouldUseTmdb(siteKey)) {
+      Get.to(
+        () => TmdbDetailPage(
+          videoItem: item,
+          site: site!,
+          fromHome: true,  // 首页进入，使用搜索
+        ),
+        routeName: AppPages.tmdbDetail,
       );
       return;
     }

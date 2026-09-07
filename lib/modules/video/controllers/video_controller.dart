@@ -39,6 +39,9 @@ import 'package:yuanying/t4/services/drpy2_api_service.dart';
 import 'package:yuanying/modules/video/widgets/introduction/intro_detail_panel.dart';
 import 'package:yuanying/plugin/pl_player/models/play_repeat.dart';
 
+import 'package:yuanying/utils/storage_manager.dart';
+import 'package:yuanying/core/constants/storage_keys.dart';
+
 class DetailController extends GetxController with GetTickerProviderStateMixin {
   // ===== tag 用于隔离控制器 =====
   final String? _tag;
@@ -689,6 +692,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     bool autoPlay = true,
     Duration? seekTo,
   }) async {
+    _danmakuLoaded = false;
     _currentEpisode = episode;
     _currentSourceIndex = sourceIndex;
     _currentEpisodeIndex = episodeIndex;
@@ -1011,7 +1015,11 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
 
     final danmakuUrl = playUrl.danmaku;
     if (danmakuUrl != null && danmakuUrl.isNotEmpty) {
-      _loadDanmakuOnPlay(danmakuUrl, playUrl.headers);
+      // 播放接口自带弹幕，直接加载，不显示任何 Toast
+      _loadDanmaku(danmakuUrl, playUrl.headers);
+    } else {
+      // 播放接口无弹幕，尝试自定义 API，并显示匹配结果 Toast
+      _loadDanmakuOnPlay(null, playUrl.headers);
     }
 
     _addToHistory();
@@ -1588,31 +1596,28 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     }
   }
 
-  void _loadDanmakuOnPlay(String danmakuUrl, Map<String, String>? headers) {
-    if (_danmakuLoaded) return;
+  void _loadDanmakuOnPlay(String? originalDanmakuUrl, Map<String, String>? headers) {
+    if (_danmakuLoaded) return;   // 避免重复请求
 
-    void listener(PlayerStatus status) {
-      if (status.isPlaying && !_danmakuLoaded) {
+    // 记录当前剧集，防止异步回调覆盖新剧集
+    final currentEpisode = _currentEpisode;
+
+    // 尝试用户配置的外部 API
+    _loadDanmakuFromUserApi().then((success) {
+      // 如果剧集已切换，忽略结果
+      if (currentEpisode != _currentEpisode) return;
+
+      if (success) {
         _danmakuLoaded = true;
-        _loadDanmaku(danmakuUrl, headers);
-        if (_danmakuListener != null) {
-          playerController.removeStatusLister(_danmakuListener!);
-          _danmakuListener = null;
-        }
+        return;
       }
-    }
 
-    _danmakuListener = listener;
-    playerController.addStatusLister(listener);
-
-    if (playerController.playerStatus.value.isPlaying) {
+      // 降级：仅当原始弹幕 URL 存在且非空时才加载
+      if (originalDanmakuUrl != null && originalDanmakuUrl.isNotEmpty) {
+        _loadDanmaku(originalDanmakuUrl, headers);
+      }
       _danmakuLoaded = true;
-      _loadDanmaku(danmakuUrl, headers);
-      if (_danmakuListener != null) {
-        playerController.removeStatusLister(_danmakuListener!);
-        _danmakuListener = null;
-      }
-    }
+    });
   }
 
   Future<void> _loadDanmaku(String url, Map<String, String>? headers) async {
@@ -1937,6 +1942,150 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
       }
     } catch (e) {
       SmartDialog.showToast('保存封面失败: $e');
+    }
+  }
+
+  /// 根据用户配置的 API 基础地址、标题和集数，构造 FongMi 弹幕 URL
+  String _buildFongmiUrl(String base, String title, int episode) {
+    String normalized = base.trim();
+    while (normalized.endsWith('/')) {
+      normalized = normalized.substring(0, normalized.length - 1);
+    }
+
+    if (!normalized.contains('/fongmi/danmaku')) {
+      if (normalized.contains('/api/v2')) {
+        final idx = normalized.indexOf('/api/v2');
+        if (idx != -1) {
+          normalized = normalized.substring(0, idx + 7);
+        }
+        normalized += '/fongmi/danmaku';
+      } else {
+        normalized += '/api/v2/fongmi/danmaku';
+      }
+    }
+
+    final uri = Uri.parse(normalized).replace(queryParameters: {
+      'name': title,
+      'episode': episode.toString(),
+    });
+    return uri.toString();
+  }
+
+  /// 尝试从设置中配置的弹幕 API 加载弹幕，成功返回 true
+  Future<bool> _loadDanmakuFromUserApi() async {
+    // 1. 检查自动匹配开关
+    final autoMatch = StorageManager.getSetting<bool>(SettingBoxKey.danmakuAutoMatch) ?? false;
+    if (!autoMatch) return false;
+
+    // 2. 读取 API 列表和当前选中的 key
+    final apisJson = StorageManager.getSetting<List<dynamic>>(SettingBoxKey.danmakuApis) ?? [];
+    if (apisJson.isEmpty) {
+      SmartDialog.showToast('未匹配到弹幕');
+      return false;
+    }
+    final currentKey = StorageManager.getSetting<String>(SettingBoxKey.danmakuCurrentKey) ?? '';
+    if (currentKey.isEmpty) {
+      SmartDialog.showToast('未匹配到弹幕');
+      return false;
+    }
+
+    // 3. 查找匹配的 API 对象
+    Map<String, dynamic>? apiMap;
+    for (var item in apisJson) {
+      if (item is Map) {
+        final map = Map<String, dynamic>.from(item);
+        if (map['key'] == currentKey) {
+          apiMap = map;
+          break;
+        }
+      }
+    }
+    if (apiMap == null) {
+      SmartDialog.showToast('未匹配到弹幕');
+      return false;
+    }
+    final apiBase = apiMap['api'] as String?;
+    if (apiBase == null || apiBase.isEmpty) {
+      SmartDialog.showToast('未匹配到弹幕');
+      return false;
+    }
+
+    // 4. 获取当前视频标题和集数
+    final detail = introController.videoDetail.value;
+    if (detail == null) {
+      SmartDialog.showToast('未匹配到弹幕');
+      return false;
+    }
+    final title = detail.vodName.trim();
+    if (title.isEmpty) {
+      SmartDialog.showToast('未匹配到弹幕');
+      return false;
+    }
+    final episodeNumber = introController.currentEpisodeIndex.value + 1;
+
+    // 5. 构造 FongMi URL
+    final fongmiUrl = _buildFongmiUrl(apiBase, title, episodeNumber);
+    if (fongmiUrl.isEmpty) {
+      SmartDialog.showToast('未匹配到弹幕');
+      return false;
+    }
+
+    // 6. 使用 Dio 请求 FongMi 接口
+    try {
+      final dio = Dio();
+      final response = await dio.get(
+        fongmiUrl,
+        options: Options(
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          },
+        ),
+      );
+      if (response.statusCode != 200) {
+        SmartDialog.showToast('未匹配到弹幕');
+        return false;
+      }
+
+      final data = response.data;
+
+      // 6.1 检查是否为候选列表格式
+      if (data is List && data.isNotEmpty && data[0] is Map && (data[0] as Map).containsKey('url')) {
+        final firstUrl = data[0]['url'] as String?;
+        if (firstUrl == null || firstUrl.isEmpty) {
+          SmartDialog.showToast('未匹配到弹幕');
+          return false;
+        }
+        final parser = DanmakuParser();
+        final items = await parser.loadFromUrl(firstUrl);
+        if (items.isNotEmpty) {
+          if (Get.isRegistered<DanmakuController>()) {
+            Get.find<DanmakuController>().loadDanmaku(items);
+          }
+          SmartDialog.showToast('已匹配到弹幕');
+          return true;
+        } else {
+          SmartDialog.showToast('未匹配到弹幕');
+          return false;
+        }
+      }
+
+      // 6.2 否则直接尝试解析（可能标准弹幕格式）
+      final parser = DanmakuParser();
+      final items = await parser.loadFromUrl(fongmiUrl);
+      if (items.isNotEmpty) {
+        if (Get.isRegistered<DanmakuController>()) {
+          Get.find<DanmakuController>().loadDanmaku(items);
+        }
+        SmartDialog.showToast('已匹配到弹幕');
+        return true;
+      } else {
+        SmartDialog.showToast('未匹配到弹幕');
+        return false;
+      }
+    } catch (e) {
+      print('加载弹幕异常: $e');
+      SmartDialog.showToast('未匹配到弹幕');
+      return false;
     }
   }
 }

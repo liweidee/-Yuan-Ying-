@@ -1,3 +1,4 @@
+// lib/modules/setting/views/tmdb_match_page.dart
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:yuanying/core/theme/style.dart';
@@ -57,7 +58,6 @@ class _TmdbMatchPageState extends State<TmdbMatchPage> {
       ),
       body: Column(
         children: [
-          // 搜索栏
           Padding(
             padding: const EdgeInsets.all(Style.safeSpace),
             child: Row(
@@ -65,8 +65,10 @@ class _TmdbMatchPageState extends State<TmdbMatchPage> {
                 Expanded(
                   child: TextField(
                     onChanged: _filterSites,
+                    style: TextStyle(color: colorScheme.onSurface, fontSize: 14),
                     decoration: InputDecoration(
                       hintText: '搜索站源名称...',
+                      hintStyle: TextStyle(color: colorScheme.outline),
                       prefixIcon: Icon(Icons.search, color: colorScheme.outline),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),
@@ -97,7 +99,6 @@ class _TmdbMatchPageState extends State<TmdbMatchPage> {
               ],
             ),
           ),
-          // 列表
           Expanded(
             child: ListView.separated(
               padding: const EdgeInsets.symmetric(horizontal: Style.safeSpace),

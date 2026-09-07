@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:canvas_danmaku/canvas_danmaku.dart' as canvas;
 
 import 'package:yuanying/core/theme/style.dart';
 import 'package:yuanying/modules/video/controllers/video_controller.dart';
 import 'package:yuanying/plugin/pl_player/controller.dart';
 import 'package:yuanying/plugin/pl_player/player_pref.dart';
+// 使用 common 中的 NoScrollbarBehavior，避免与 setting_sheet 冲突
 import 'package:yuanying/common/widgets/scroll_behavior.dart';
 import 'package:yuanying/modules/danmaku/controllers/danmaku_controller.dart';
 
@@ -60,8 +62,9 @@ class _DanmakuSettingsState extends State<DanmakuSettings> {
     danmakuColorMode = PlayerPref.danmakuColorMode.obs;
   }
 
-  /// 保存所有设置并触发版本更新
+  /// 保存所有设置并立即应用到弹幕渲染控制器（与 PiliPlus 实现一致）
   void _saveAll() {
+    // 1. 写入持久化存储
     PlayerPref.danmakuShowArea = danmakuShowArea.value;
     PlayerPref.danmakuFontScale = danmakuFontScale.value;
     PlayerPref.danmakuFontScaleFS = danmakuFontScaleFS.value;
@@ -75,12 +78,37 @@ class _DanmakuSettingsState extends State<DanmakuSettings> {
     PlayerPref.danmakuFixedV = danmakuFixedV.value;
     PlayerPref.danmakuColorMode = danmakuColorMode.value;
 
-    // 触发版本号更新，通知 DanmakuView 重建
-    if (Get.isRegistered<DanmakuController>()) {
-      final ctrl = Get.find<DanmakuController>();
-      ctrl.configVersion.value++;
-      // print('弹幕设置已保存，configVersion = ${ctrl.configVersion.value}');
+    // 2. 直接更新弹幕渲染控制器的 Option（与 PiliPlus 完全一致）
+    final danmakuCtrl = playerController.danmakuController;
+    if (danmakuCtrl != null) {
+      // 构造新的 DanmakuOption，从 PlayerPref 读取最新值
+      final isFullScreen = playerController.isFullScreen.value;
+      final fontScale = isFullScreen
+          ? PlayerPref.danmakuFontScaleFS
+          : PlayerPref.danmakuFontScale;
+      final option = canvas.DanmakuOption(
+        fontSize: 15 * fontScale,
+        area: PlayerPref.danmakuShowArea,
+        duration: PlayerPref.danmakuDuration,
+        staticDuration: PlayerPref.danmakuStaticDuration,
+        strokeWidth: PlayerPref.danmakuStrokeWidth,
+        scrollFixedVelocity: PlayerPref.danmakuFixedV,
+        massiveMode: PlayerPref.danmakuMassiveMode,
+        static2Scroll: PlayerPref.danmakuStatic2Scroll,
+        lineHeight: PlayerPref.danmakuLineHeight,
+        // 固定值
+        hideBottom: false,
+        hideScroll: false,
+        hideTop: false,
+        hideSpecial: false,
+        safeArea: true,
+      );
+      // danmakuCtrl 是 dynamic，实际是 canvas.DanmakuController，调用 updateOption
+      (danmakuCtrl as canvas.DanmakuController).updateOption(option);
     }
+
+    // 注意：不再需要递增 configVersion，因为设置页直接更新了渲染控制器
+    // 如果其他地方仍依赖 configVersion，可保留其递增但非必需
   }
 
   Widget _resetBtn(Object def, VoidCallback onPressed) {
@@ -120,7 +148,7 @@ class _DanmakuSettingsState extends State<DanmakuSettings> {
           expand: false,
           builder: (context, scrollController) {
             return ScrollConfiguration(
-              behavior: const NoScrollbarBehavior(),
+              behavior: NoScrollbarBehavior(), // 去掉 const，因为构造函数不是 const
               child: ListView(
                 controller: scrollController,
                 padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
@@ -506,38 +534,5 @@ class _DanmakuSettingsState extends State<DanmakuSettings> {
         ],
       ),
     );
-  }
-}
-
-/// 隐藏滚动条的 Behavior
-class _NoScrollbarBehavior extends ScrollBehavior {
-  @override
-  Widget buildScrollbar(
-    BuildContext context,
-    Widget child,
-    ScrollableDetails details,
-  ) {
-    return child;
-  }
-}
-
-/// 自定义 SliderTrackShape
-class _MSliderTrackShape extends RoundedRectSliderTrackShape {
-  const _MSliderTrackShape();
-
-  @override
-  Rect getPreferredRect({
-    required RenderBox parentBox,
-    Offset offset = Offset.zero,
-    SliderThemeData? sliderTheme,
-    bool isEnabled = false,
-    bool isDiscrete = false,
-  }) {
-    const double trackHeight = 3;
-    final double trackLeft = offset.dx;
-    final double trackTop =
-        offset.dy + (parentBox.size.height - trackHeight) / 2 + 4;
-    final double trackWidth = parentBox.size.width;
-    return Rect.fromLTWH(trackLeft, trackTop, trackWidth, trackHeight);
   }
 }

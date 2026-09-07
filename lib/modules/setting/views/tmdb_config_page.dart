@@ -1,3 +1,4 @@
+// lib/modules/setting/views/tmdb_config_page.dart
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
@@ -11,7 +12,10 @@ class TmdbConfigPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final controller = Get.put(TmdbConfigController());
+    // 安全获取或创建控制器
+    final controller = Get.isRegistered<TmdbConfigController>()
+        ? Get.find<TmdbConfigController>()
+        : Get.put(TmdbConfigController());
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
@@ -111,7 +115,6 @@ class TmdbConfigPage extends StatelessWidget {
     );
   }
 
-  // ----- 站源匹配卡片 -----
   Widget _buildSourceMatchCard(
     BuildContext context,
     ThemeData theme,
@@ -173,7 +176,6 @@ class TmdbConfigPage extends StatelessWidget {
     );
   }
 
-  // ----- Access Token卡片（使用controller.tokenController）-----
   Widget _buildAccessTokenCard(
     BuildContext context,
     ThemeData theme,
@@ -260,7 +262,6 @@ class TmdbConfigPage extends StatelessWidget {
     );
   }
 
-  // ----- 代理设置卡片（使用controller的apiProxyController和imageProxyController）-----
   Widget _buildProxyCard(
     BuildContext context,
     ThemeData theme,
@@ -355,9 +356,6 @@ class TmdbConfigPage extends StatelessWidget {
               icon: Icon(Icons.clear, color: colorScheme.outline, size: 18),
               onPressed: () {
                 controller.clear();
-                // 同步更新Rx（因监听器已绑定，会自动更新）
-                // 但清除后需手动触发，因为controller.clear()不会触发listener？
-                // 实际上controller.clear()会触发text变化，listener会响应。
               },
             ),
           ),
@@ -386,15 +384,15 @@ class TmdbConfigPage extends StatelessWidget {
     return index >= 0 && index < labels.length ? labels[index] : url;
   }
 
-  // ----- 底部操作栏（保持不变）-----
   Widget _buildBottomActions(
     BuildContext context,
     ThemeData theme,
     TmdbConfigController controller,
   ) {
     final colorScheme = theme.colorScheme;
+    final bottomPadding = MediaQuery.of(context).padding.bottom;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: EdgeInsets.fromLTRB(16, 12, 16, 12 + bottomPadding),
       decoration: BoxDecoration(
         color: colorScheme.surface,
         boxShadow: [
