@@ -390,7 +390,7 @@ class SourceManager extends GetxController {
     final newSite = Site(
       key: key,
       name: name,
-      api: 'local_zip', // 占位
+      api: 'local_zip',
       searchable: 1,
       filterable: 1,
       quickSearch: 1,
@@ -402,10 +402,15 @@ class SourceManager extends GetxController {
     );
 
     GStorage.addCustomSite(newSite.toJson());
-    // 刷新列表
+    
+    // 4. 刷新列表
     await loadConfig();
-    // 自动切换到该配置
-    await switchConfig(key);
+    
+    // 不再强制自动切换
+    // await switchConfig(key);
+    
+    // 注：如果这是第一个配置，_selectDefaultSite 会自动选中它
+    // 但如果是后续配置，让用户手动点击卡片切换
   }
 
   void _log(String msg) => print('[SourceManager] $msg');
@@ -448,14 +453,14 @@ class SourceManager extends GetxController {
           selectedConfig['zipFilePath'].toString().isNotEmpty;
 
       if (isLocalZip) {
-        // ===== 本地 ZIP 分支 =====
+        // 本地 ZIP 分支
         final zipPath = selectedConfig!['zipFilePath'].toString();
-        _log('📦 检测到本地 CatVod ZIP，解压并覆盖到固定目录');
+        _log('检测到本地 CatVod ZIP，解压并覆盖到固定目录');
         _log('ZIP 文件路径: $zipPath');
 
         final zipFile = File(zipPath);
         if (!await zipFile.exists()) {
-          _log('❌ ZIP 文件不存在: $zipPath');
+          _log('ZIP 文件不存在: $zipPath');
           configLoadError.value = true;
           if (currentLoadId == _configLoadId) {
             remoteSites.clear();
@@ -481,7 +486,7 @@ class SourceManager extends GetxController {
               await targetFile.writeAsBytes(data, flush: true);
             }
           }
-          _log('✅ 解压完成，共 ${archive.files.length} 个文件');
+          _log('解压完成，共 ${archive.files.length} 个文件');
 
           final indexFile = File('${sourceDir.path}/index.js');
           if (!await indexFile.exists()) {
@@ -491,15 +496,17 @@ class SourceManager extends GetxController {
           final md5File = File('${sourceDir.path}/index.js.md5');
           if (await md5File.exists()) {
             await md5File.delete();
-            _log('🧹 已删除旧的 .md5 缓存');
+            _log('已删除旧的 .md5 缓存');
           }
 
           final loaded = await nodejs.reloadLocalSpider();
           if (!loaded) {
             throw Exception('Node.js 重载蜘蛛失败');
           }
+
+          nodejs.setLastLoadedUrl('local_zip');
         } catch (e) {
-          _log('❌ 解压或加载失败: $e');
+          _log('解压或加载失败: $e');
           configLoadError.value = true;
           if (currentLoadId == _configLoadId) {
             remoteSites.clear();
@@ -508,7 +515,7 @@ class SourceManager extends GetxController {
           return;
         }
       } else {
-        // ===== 原有远程下载逻辑（完全保持不变） =====
+        // 远程下载逻辑
         bool needLoadSource = true;
         if (nodejs.spiderPort > 0) {
           final alive = await nodejs.isServiceAlive();
@@ -543,7 +550,7 @@ class SourceManager extends GetxController {
         if (currentLoadId != _configLoadId) return;
       }
 
-      // ===== 后续统一逻辑：获取配置列表 =====
+      // 获取配置列表
       final result = await nodejs.getCatConfig();
       if (currentLoadId != _configLoadId) return;
 

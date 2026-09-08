@@ -205,12 +205,16 @@ class SiteConfigPage extends StatelessWidget {
                     children: [
                       Row(
                         children: [
-                          Text(
-                            site.name,
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                              color: isCurrent ? theme.colorScheme.primary : theme.colorScheme.onSurface,
+                          Expanded(
+                            child: Text(
+                              site.name,
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                                color: isCurrent ? theme.colorScheme.primary : theme.colorScheme.onSurface,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
                           if (isLocal) ...[

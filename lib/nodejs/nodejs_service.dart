@@ -250,6 +250,12 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
     }
   }
 
+  /// 设置最后加载的 URL（用于状态标记）
+  void setLastLoadedUrl(String? url) {
+    _lastLoadedUrl = url;
+    _log('lastLoadedUrl 设置为: $url');
+  }
+
   /// 获取默认蜘蛛目录
   Future<String> getDefaultSourcePath() async {
     final dir = await getApplicationDocumentsDirectory();
