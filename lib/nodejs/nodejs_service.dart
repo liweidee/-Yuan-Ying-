@@ -256,13 +256,13 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
     _log('lastLoadedUrl 设置为: $url');
   }
 
-  /// 获取默认蜘蛛目录
+  /// 获取默认CatVod爬虫源目录
   Future<String> getDefaultSourcePath() async {
     final dir = await getApplicationDocumentsDirectory();
     return '${dir.path}/nodejs-project/src/source';
   }
 
-  /// 强制重新加载固定目录中的蜘蛛（不下载，不校验 MD5）
+  /// 强制重新加载本地目录中的爬虫源（不下载，不校验 MD5）
   /// 用于本地 ZIP 切换后的刷新
   Future<bool> reloadLocalSpider() async {
     if (_managementPort <= 0) {
@@ -274,7 +274,7 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
     }
 
     final sourcePath = await getDefaultSourcePath();
-    _log('🔄 强制重载本地蜘蛛，路径: $sourcePath');
+    _log('🔄 强制重载本地源，路径: $sourcePath');
 
     final url = 'http://127.0.0.1:$_managementPort/source/loadPath';
     try {
@@ -284,7 +284,7 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
         body: jsonEncode({'path': sourcePath}),
       ).timeout(const Duration(seconds: 10));
       if (response.statusCode == 200) {
-        _log('✅ 本地蜘蛛重载成功');
+        _log('✅ 本地源重载成功');
         return true;
       } else {
         _log('❌ 重载失败，状态码: ${response.statusCode}');
