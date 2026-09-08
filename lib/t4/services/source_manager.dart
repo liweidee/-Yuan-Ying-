@@ -431,7 +431,6 @@ class SourceManager extends GetxController {
       if (!nodejs.isInitialized || nodejs.managementPort == 0) {
         await nodejs.initialize();
       }
-      // 移除了统一的失败判断，交给各分支处理
       if (currentLoadId != _configLoadId) return;
 
       // ---- 获取当前选中的配置信息 ----
@@ -536,7 +535,7 @@ class SourceManager extends GetxController {
           return;
         }
       } else {
-        // ===== 远程下载逻辑 =====
+        // ===== 远端分支 =====
         bool needLoadSource = true;
         if (nodejs.spiderPort > 0) {
           final alive = await nodejs.isServiceAlive();
@@ -558,18 +557,19 @@ class SourceManager extends GetxController {
           }
           if (currentLoadId != _configLoadId) return;
         }
-
-        await nodejs.waitForSpiderPort();
-        if (nodejs.spiderPort == 0) {
-          configLoadError.value = true;
-          _log('[SourceManager] spiderPort 未就绪，无法获取配置');
-          if (currentLoadId == _configLoadId) {
-            remoteSites.clear();
-          }
-          return;
-        }
-        if (currentLoadId != _configLoadId) return;
       }
+
+      // ===== 统一等待 spiderPort 就绪（本地和远端都需要） =====
+      await nodejs.waitForSpiderPort();
+      if (nodejs.spiderPort == 0) {
+        configLoadError.value = true;
+        _log('[SourceManager] spiderPort 未就绪，无法获取配置');
+        if (currentLoadId == _configLoadId) {
+          remoteSites.clear();
+        }
+        return;
+      }
+      if (currentLoadId != _configLoadId) return;
 
       // ===== 获取配置列表（远程与本地共用） =====
       final result = await nodejs.getCatConfig();
