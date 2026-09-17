@@ -25,7 +25,6 @@
 - [x] Windows
 - [x] Linux
 
-[![Packaging status](https://repology.org/badge/vertical-allrepos/yuanying.svg)](https://repology.org/project/yuanying/versions)
 
 ## feat
 
@@ -90,7 +89,7 @@
 
 ## 声明
 
-此项目（源影）基于PiliPlus开发而来，仅用于学习和测试，请于下载后24小时内删除。
+此项目（源影）基于[PiliPlus](https://img.shields.io/github/repo-size/bggRGjQaUbCoE/PiliPlus)开发而来，仅用于学习和测试，请于下载后24小时内删除。
 所用API皆从官方网站收集，不提供任何破解内容。
 在此致敬原作者：[guozhigq/pilipala](https://github.com/guozhigq/pilipala)
 在此致敬上游作者：[orz12/PiliPalaX](https://github.com/orz12/PiliPalaX)
