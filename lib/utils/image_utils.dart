@@ -86,32 +86,50 @@ abstract final class ImageUtils {
       DateFormat('yyyy-MM-dd_HH-mm-ss').format(DateTime.now());
 
   /// 保存字节图片
+  ///
+  /// 对齐 PiliPlus 的健壮做法：
+  /// 1. `fileName` 强制补扩展名，避免 iOS 无法识别图片格式
+  /// 2. iOS 的 `albumPath` 不含斜杠，避免 saver_gallery 原生层路径分割异常
+  /// 3. Android 保留 `Pictures/xxx` 形式（MediaStore 支持）
   static Future<void> saveByteImg({
     required Uint8List bytes,
     required String fileName,
+    String ext = 'png',
   }) async {
     try {
+      // ---- 1. 强制补扩展名 ----
+      final lowerName = fileName.toLowerCase();
+      final lowerExt = ext.toLowerCase();
+      final String finalFileName =
+          lowerName.endsWith('.$lowerExt') ? fileName : '$fileName.$ext';
+
+      // ---- 2. 写入临时目录（保留原有行为，便于调试 / 兜底）----
       final tempDir = await getTemporaryDirectory();
-      final file = File('${tempDir.path}/$fileName');
+      final file = File('${tempDir.path}/$finalFileName');
       await file.writeAsBytes(bytes);
 
+      // ---- 3. 平台分支保存 ----
       if (Platform.isAndroid || Platform.isIOS) {
+        // iOS 不允许相册名带斜杠；Android 走 Pictures/xxx 形式
+        final String albumPath = Platform.isAndroid ? '源影/截图' : '源影';
         try {
           await SaverGallery.saveImage(
             bytes,
-            fileName: fileName,
-            albumPath: '源影/截图',
+            fileName: finalFileName,
+            albumPath: albumPath,
             skipIfExists: false,
           );
           SmartDialog.showToast('截图已保存到相册');
         } catch (e) {
+          // saver_gallery 的 native 异常抓不到；这里只兜底 Dart 侧异常
           SmartDialog.showToast('保存失败: $e');
         }
       } else {
+        // ---- 桌面端：写入下载目录 ----
         try {
           final downloadsPath = _getDownloadsPath();
           if (downloadsPath != null) {
-            final saveFile = File('$downloadsPath/$fileName');
+            final saveFile = File('$downloadsPath/$finalFileName');
             await file.copy(saveFile.path);
             SmartDialog.showToast('截图已保存到下载目录');
           } else {

@@ -9,6 +9,9 @@ class LabPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    // 底部安全距离：系统手势条 / 导航栏 + 额外呼吸间距
+    final bottomInset = MediaQuery.of(context).padding.bottom;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('实验室'),
@@ -17,7 +20,13 @@ class LabPage extends StatelessWidget {
         foregroundColor: theme.colorScheme.onSurface,
       ),
       body: ListView(
-        padding: const EdgeInsets.all(Style.safeSpace),
+        padding: EdgeInsets.fromLTRB(
+          Style.safeSpace,
+          Style.safeSpace,
+          Style.safeSpace,
+          // 关键：底部叠加安全区高度 + 额外间距，避免与底部导航栏重叠
+          Style.safeSpace + bottomInset + 12,
+        ),
         children: [
           // ===== 媒体服务器 =====
           _buildEntry(

@@ -5,6 +5,7 @@ import 'package:yuanying/core/theme/style.dart';
 import 'package:yuanying/modules/setting/models/setting_pref.dart';
 import 'package:yuanying/modules/webdav/controllers/webdav_controller.dart';
 import 'package:yuanying/utils/storage_manager.dart';
+import 'package:yuanying/common/widgets/dialog/webdav_backup_dialog.dart';
 
 class WebDavSettingPage extends StatefulWidget {
   const WebDavSettingPage({super.key, this.showAppBar = true});
@@ -150,7 +151,21 @@ class _WebDavSettingPageState extends State<WebDavSettingPage> {
                           borderRadius: Style.mdRadius,
                         ),
                       ),
-                      onPressed: () => _controller.backup(),
+                      onPressed: () async {
+                        SmartDialog.showLoading(msg: '连接中...');
+                        final ok = await _controller.init();
+                        SmartDialog.dismiss();
+                        if (!ok) {
+                          SmartDialog.showToast('连接失败，请检查 WebDAV 配置');
+                          return;
+                        }
+                        if (!context.mounted) return;
+                        await showWebDavBackupDialog(
+                          context,
+                          controller: _controller,
+                          initialMode: 0,
+                        );
+                      },
                       child: const Text('备份'),
                     ),
                   ),
@@ -163,7 +178,21 @@ class _WebDavSettingPageState extends State<WebDavSettingPage> {
                           borderRadius: Style.mdRadius,
                         ),
                       ),
-                      onPressed: () => _controller.restore(),
+                      onPressed: () async {
+                        SmartDialog.showLoading(msg: '连接中...');
+                        final ok = await _controller.init();
+                        SmartDialog.dismiss();
+                        if (!ok) {
+                          SmartDialog.showToast('连接失败，请检查 WebDAV 配置');
+                          return;
+                        }
+                        if (!context.mounted) return;
+                        await showWebDavBackupDialog(
+                          context,
+                          controller: _controller,
+                          initialMode: 1,
+                        );
+                      },
                       child: const Text('恢复'),
                     ),
                   ),

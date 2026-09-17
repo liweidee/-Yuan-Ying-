@@ -1134,11 +1134,17 @@ class MediaKitEngine implements IPlayerEngine {
         context: Get.context!,
         builder: (context) => GestureDetector(
           onTap: () async {
-            ImageUtils.saveByteImg(
-              bytes: imageBytes,
-              fileName: 'screenshot_${ImageUtils.time}',
-            );
-            Get.back();
+            try {
+              await ImageUtils.saveByteImg(
+                bytes: imageBytes,
+                fileName: 'screenshot_${ImageUtils.time}',
+              );
+            } catch (e) {
+              debugPrint('saveByteImg failed: $e');
+            }
+            if (Get.context != null) {
+              Get.back();
+            }
           },
           child: Align(
             alignment: Alignment.centerRight,

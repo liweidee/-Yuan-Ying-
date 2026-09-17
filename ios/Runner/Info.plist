@@ -37,6 +37,8 @@
 
     <!-- 权限描述（原注释全部保留） -->
     <!-- 相册保存权限 -->
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>请允许APP保存图片到相册</string>
     <key>NSPhotoLibraryAddUsageDescription</key>
     <string>App需要访问相册以保存图片，请允许访问</string>
     <!-- 相机扫码权限 -->

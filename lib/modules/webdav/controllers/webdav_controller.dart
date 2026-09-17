@@ -1,19 +1,21 @@
-import 'dart:convert';
-import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
+import 'dart:typed_data';
+
 import 'package:get/get.dart';
 import 'package:webdav_client/webdav_client.dart' as webdav;
+
 import 'package:yuanying/modules/setting/models/setting_pref.dart';
 import 'package:yuanying/utils/device_utils.dart';
-import 'package:yuanying/utils/storage.dart';
 
 class WebDavController extends GetxController {
   late String _webdavDirectory;
   String? _fileName;
   webdav.Client? _client;
 
-  // 加载状态
   final RxBool isLoading = false.obs;
 
+  // ============================================================
+  // 初始化 / 测试连接
+  // ============================================================
   Future<bool> init() async {
     final webDavUri = SettingPref.webdavUri;
     final webDavUsername = SettingPref.webdavUsername;
@@ -45,47 +47,45 @@ class WebDavController extends GetxController {
   }
 
   String _getFileName() {
-    return 'yuanying_settings_${DeviceUtils.platformName}.json';
+    return 'yuanying_backup.zip';
   }
 
-  Future<void> backup() async {
+  // ============================================================
+  // 上传：把 ZIP 字节写到 WebDAV
+  // ============================================================
+  Future<bool> uploadBackup(Uint8List zipBytes) async {
     if (_client == null) {
       final success = await init();
-      if (!success) {
-        SmartDialog.showToast('备份失败，请检查 WebDAV 配置');
-        return;
-      }
+      if (!success) return false;
     }
     try {
-      String data = GStorage.exportAllSettings();
       _fileName ??= _getFileName();
       final path = '$_webdavDirectory/$_fileName';
       try {
         await _client!.remove(path);
       } catch (_) {}
-      await _client!.write(path, utf8.encode(data));
-      SmartDialog.showToast('备份成功');
+      await _client!.write(path, zipBytes);
+      return true;
     } catch (e) {
-      SmartDialog.showToast('备份失败: $e');
+      return false;
     }
   }
 
-  Future<void> restore() async {
+  // ============================================================
+  // 下载：从 WebDAV 读取 ZIP 字节
+  // ============================================================
+  Future<Uint8List?> downloadBackup() async {
     if (_client == null) {
       final success = await init();
-      if (!success) {
-        SmartDialog.showToast('恢复失败，请检查 WebDAV 配置');
-        return;
-      }
+      if (!success) return null;
     }
     try {
       _fileName ??= _getFileName();
       final path = '$_webdavDirectory/$_fileName';
       final data = await _client!.read(path);
-      await GStorage.importAllSettings(utf8.decode(data));
-      SmartDialog.showToast('恢复成功');
+      return Uint8List.fromList(data);
     } catch (e) {
-      SmartDialog.showToast('恢复失败: $e');
+      return null;
     }
   }
 }

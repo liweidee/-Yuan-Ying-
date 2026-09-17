@@ -15,12 +15,56 @@ AlertDialog serverDialog({
   return AlertDialog(
     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
     titlePadding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
-    contentPadding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
-    actionsPadding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-    actionsAlignment: MainAxisAlignment.spaceBetween,
+    // 底部留 8，避免内容与 actions 紧贴/重叠
+    contentPadding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
+    // 减小左右内边距，给底部按钮更多横向空间
+    actionsPadding: const EdgeInsets.fromLTRB(8, 0, 12, 8),
+    // 关键：不要用 spaceBetween，否则换行时按钮会各自独占一行
+    actionsAlignment: MainAxisAlignment.end,
+    // 溢出时紧凑地靠右垂直堆叠，而不是各自独占一行
+    actionsOverflowAlignment: OverflowBarAlignment.end,
+    actionsOverflowDirection: VerticalDirection.down,
+    actionsOverflowButtonSpacing: 8,
+    // 统一限制内容区最大高度，字段多时自动滚动，不挤压 actions
+    content: Builder(
+      builder: (context) {
+        final maxHeight = MediaQuery.of(context).size.height * 0.62;
+        return ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: maxHeight),
+          child: content,
+        );
+      },
+    ),
     title: title,
-    content: content,
     actions: actions,
+  );
+}
+
+/// 服务器弹窗底部按钮的紧凑样式。
+///
+/// [filled] 为 true 时不画边框（用于 FilledButton），
+/// 为 false 时画一条淡边框（用于 OutlinedButton / TextButton）。
+ButtonStyle serverActionButtonStyle(
+  BuildContext context, {
+  bool filled = false,
+}) {
+  final cs = Theme.of(context).colorScheme;
+  return ButtonStyle(
+    padding: const WidgetStatePropertyAll(
+      EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+    ),
+    minimumSize: const WidgetStatePropertyAll(Size(0, 36)),
+    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    visualDensity: VisualDensity.compact,
+    textStyle: const WidgetStatePropertyAll(TextStyle(fontSize: 13.5)),
+    shape: WidgetStatePropertyAll(
+      RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+    ),
+    side: filled
+        ? null
+        : WidgetStatePropertyAll(
+            BorderSide(color: cs.outline.withOpacity(0.6)),
+          ),
   );
 }
 
