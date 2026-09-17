@@ -51,6 +51,18 @@ import 'package:yuanying/modules/music/controllers/music_player_controller.dart'
 import 'package:audio_service/audio_service.dart';
 import 'package:yuanying/modules/music/services/audio_player_handler.dart';
 
+import 'package:yuanying/modules/emby/controllers/emby_server_controller.dart';
+import 'package:yuanying/modules/emby/controllers/emby_home_controller.dart';
+
+import 'package:yuanying/modules/jellyfin/controllers/jellyfin_server_controller.dart';
+import 'package:yuanying/modules/jellyfin/controllers/jellyfin_home_controller.dart';
+
+import 'package:yuanying/modules/ftp_drive/controllers/ftp_server_controller.dart';
+
+import 'package:yuanying/modules/smb_drive/controllers/smb_server_controller.dart';
+
+import 'package:yuanying/modules/fnos/controllers/fnos_server_controller.dart';
+
 // ============================================================================
 // 全局变量
 // ============================================================================
@@ -258,7 +270,23 @@ void main() async {
   Get.put(DebugLogService());
   Get.put(NovelTtsService(), permanent: true);
   await NovelFontService.init();
+  
+  // Emby 控制器（懒加载）
+  Get.lazyPut(() => EmbyServerController(), fenix: true);
+  Get.lazyPut(() => EmbyHomeController(), fenix: true);
 
+  // Jellyfin 控制器（懒加载）
+  Get.lazyPut(() => JellyfinServerController(), fenix: true);
+  Get.lazyPut(() => JellyfinHomeController(), fenix: true);
+
+  // FTP 控制器（懒加载）
+  Get.lazyPut(() => FtpServerController(), fenix: true);
+
+  // SMB 控制器（懒加载）
+  Get.lazyPut(() => SmbServerController(), fenix: true);
+
+  // FnOS 控制器（懒加载）
+  Get.lazyPut(() => FnosServerController(), fenix: true);
 
   // 音乐播放器初始化
   final musicController = Get.put(MusicPlayerController(), permanent: true);
@@ -316,7 +344,13 @@ class _WindowListener extends WindowListener {
   void onWindowMoved() {}
 
   @override
-  void onWindowClose() {}
+  void onWindowClose() async {
+    // 用户主动关闭应用：通知 NodeJSService 停止子进程，
+    // 避免 exitCode 回调误触发重启，形成幽灵进程
+    try {
+      await NodeJSService.instance.shutdown();
+    } catch (_) {}
+  }
 
   @override
   void onWindowMinimized() {}

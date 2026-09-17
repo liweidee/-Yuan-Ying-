@@ -1,3 +1,4 @@
+import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:yuanying/common/widgets/custom_icon.dart';
@@ -13,6 +14,8 @@ import 'package:yuanying/plugin/pl_player/models/fullscreen_mode.dart';
 import 'package:yuanying/plugin/pl_player/models/play_repeat.dart';
 import 'package:yuanying/plugin/pl_player/player_pref.dart';
 import 'package:yuanying/utils/platform_utils.dart';
+import 'package:yuanying/plugin/pl_player/models/external_player_type.dart';
+import 'package:yuanying/modules/setting/widgets/external_player_dialog.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 
 class PlaySettingPage extends StatefulWidget {
@@ -61,7 +64,15 @@ class _PlaySettingPageState extends State<PlaySettingPage> {
               subtitle: _getEngineLabel(),
               onTap: _showEngineDialog,
             ),
-            const SizedBox(height: 8),
+          const SizedBox(height: 8),
+          // ===== 第三方播放器 =====
+          _buildSettingItem(
+            icon: Icons.open_in_new,
+            title: '第三方播放器',
+            subtitle: _getExternalPlayerLabel(),
+            onTap: _showExternalPlayerDialog,
+          ),
+          const SizedBox(height: 8),
           // ===== 请求头策略 =====
           _buildSettingItem(
             icon: Icons.http_outlined,
@@ -336,6 +347,26 @@ class _PlaySettingPageState extends State<PlaySettingPage> {
   String _getEngineLabel() {
     final currentType = PlayerPref.playerEngine;
     return currentType == PlayerEngineType.mediaKit ? '当前：MPV（默认）' : '当前：MDK（实验性）';
+  }
+
+  /// 第三方播放器标签
+  String _getExternalPlayerLabel() {
+    final path = PlayerPref.externalPlayerPath;
+    final type = PlayerPref.externalPlayerType;
+    if (path.isEmpty) {
+      return '未配置（支持 MPV / VLC / PotPlayer）';
+    }
+    final fileName = path.split(Platform.pathSeparator).last;
+    return '${type.label}：$fileName';
+  }
+
+  /// 打开第三方播放器配置弹窗
+  void _showExternalPlayerDialog() async {
+    final result = await ExternalPlayerDialog.show(context);
+    if (result == true && mounted) {
+      _refresh();
+      SmartDialog.showToast('第三方播放器配置已保存');
+    }
   }
 
   String _getStrategyLabel(int index) {

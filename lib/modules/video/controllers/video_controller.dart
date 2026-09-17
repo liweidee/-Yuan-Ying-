@@ -38,9 +38,13 @@ import 'package:yuanying/t4/services/i_spider_service.dart';
 import 'package:yuanying/t4/services/drpy2_api_service.dart';
 import 'package:yuanying/modules/video/widgets/introduction/intro_detail_panel.dart';
 import 'package:yuanying/plugin/pl_player/models/play_repeat.dart';
+import 'playback_event_listener.dart';
 
 import 'package:yuanying/utils/storage_manager.dart';
 import 'package:yuanying/core/constants/storage_keys.dart';
+import 'package:yuanying/services/external_player_service.dart';
+import 'package:yuanying/plugin/pl_player/models/external_player_type.dart';
+import 'package:yuanying/modules/setting/views/play_setting_page.dart';
 
 class DetailController extends GetxController with GetTickerProviderStateMixin {
   // ===== tag 用于隔离控制器 =====
@@ -62,6 +66,23 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
   final RxString currentPlayUrl = ''.obs;
   final RxList<PlayQuality> currentQualities = <PlayQuality>[].obs;
   final RxBool isPlaying = false.obs;
+  bool _isDirectPushMode = false;
+
+  // 外部播放事件监听器（仅 Jellyfin 等需要主动上报的服务器会注入）
+  //   未注入时为 null，所有相关调用都会短路返回，行为与原版一致。
+  PlaybackEventListener? _playbackEventListener;
+
+  // push 模式下当前播放的标题（用于外部上报反查 itemId）
+  //   因为 push 模式下 introController.currentPlayEpisode 可能是错的，
+  //   只有 directTitle 才代表用户实际点击的那一集
+  String? _currentDirectTitle;
+
+  // 外部上报的进度 Timer（仅在注入了 listener 时启动）
+  Timer? _externalProgressTimer;
+
+  /// 推送模式下的请求头（如 WebDAV Basic Auth、自建服务器 token）
+  /// 仅在 isPush 模式下有效；非推送模式保持 null，不影响原逻辑。
+  Map<String, String>? _initHeaders;
 
   // 播放完成监听器（保存函数引用，用于移除）
   void Function(PlayerStatus)? _playCompletedListener;
@@ -418,6 +439,20 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
 
   /// 推送模式初始化（只处理直链/解析，接口模式走 loadVideoDetail）
   void _initPushMode(Map args) {
+    // 调用方显式传入 isDirectPushMode，或提供了完整的 VideoDetail
+    _isDirectPushMode = args['isDirectPushMode'] == true || args['videoDetail'] is VideoDetail;
+
+    // 解析并保存请求头（WebDAV Basic Auth 等）
+    final rawHeaders = args['headers'];
+    if (rawHeaders is Map && rawHeaders.isNotEmpty) {
+      _initHeaders = <String, String>{};
+      rawHeaders.forEach((k, v) {
+        _initHeaders![k.toString()] = v.toString();
+      });
+    } else {
+      _initHeaders = null;
+    }
+
     // 只处理直链/解析模式
     if (args['directUrl'] == null || args['directUrl'].toString().isEmpty) {
       detailError.value = '推送参数无效';
@@ -429,25 +464,72 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     final String title = args['directTitle'] ?? '直链播放';
     final bool isParserMode = args['isParserMode'] == true;
 
-    final detail = VideoDetail(
-      vodId: 'direct_${Uri.encodeComponent(url)}',
-      vodName: title,
-      vodPic: '',
-      vodContent: isParserMode ? '来自解析播放' : '来自推送播放',
-      playSources: [
-        PlaySource(
-          name: isParserMode ? '解析' : '推送',
-          episodes: [
-            Episode(
-              name: title,
-              url: url,
+    // ============================================================
+    // 核心增强：支持传入完整 VideoDetail（Emby 等外部来源）
+    // 设计原则：如果传入则使用，否则走原逻辑，完全向后兼容
+    // ============================================================
+    VideoDetail detail;
+    if (args['videoDetail'] is VideoDetail) {
+      // 直接使用传入的完整详情数据
+      detail = args['videoDetail'] as VideoDetail;
+
+      // 设置来源名称
+      if (args['sourceName'] != null) {
+        introController.setSourceName(args['sourceName'].toString());
+      }
+
+      // 安全兜底：如果外部数据没有 playSources，补充一个默认源
+      if (detail.playSources.isEmpty) {
+        detail = VideoDetail(
+          vodId: detail.vodId,
+          vodName: detail.vodName,
+          vodPic: detail.vodPic,
+          vodContent: detail.vodContent,
+          vodYear: detail.vodYear,
+          vodActor: detail.vodActor,
+          vodDirector: detail.vodDirector,
+          // vodTag 已移除（VideoDetail 没有此字段）
+          vodRemarks: detail.vodRemarks,
+          typeName: detail.typeName,
+          playSources: [
+            PlaySource(
+              name: isParserMode ? '解析' : '推送',
+              episodes: [Episode(name: title, url: url)],
             ),
           ],
-        ),
-      ],
-    );
+        );
+      }
+    } else {
+      // ===== 原逻辑：构造简化版 VideoDetail（完全不变） =====
+      detail = VideoDetail(
+        vodId: 'direct_${Uri.encodeComponent(url)}',
+        vodName: title,
+        vodPic: args['vodPic'] ?? '',
+        vodContent: args['vodContent'] ?? (isParserMode ? '来自解析播放' : '来自推送播放'),
+        vodYear: args['vodYear'] ?? '',
+        vodActor: args['vodActor'] ?? '',
+        vodDirector: args['vodDirector'] ?? '',
+        // vodTag 已移除（原逻辑中已无此字段）
+        vodRemarks: args['vodRemarks'] ?? '',
+        typeName: args['typeName'] ?? '',
+        playSources: [
+          PlaySource(
+            name: isParserMode ? '解析' : '推送',
+            episodes: [Episode(name: title, url: url)],
+          ),
+        ],
+      );
+    }
 
     introController.setVideoDetail(detail);
+
+    // 解析外部播放事件监听器（可选，未注入时保持 null）
+    final listener = args['playbackEventListener'];
+    if (listener is PlaybackEventListener) {
+      _playbackEventListener = listener;
+    }
+    // 保存 directTitle 供上报使用（用于反查 Jellyfin 的 itemId）
+    _currentDirectTitle = title;
 
     if (isParserMode) {
       if (args['parserSources'] != null) {
@@ -471,7 +553,86 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
       initialIndex: 0,
     );
 
+    // ============================================================
+    // 推送模式下定位当前集/曲目，同步播放列表状态
+    // - 兼容性保证：只在匹配成功时更新状态
+    // - 匹配失败 / playSources 为空 / 单集场景 保持原行为（从第 0 集开始）
+    // - 不抛异常、不阻塞播放
+    // ============================================================
+    _locateCurrentEpisodeInPushMode(detail, url, title);
+
     _playDirect(url);
+  }
+
+  /// 在推送模式下定位当前集/曲目，同步到 [IntroController] 与本类状态
+  ///
+  /// 作用：
+  /// - 让播放列表 UI 高亮正确的集/曲目
+  /// - 让"上一集 / 下一集 / 自动连播"从正确的索引开始计算
+  /// - 让 `_startPlay` 里的 `vodId: _currentEpisode?.name` 显示正确标题
+  ///
+  /// 匹配策略（按优先级）：
+  /// 1. URL 精确匹配（最优先，URL 在播放列表内唯一）
+  /// 2. 标题匹配（URL 未命中时的兜底；同标题时命中第一个）
+  ///
+  /// 匹配失败时**不做任何状态修改**，保持原有从第 0 集开始的行为。
+  void _locateCurrentEpisodeInPushMode(
+    VideoDetail detail,
+    String url,
+    String title,
+  ) {
+    if (detail.playSources.isEmpty) return;
+
+    int foundSourceIdx = -1;
+    int foundEpisodeIdx = -1;
+
+    // ---- 策略 1：URL 精确匹配 ----
+    for (int si = 0; si < detail.playSources.length; si++) {
+      final source = detail.playSources[si];
+      for (int ei = 0; ei < source.episodes.length; ei++) {
+        if (source.episodes[ei].url == url) {
+          foundSourceIdx = si;
+          foundEpisodeIdx = ei;
+          break;
+        }
+      }
+      if (foundEpisodeIdx >= 0) break;
+    }
+
+    // ---- 策略 2：标题匹配（兜底） ----
+    if (foundEpisodeIdx < 0 && title.isNotEmpty) {
+      for (int si = 0; si < detail.playSources.length; si++) {
+        final source = detail.playSources[si];
+        for (int ei = 0; ei < source.episodes.length; ei++) {
+          if (source.episodes[ei].name == title) {
+            foundSourceIdx = si;
+            foundEpisodeIdx = ei;
+            break;
+          }
+        }
+        if (foundEpisodeIdx >= 0) break;
+      }
+    }
+
+    // ---- 未匹配到：保持原行为，不修改任何状态 ----
+    if (foundEpisodeIdx < 0) {
+      debugPrint(
+          '[PushMode] 未匹配到 url=$url / title=$title，使用默认从第 0 集开始');
+      return;
+    }
+
+    debugPrint(
+        '[PushMode] 定位成功: source=$foundSourceIdx, episode=$foundEpisodeIdx');
+
+    // ---- 同步到 IntroController（驱动 UI 高亮 / 上下集计算） ----
+    introController.switchPlaySource(foundSourceIdx);
+    introController.switchEpisode(foundEpisodeIdx);
+
+    // ---- 同步到 DetailController 私有字段（供 _startPlay / 完成处理使用） ----
+    _currentSourceIndex = foundSourceIdx;
+    _currentEpisodeIndex = foundEpisodeIdx;
+    _currentEpisode =
+        detail.playSources[foundSourceIdx].episodes[foundEpisodeIdx];
   }
 
   Future<void> loadVideoDetail() async {
@@ -699,6 +860,18 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
 
     isPlaying.value = false;
     showParserButton.value = false;
+
+    // 直链推送模式：直接用 episode.url 播放，不走 _apiService
+    // 适用于 Emby / AList 等外部来源，其 Episode.url 已是完整 HTTP 直链
+    if (_isDirectPushMode) {
+      final directPlayUrl = PlayUrl(
+        parse: 0,
+        qualities: [PlayQuality(label: '直链', url: episode.url)],
+        headers: _initHeaders, // ← 新增：透传 headers（null 时与原逻辑一致）
+      );
+      await _startPlay(directPlayUrl, autoPlay, seekTo: seekTo);
+      return;
+    }
 
     try {
       final source = introController.getSource(sourceIndex);
@@ -1203,6 +1376,54 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
   }
 
+  /// 通知外部监听器：播放事件
+  ///
+  /// 未注入监听器时直接返回，不产生任何副作用。
+  /// 只在 push 模式（_playDirect）下被调用。
+  void _notifyExternalPlayback(String event) {
+    final listener = _playbackEventListener;
+    if (listener == null) return;
+
+    try {
+      // push 模式下 introController.currentPlayEpisode 的索引恒为 0，
+      // 会指向播放列表第一集；只有 _currentDirectTitle 才是用户实际点击的
+      final episodeName = _currentDirectTitle?.isNotEmpty == true
+          ? _currentDirectTitle!
+          : (introController.currentPlayEpisode?.name ?? '');
+      if (episodeName.isEmpty) return;
+
+      final position = playerController.position;
+      final duration = playerController.duration.value;
+
+      switch (event) {
+        case 'start':
+          listener.onPlaybackStart(
+            episodeName: episodeName,
+            position: position,
+            duration: duration,
+          );
+          break;
+        case 'progress':
+          listener.onPlaybackProgress(
+            episodeName: episodeName,
+            position: position,
+            duration: duration,
+            isPlaying: playerController.playerStatus.value.isPlaying,
+          );
+          break;
+        case 'stop':
+          listener.onPlaybackStop(
+            episodeName: episodeName,
+            position: position,
+            duration: duration,
+          );
+          break;
+      }
+    } catch (_) {
+      // 外部监听器出错不影响播放
+    }
+  }
+
   void _updateHistoryProgress() {
     try {
       final detail = introController.videoDetail.value;
@@ -1410,6 +1631,111 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
         'flag': flag,
       },
     );
+  }
+
+  /// 用第三方播放器（MPV / VLC / PotPlayer）打开当前视频
+  ///
+  /// 流程：
+  ///   1. 校验当前播放地址是否有效
+  ///   2. 检查用户是否已配置第三方播放器，未配置则引导跳转设置
+  ///   3. 暂停内置播放器，记录当前位置
+  ///   4. 调用 ExternalPlayerService 启动
+  ///   5. 通过 toast 反馈结果
+  Future<void> openWithExternalPlayer() async {
+    // ---- 1. 校验播放地址 ----
+    final url = currentPlayUrl.value;
+    if (url.isEmpty) {
+      SmartDialog.showToast('当前没有可播放的地址');
+      return;
+    }
+
+    // ---- 2. 检查是否已配置第三方播放器 ----
+    if (!ExternalPlayerService().isConfigured) {
+      final goSettings = await SmartDialog.show<bool>(
+        builder: (_) => AlertDialog(
+          title: const Text('未配置第三方播放器'),
+          content: const Text(
+            '请先在「设置 → 播放设置 → 第三方播放器」中配置播放器路径',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => SmartDialog.dismiss(result: false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => SmartDialog.dismiss(result: true),
+              child: const Text('前往设置'),
+            ),
+          ],
+        ),
+      );
+      if (goSettings == true) {
+        Get.to(() => const PlaySettingPage());
+      }
+      return;
+    }
+
+    // ---- 3. 暂停内置播放器，记录当前位置 ----
+    final position = playerController.position;
+    if (playerController.playerStatus.value.isPlaying) {
+      await playerController.pause();
+    }
+
+    // ---- 4. 启动第三方播放器 ----
+    final headers =
+        currentHeaders.value.isNotEmpty ? currentHeaders.value : null;
+
+    final error = await ExternalPlayerService().launch(
+      url: url,
+      startPosition: position,
+      headers: headers,
+    );
+
+    // ---- 5. 反馈 ----
+    if (error != null) {
+      SmartDialog.showToast(error);
+    } else {
+      final typeLabel = ExternalPlayerService().currentType.label;
+      SmartDialog.showToast('已用 $typeLabel 打开');
+    }
+  }
+
+  /// 用指定的第三方播放器打开当前视频
+  ///
+  /// 与 [openWithExternalPlayer] 的区别：
+  ///   - [openWithExternalPlayer] 走"当前配置的播放器"
+  ///   - 本方法由 UI 下拉菜单直接指定类型
+  Future<void> openWithPlayer(ExternalPlayerType type) async {
+    // ---- 1. 校验播放地址 ----
+    final url = currentPlayUrl.value;
+    if (url.isEmpty) {
+      SmartDialog.showToast('当前没有可播放的地址');
+      return;
+    }
+
+    // ---- 2. 暂停内置播放器，记录当前位置 ----
+    final position = playerController.position;
+    if (playerController.playerStatus.value.isPlaying) {
+      await playerController.pause();
+    }
+
+    // ---- 3. 启动指定类型的播放器 ----
+    final headers =
+        currentHeaders.value.isNotEmpty ? currentHeaders.value : null;
+
+    final error = await ExternalPlayerService().launchWithType(
+      type: type,
+      url: url,
+      startPosition: position,
+      headers: headers,
+    );
+
+    // ---- 4. 反馈 ----
+    if (error != null) {
+      SmartDialog.showToast(error);
+    } else {
+      SmartDialog.showToast('已用 ${type.label} 打开');
+    }
   }
 
   Future<void> playerInit({bool showLoading = true}) async {
@@ -1635,6 +1961,13 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     _updateHistoryProgress();
     _stopProgressUpdater();
 
+    // 通知外部监听器：先补发一次 progress，再上报 stop
+    //   保证即使播放时间很短（<2s），服务器也能拿到有效的 PlaybackPositionTicks
+    _externalProgressTimer?.cancel();
+    _externalProgressTimer = null;
+    _notifyExternalPlayback('progress');
+    _notifyExternalPlayback('stop');
+
     // 重置当前详情页的跳过设置（仅当次有效）
     skipStartDuration.value = 0;
     skipEndDuration.value = 0;
@@ -1703,7 +2036,10 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
   Future<void> _playDirect(String url) async {
     currentPlayUrl.value = url;
     currentQualities.value = [PlayQuality(label: '直链', url: url)];
-    currentHeaders.value = {};
+
+    // 应用请求头
+    final headers = _initHeaders ?? <String, String>{};
+    currentHeaders.value = headers;
 
     final isLocalFile = url.startsWith('file://') ||
         (Uri.tryParse(url)?.scheme == 'file') ||
@@ -1715,11 +2051,14 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
       dataSource = NetworkSource(
         videoSource: filePath,
         audioSource: null,
+        // 本地文件通常不需要 headers，但保留一致性
+        headers: headers.isEmpty ? null : headers,
       );
     } else {
       dataSource = NetworkSource(
         videoSource: url,
         audioSource: null,
+        headers: headers.isEmpty ? null : headers, // ← 新增
       );
     }
 
@@ -1735,6 +2074,25 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
       isLoadingDetail.value = false;
       await playerController.play();
       isPlaying.value = true;
+
+      // 通知外部监听器：播放开始 + 启动进度上报 Timer
+      //   仅在注入了 listener 时生效；否则完全无副作用
+      if (_playbackEventListener != null) {
+        // 上报 start
+        Future.microtask(() => _notifyExternalPlayback('start'));
+        // 2 秒后立即上报一次 progress（等播放器有 position 值）
+        Future.delayed(const Duration(seconds: 2), () {
+          if (_playbackEventListener != null) {
+            _notifyExternalPlayback('progress');
+          }
+        });
+        // 每 5 秒上报一次
+        _externalProgressTimer?.cancel();
+        _externalProgressTimer = Timer.periodic(
+          const Duration(seconds: 5),
+          (_) => _notifyExternalPlayback('progress'),
+        );
+      }
     } catch (e) {
       autoPlay.value = false;
       detailError.value = '播放失败: ${e.toString()}';

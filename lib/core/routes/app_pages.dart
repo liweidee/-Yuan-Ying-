@@ -35,6 +35,43 @@ import 'package:yuanying/modules/music/views/music_detail_page.dart';
 import 'package:yuanying/modules/music/widgets/player_card.dart';
 import 'package:yuanying/modules/tmdb/views/tmdb_detail_page.dart';
 import 'package:yuanying/modules/tmdb/views/tmdb_person_page.dart';
+import 'package:yuanying/modules/emby/views/emby_server_config_page.dart';
+import 'package:yuanying/modules/emby/views/emby_main_shell.dart';
+import 'package:yuanying/modules/emby/views/emby_detail_page.dart';
+import 'package:yuanying/modules/emby/views/emby_library_page.dart';
+
+import 'package:yuanying/modules/jellyfin/views/jellyfin_server_config_page.dart';
+import 'package:yuanying/modules/jellyfin/views/jellyfin_main_shell.dart';
+import 'package:yuanying/modules/jellyfin/views/jellyfin_detail_page.dart';
+import 'package:yuanying/modules/jellyfin/views/jellyfin_library_page.dart';
+
+import 'package:yuanying/modules/alist/views/alist_server_config_page.dart';
+import 'package:yuanying/modules/alist/views/alist_main_shell.dart';
+import 'package:yuanying/modules/alist/views/alist_file_list_page.dart';
+import 'package:yuanying/modules/alist/views/alist_download_page.dart';
+import 'package:yuanying/modules/alist/views/alist_recents_page.dart';
+import 'package:yuanying/modules/alist/views/alist_favorite_page.dart';
+import 'package:yuanying/modules/alist/views/alist_cache_page.dart';
+import 'package:yuanying/modules/alist/views/alist_account_page.dart';
+import 'package:yuanying/modules/alist/views/alist_file_reader_page.dart';
+import 'package:yuanying/modules/web_sniffer/views/web_sniffer_page.dart';
+
+import 'package:yuanying/modules/webdav_drive/views/webdav_server_config_page.dart';
+import 'package:yuanying/modules/webdav_drive/views/webdav_main_shell.dart';
+
+import 'package:yuanying/modules/ftp_drive/views/ftp_server_config_page.dart';
+import 'package:yuanying/modules/ftp_drive/views/ftp_main_shell.dart';
+
+import 'package:yuanying/modules/smb_drive/views/smb_server_config_page.dart';
+import 'package:yuanying/modules/smb_drive/views/smb_main_shell.dart';
+
+import 'package:yuanying/modules/fnos/views/fnos_server_config_page.dart';
+import 'package:yuanying/modules/fnos/views/fnos_main_shell.dart';
+import 'package:yuanying/modules/fnos/views/fnos_library_page.dart';
+import 'package:yuanying/modules/fnos/views/fnos_detail_page.dart';
+import 'package:yuanying/modules/fnos/views/fnos_favorite_page.dart';
+import 'package:yuanying/modules/fnos/views/fnos_search_page.dart';
+
 
 class AppPages {
   static const String initial = '/';
@@ -71,7 +108,46 @@ class AppPages {
   static const String musicPlayer = '/musicPlayer';
   static const String tmdbDetail = '/tmdbDetail';
   static const String tmdbPerson = '/tmdbPerson';
+  static const String embyServerConfig = '/emby/server_config';
+  static const String embyMain = '/emby/main';
+  static const String embyDetail = '/emby/detail';
+  static const String embyLibrary = '/emby/library';
 
+  static const String jellyfinServerConfig = '/jellyfin/server_config';
+  static const String jellyfinMain = '/jellyfin/main';
+  static const String jellyfinDetail = '/jellyfin/detail';
+  static const String jellyfinLibrary = '/jellyfin/library';
+  
+  static const String alistServerConfig = '/alist/server_config';
+  static const String alistMain = '/alist/main';
+  static const String alistFileList = '/alist/file_list';
+  static const String alistDownload = '/alist/download';
+  static const String alistRecents = '/alist/recents';
+  static const String alistFavorite = '/alist/favorite';
+  static const String alistCache = '/alist/cache';
+  static const String alistAccount = '/alist/account';
+  static const String alistFileReader = '/alist/file_reader';
+  static const String webSniffer = '/lab/web_sniffer';
+
+  // WebDAV
+  static const String webdavServerConfig = '/webdav/server_config';
+  static const String webdavMain = '/webdav/main';
+
+  // FTP / SFTP
+  static const String ftpServerConfig = '/ftp/server_config';
+  static const String ftpMain = '/ftp/main';
+
+  // SMB
+  static const String smbServerConfig = '/smb/server_config';
+  static const String smbMain = '/smb/main';
+
+  // FnOS 飞牛影视
+  static const String fnosServerConfig = '/fnos/server_config';
+  static const String fnosMain         = '/fnos/main';
+  static const String fnosLibrary      = '/fnos/library';
+  static const String fnosDetail       = '/fnos/detail';
+  static const String fnosFavorite     = '/fnos/favorite';
+  static const String fnosSearch     = '/fnos/search';
 
   static final List<GetPage> routes = [
     GetPage(name: initial, page: () => const MainPage()),
@@ -136,6 +212,91 @@ class AppPages {
         personId: Get.arguments['personId'],
         personName: Get.arguments['personName'],
       ),
+    ),
+    GetPage(name: embyServerConfig, page: () => const EmbyServerConfigPage()),
+    GetPage(name: embyMain, page: () => const EmbyMainShell()),
+    GetPage(name: embyDetail, page: () => const EmbyDetailPage()),
+    GetPage(name: embyLibrary, page: () => const EmbyLibraryPage()),
+
+    GetPage(
+      name: jellyfinServerConfig,
+      page: () => const JellyfinServerConfigPage(),
+    ),
+    GetPage(
+      name: jellyfinMain,
+      page: () => const JellyfinMainShell(),
+    ),
+    GetPage(
+      name: jellyfinDetail,
+      page: () => const JellyfinDetailPage(),
+    ),
+    GetPage(
+      name: jellyfinLibrary,
+      page: () => const JellyfinLibraryPage(),
+    ),
+
+    GetPage(name: alistServerConfig, page: () => const AlistServerConfigPage()),
+    GetPage(name: alistMain, page: () => const AlistMainShell()),
+    GetPage(name: alistFileList, page: () => const AlistFileListWrapper()),
+    GetPage(name: alistDownload, page: () => const AlistDownloadPage()),
+    GetPage(name: alistRecents, page: () => const AlistRecentsPage()),
+    GetPage(name: alistFavorite, page: () => const AlistFavoritePage()),
+    GetPage(name: alistCache, page: () => const AlistCachePage()),
+    GetPage(name: alistAccount, page: () => const AlistAccountPage()),
+    GetPage(name: alistFileReader, page: () => const AlistFileReaderPage()),
+    GetPage(name: webSniffer, page: () => const WebSnifferPage()),
+
+    GetPage(
+      name: webdavServerConfig,
+      page: () => const WebDavServerConfigPage(),
+    ),
+    GetPage(
+      name: webdavMain,
+      page: () => const WebDavMainShell(),
+    ),
+
+    GetPage(
+      name: ftpServerConfig,
+      page: () => const FtpServerConfigPage(),
+    ),
+    GetPage(
+      name: ftpMain,
+      page: () => const FtpMainShell(),
+    ),
+
+    GetPage(
+      name: smbServerConfig,
+      page: () => const SmbServerConfigPage(),
+    ),
+    GetPage(
+      name: smbMain,
+      page: () => const SmbMainShell(),
+    ),
+
+    // FnOS 飞牛影视
+    GetPage(
+      name: fnosServerConfig,
+      page: () => const FnosServerConfigPage(),
+    ),
+    GetPage(
+      name: fnosMain,
+      page: () => const FnosMainShell(),
+    ),
+    GetPage(
+      name: fnosLibrary,
+      page: () => const FnosLibraryPage(),
+    ),
+    GetPage(
+      name: fnosDetail,
+      page: () => const FnosDetailPage(),
+    ),
+    GetPage(
+      name: fnosFavorite,
+      page: () => const FnosFavoritePage()
+    ),
+    GetPage(
+      name: fnosSearch,
+      page: () => const FnosSearchPage()
     ),
   ];
 }

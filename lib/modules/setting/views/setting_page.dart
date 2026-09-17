@@ -126,7 +126,7 @@ class SettingPage extends StatelessWidget {
             context: context,
             icon: Icons.info_outline,
             title: '关于',
-            subtitle: '应用版本与相关信息',
+            subtitle: '应用版本信息与调试日志',
             onTap: () => Get.toNamed(AppPages.about),  // 跳转到关于页面
           ),
         ],

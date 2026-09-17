@@ -33,7 +33,43 @@ class StorageManager {
       if (value is T) return value;
       return defaultValue;
     }
-    return _settingBox.get(key, defaultValue: defaultValue);
+
+    final raw = _settingBox.get(key);
+    if (raw == null) return defaultValue;
+    if (raw is T) return raw;
+
+    // ------------------------------------------------------------------
+    // 兼容 Hive 序列化 List<T> 后取回变成 List<dynamic> 的问题
+    // Hive 不保留泛型参数，直接 `as List<int>` 会抛 TypeError
+    // ------------------------------------------------------------------
+    if (raw is List) {
+      final t = T.toString();
+      try {
+        if (t.contains('List<int>')) {
+          return raw.cast<int>().toList() as T;
+        }
+        if (t.contains('List<double>')) {
+          return raw.cast<double>().toList() as T;
+        }
+        if (t.contains('List<String>')) {
+          return raw.cast<String>().toList() as T;
+        }
+        if (t.contains('List<bool>')) {
+          return raw.cast<bool>().toList() as T;
+        }
+        if (t.contains('List<num>')) {
+          return raw.cast<num>().toList() as T;
+        }
+        if (t.contains('List<dynamic>')) {
+          return List<dynamic>.from(raw) as T;
+        }
+      } catch (_) {
+        // 转换失败（例如元素类型不对）→ 回落到 defaultValue
+      }
+    }
+
+    // 其它无法兼容的情况：返回默认值，绝不抛异常
+    return defaultValue;
   }
 
   static Future<void> deleteSetting(String key) async {

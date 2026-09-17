@@ -1,0 +1,96 @@
+.
+|-- CMakeLists.txt
+|-- flutter
+|   |-- CMakeLists.txt
+|   |-- ephemeral
+|   |   |-- cpp_client_wrapper
+|   |   |   |-- binary_messenger_impl.h
+|   |   |   |-- byte_buffer_streams.h
+|   |   |   |-- core_implementations.cc
+|   |   |   |-- engine_method_result.cc
+|   |   |   |-- flutter_engine.cc
+|   |   |   |-- flutter_view_controller.cc
+|   |   |   |-- include
+|   |   |   |   `-- flutter
+|   |   |   |       |-- basic_message_channel.h
+|   |   |   |       |-- binary_messenger.h
+|   |   |   |       |-- byte_streams.h
+|   |   |   |       |-- dart_project.h
+|   |   |   |       |-- encodable_value.h
+|   |   |   |       |-- engine_method_result.h
+|   |   |   |       |-- event_channel.h
+|   |   |   |       |-- event_sink.h
+|   |   |   |       |-- event_stream_handler.h
+|   |   |   |       |-- event_stream_handler_functions.h
+|   |   |   |       |-- flutter_engine.h
+|   |   |   |       |-- flutter_view.h
+|   |   |   |       |-- flutter_view_controller.h
+|   |   |   |       |-- message_codec.h
+|   |   |   |       |-- method_call.h
+|   |   |   |       |-- method_channel.h
+|   |   |   |       |-- method_codec.h
+|   |   |   |       |-- method_result.h
+|   |   |   |       |-- method_result_functions.h
+|   |   |   |       |-- plugin_registrar.h
+|   |   |   |       |-- plugin_registrar_windows.h
+|   |   |   |       |-- plugin_registry.h
+|   |   |   |       |-- standard_codec_serializer.h
+|   |   |   |       |-- standard_message_codec.h
+|   |   |   |       |-- standard_method_codec.h
+|   |   |   |       `-- texture_registrar.h
+|   |   |   |-- plugin_registrar.cc
+|   |   |   |-- readme
+|   |   |   |-- standard_codec.cc
+|   |   |   `-- texture_registrar_impl.h
+|   |   |-- flutter_export.h
+|   |   |-- flutter_messenger.h
+|   |   |-- flutter_plugin_registrar.h
+|   |   |-- flutter_texture_registrar.h
+|   |   |-- flutter_windows.dll
+|   |   |-- flutter_windows.dll.exp
+|   |   |-- flutter_windows.dll.lib
+|   |   |-- flutter_windows.dll.pdb
+|   |   |-- flutter_windows.h
+|   |   |-- generated_config.cmake
+|   |   `-- icudtl.dat
+|   |-- generated_plugin_registrant.cc
+|   |-- generated_plugin_registrant.h
+|   `-- generated_plugins.cmake
+|-- nodejs
+|   |-- project
+|   `-- runtime
+|       |-- CHANGELOG.md
+|       |-- LICENSE
+|       |-- README.md
+|       |-- corepack
+|       |-- corepack.cmd
+|       |-- install_tools.bat
+|       |-- node.exe
+|       |-- node_etw_provider.man
+|       |-- nodevars.bat
+|       |-- npm
+|       |-- npm.cmd
+|       |-- npx
+|       `-- npx.cmd
+|-- packaging
+|   `-- exe
+|       |-- ChineseSimplified.isl
+|       |-- inno_setup.iss
+|       `-- make_config.yaml
+|-- runner
+|   |-- CMakeLists.txt
+|   |-- Runner.rc
+|   |-- flutter_window.cpp
+|   |-- flutter_window.h
+|   |-- main.cpp
+|   |-- resource.h
+|   |-- resources
+|   |   `-- app_icon.ico
+|   |-- runner.exe.manifest
+|   |-- utils.cpp
+|   |-- utils.h
+|   |-- win32_window.cpp
+|   `-- win32_window.h
+`-- windows_tree.txt
+
+12 directories, 81 files

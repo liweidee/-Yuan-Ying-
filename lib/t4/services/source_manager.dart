@@ -257,33 +257,33 @@ class SourceManager extends GetxController {
     NodeJSService.instance.updateConfigType(currentConfigType.value);
 
     try {
-      if (PlatformUtils.isDesktop) {
-        final customConfigs = GStorage.getCustomSites();
-        if (customConfigs.isNotEmpty) {
-          final savedKey = GStorage.getSetting<String>('selected_config_key');
-          if (savedKey != null && savedKey.isNotEmpty) {
-            final targetConfig = customConfigs.firstWhereOrNull(
-              (c) => c['key']?.toString() == savedKey
-            );
-            if (targetConfig != null) {
-              final configType = targetConfig['configType']?.toString() ?? 'tvbox';
-              if (configType == 'catvod') {
-                final tvboxConfig = customConfigs.firstWhereOrNull(
-                  (c) => (c['configType']?.toString() ?? 'tvbox') != 'catvod'
-                );
-                if (tvboxConfig != null) {
-                  final newKey = tvboxConfig['key']?.toString() ?? '';
-                  await GStorage.setSetting('selected_config_key', newKey);
-                  print('[SourceManager] 桌面端自动跳转到 TVBox 配置: $newKey');
-                } else {
-                  await GStorage.deleteSetting('selected_config_key');
-                  print('[SourceManager] 桌面端无可用 TVBox 配置');
-                }
-              }
-            }
-          }
-        }
-      }
+      // if (PlatformUtils.isDesktop) {
+      //   final customConfigs = GStorage.getCustomSites();
+      //   if (customConfigs.isNotEmpty) {
+      //     final savedKey = GStorage.getSetting<String>('selected_config_key');
+      //     if (savedKey != null && savedKey.isNotEmpty) {
+      //       final targetConfig = customConfigs.firstWhereOrNull(
+      //         (c) => c['key']?.toString() == savedKey
+      //       );
+      //       if (targetConfig != null) {
+      //         final configType = targetConfig['configType']?.toString() ?? 'tvbox';
+      //         if (configType == 'catvod') {
+      //           final tvboxConfig = customConfigs.firstWhereOrNull(
+      //             (c) => (c['configType']?.toString() ?? 'tvbox') != 'catvod'
+      //           );
+      //           if (tvboxConfig != null) {
+      //             final newKey = tvboxConfig['key']?.toString() ?? '';
+      //             await GStorage.setSetting('selected_config_key', newKey);
+      //             print('[SourceManager] 桌面端自动跳转到 TVBox 配置: $newKey');
+      //           } else {
+      //             await GStorage.deleteSetting('selected_config_key');
+      //             print('[SourceManager] 桌面端无可用 TVBox 配置');
+      //           }
+      //         }
+      //       }
+      //     }
+      //   }
+      // }
 
       if (configSource.value == 'local') {
         await _loadLocalConfigBySavedKey();
@@ -335,12 +335,12 @@ class SourceManager extends GetxController {
     }
 
     final configType = selectedConfig['configType']?.toString() ?? 'tvbox';
-    if (PlatformUtils.isDesktop && configType == 'catvod') {
-      print('[SourceManager] 桌面端跳过猫影视配置加载');
-      remoteSites.clear();
-      remoteParses.clear();
-      return;
-    }
+    // if (PlatformUtils.isDesktop && configType == 'catvod') {
+    //   print('[SourceManager] 桌面端跳过猫影视配置加载');
+    //   remoteSites.clear();
+    //   remoteParses.clear();
+    //   return;
+    // }
     if (configType == 'catvod') {
       await _loadCatVodConfig(configUrl, loadId: loadId);
       return;
@@ -736,10 +736,10 @@ class SourceManager extends GetxController {
     if (targetConfig == null) return;
     
     final configType = targetConfig['configType']?.toString() ?? 'tvbox';
-    if (PlatformUtils.isDesktop && configType == 'catvod') {
-      SmartDialog.showToast('猫影视配置仅支持移动端');
-      return;
-    }
+    // if (PlatformUtils.isDesktop && configType == 'catvod') {
+    //   SmartDialog.showToast('猫影视配置仅支持移动端');
+    //   return;
+    // }
     
     // 切换到非猫影视时，只清 Dart 层状态，不调用原生 stopNodeJS
     if (configType != 'catvod') {

@@ -15,7 +15,7 @@ import 'package:yuanying/utils/platform_utils.dart';
 import 'package:yuanying/utils/storage.dart';
 import 'package:yuanying/utils/update.dart';
 import 'package:yuanying/utils/utils.dart';
-import 'package:yuanying/common/widgets/dialog/export_import.dart';
+import 'package:yuanying/common/widgets/dialog/backup_dialog.dart';
 import 'package:yuanying/utils/device_utils.dart';
 import 'package:yuanying/t4/services/source_manager.dart';
 
@@ -261,18 +261,16 @@ class _AboutPageState extends State<AboutPage> {
           ),
 
           // =============================================================
-          // 导入/导出设置
+          // 备份与恢复（ZIP）
           // =============================================================
           ListTile(
-            title: const Text('导入/导出设置'),
-            leading: const Icon(Icons.import_export_outlined),
-            onTap: () => showImportExportDialog<String>(
-              context,
-              title: '设置',
-              localFileName: () => 'setting_${DeviceUtils.platformName}',
-              onExport: GStorage.exportAllSettings,
-              onImport: GStorage.importAllSettings,
+            title: const Text('备份与恢复'),
+            subtitle: const Text(
+              '导出/导入所有设置为 ZIP 文件',
+              style: TextStyle(fontSize: 12),
             ),
+            leading: const Icon(Icons.backup_outlined),
+            onTap: () => showBackupDialog(context),
           ),
 
           // =============================================================

@@ -11,6 +11,8 @@ import 'package:yuanying/plugin/pl_player/controller.dart';
 import 'package:yuanying/utils/platform_utils.dart';
 import 'package:yuanying/plugin/pl_player/player_pref.dart';
 import 'package:yuanying/plugin/pl_player/models/data_status.dart';
+import 'package:yuanying/plugin/pl_player/models/external_player_type.dart';
+import 'package:yuanying/services/external_player_service.dart';
 
 class HeaderControl extends StatefulWidget {
   final String controllerTag;
@@ -427,6 +429,9 @@ class _HeaderControlState extends State<HeaderControl> {
                     icon: const Icon(Icons.cast, size: 19, color: Colors.white),
                   ),
                 ),
+                // 用第三方播放器打开（仅桌面端显示）
+                if (PlatformUtils.isDesktop)
+                  _buildExternalPlayerEntry(controller),
                 // 弹幕开关
                 SizedBox(
                   width: 40,
@@ -540,6 +545,71 @@ class _HeaderControlState extends State<HeaderControl> {
         builder: (context) => SettingSheet(controller: controller, isWide: false),
       );
     }
+  }
+
+  /// 构建第三方播放器入口
+  ///
+  /// 交互分流：
+  ///   - 未配置任何播放器 → 单按钮，点击引导用户去设置
+  ///   - 已配置播放器 → 下拉菜单，列出所有已配置的播放器
+  ///     （无对号、无默认值，点击哪项就用哪项）
+  Widget _buildExternalPlayerEntry(DetailController controller) {
+    // 每次 build 时重新读取，保证与设置页实时联动
+    // （用户清除某个播放器后，这里下次构建时该选项自动消失）
+    final configured = ExternalPlayerService().getConfiguredPlayers();
+
+    // ---- 场景 1：一个都没配置 → 单按钮引导 ----
+    if (configured.isEmpty) {
+      return SizedBox(
+        width: 40,
+        height: 34,
+        child: IconButton(
+          tooltip: '用第三方播放器打开',
+          style: const ButtonStyle(
+            padding: WidgetStatePropertyAll(EdgeInsets.zero),
+          ),
+          onPressed: controller.openWithExternalPlayer,
+          icon: const Icon(
+            Icons.open_in_new,
+            size: 19,
+            color: Colors.white,
+          ),
+        ),
+      );
+    }
+
+    // ---- 场景 2：已配置 → 下拉菜单 ----
+    return PopupMenuButton<ExternalPlayerType>(
+      tooltip: '用第三方播放器打开',
+      offset: const Offset(0, 40),
+      color: Colors.black.withValues(alpha: 0.8),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      itemBuilder: (context) {
+        return configured.map((type) {
+          return PopupMenuItem<ExternalPlayerType>(
+            value: type,
+            height: 38,
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            child: Text(
+              type.label,
+              style: const TextStyle(color: Colors.white, fontSize: 13),
+            ),
+          );
+        }).toList();
+      },
+      onSelected: (type) => controller.openWithPlayer(type),
+      child: const SizedBox(
+        width: 40,
+        height: 34,
+        child: Center(
+          child: Icon(
+            Icons.open_in_new,
+            size: 19,
+            color: Colors.white,
+          ),
+        ),
+      ),
+    );
   }
 
   void _switchEngine(PlayerEngineType newType) async {

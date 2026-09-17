@@ -4,6 +4,7 @@ import 'package:yuanying/modules/home/views/home_page.dart';
 import 'package:yuanying/modules/local_file/views/local_file_page.dart';
 import 'package:yuanying/modules/live/views/live_page.dart';
 import 'package:yuanying/modules/setting/views/setting_page.dart';
+import 'package:yuanying/modules/emby/views/lab_page.dart';
 
 /// 导航栏类型枚举
 enum NavigationBarType implements EnumWithLabel {
@@ -24,6 +25,12 @@ enum NavigationBarType implements EnumWithLabel {
     Icon(Icons.folder_outlined, size: 24),
     Icon(Icons.folder, size: 24),
     LocalFilePage(),
+  ),
+  lab(
+    '实验室',
+    Icon(Icons.science_outlined, size: 24),
+    Icon(Icons.science, size: 24),
+    const LabPage(),
   ),
   setting(
     '设置',

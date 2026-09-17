@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:yuanying/utils/storage.dart';
+import 'package:yuanying/plugin/pl_player/models/external_player_type.dart';
 
 /// 播放器内核类型
 enum PlayerEngineType {
@@ -413,4 +414,38 @@ class PlayerPref {
   static set playerEngine(PlayerEngineType value) {
     _box.put('playerEngine', value.index);
   }
+
+
+  // ===== 第三方播放器 =====
+  /// 当前选中的第三方播放器类型（默认 MPV）
+  static ExternalPlayerType get externalPlayerType {
+    final index = _box.get('external_player_type', defaultValue: 0);
+    if (index >= 0 && index < ExternalPlayerType.values.length) {
+      return ExternalPlayerType.values[index];
+    }
+    return ExternalPlayerType.mpv;
+  }
+
+  static set externalPlayerType(ExternalPlayerType value) {
+    _box.put('external_player_type', value.index);
+  }
+
+  /// 获取指定播放器类型的已配置路径
+  ///
+  /// 存储键格式：`external_player_path_<type.name>`
+  /// 例如：external_player_path_mpv、external_player_path_vlc、external_player_path_potPlayer
+  static String getPathForType(ExternalPlayerType type) {
+    return _box.get(
+      'external_player_path_${type.name}',
+      defaultValue: '',
+    );
+  }
+
+  /// 设置指定播放器类型的路径
+  static void setPathForType(ExternalPlayerType type, String path) {
+    _box.put('external_player_path_${type.name}', path);
+  }
+
+  /// 当前选中类型的播放器路径（快捷方式）
+  static String get externalPlayerPath => getPathForType(externalPlayerType);
 }

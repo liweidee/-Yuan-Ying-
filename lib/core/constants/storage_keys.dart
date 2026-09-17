@@ -224,3 +224,68 @@ abstract final class LocalCacheKey {
   static const String buvid = 'buvid';
   static const String historyPause = 'historyPause';
 }
+
+abstract final class EmbyStorageKeys {
+  static const String servers = 'emby_servers';            // List<Map>
+  static const String currentServerId = 'emby_current_server_id';
+  // Token 存储，key 为 'emby_token_${serverId}'
+  static const String tokenPrefix = 'emby_token_';
+  static const String downloadList = 'emby_download_list';
+}
+
+abstract final class JellyfinStorageKeys {
+  static const String servers = 'jellyfin_servers';
+  static const String currentServerId = 'jellyfin_current_server_id';
+  static const String tokenPrefix = 'jellyfin_token_';
+  static const String downloadList = 'jellyfin_download_list';
+}
+
+abstract final class AlistStorageKeys {
+  // ===== 服务器配置 =====
+  /// 服务器列表存储键（List<Map<String, dynamic>>）
+  static const String servers = 'alist_servers';
+  /// 当前选中的服务器 ID
+  static const String currentServerId = 'alist_current_server_id';
+  /// Token 前缀，实际存储键为 'alist_token_{serverId}'
+  static const String tokenPrefix = 'alist_token_';
+
+  // ===== 下载 =====
+  static const String downloadRecords = 'alist_download_records';
+  static const String maxRunningTaskCount = 'alist_max_running_task';
+
+  // ===== 文件相关 =====
+  static const String filePasswords = 'alist_file_passwords';
+  static const String fileViewingRecords = 'alist_file_viewing_records';
+  static const String favorites = 'alist_favorites';
+
+  // ===== 设置项 =====
+  static const String ignoreSSLError = 'alist_ignore_ssl_error';
+  static const String fileNameMaxLines = 'alist_file_name_max_lines';
+  static const String fileSortWayIndex = 'alist_file_sort_index';
+  static const String fileSortWayUp = 'alist_file_sort_up';
+  static const String alistViewMode = 'alist_view_mode';
+}
+
+abstract final class WebDavStorageKeys {
+  static const String servers = 'webdav_servers';
+  static const String currentId = 'webdav_current_id';
+}
+
+abstract final class FtpStorageKeys {
+  static const String servers = 'ftp_servers';
+  static const String currentId = 'ftp_current_id';
+}
+
+abstract final class SmbStorageKeys {
+  static const String servers = 'smb_servers';
+  static const String currentId = 'smb_current_id';
+}
+
+abstract final class FnosStorageKeys {
+  /// 服务器列表 List<Map>
+  static const String servers = 'fnos_servers';
+  /// 当前选中的服务器 ID
+  static const String currentServerId = 'fnos_current_server_id';
+  /// Token 前缀，实际存储键 = 'fnos_token_{serverId}'
+  static const String tokenPrefix = 'fnos_token_';
+}

@@ -37,10 +37,10 @@ class SiteConfigController extends GetxController {
     if (!sites.any((s) => s.key == key)) return;
 
     final targetSite = sites.firstWhere((s) => s.key == key);
-    if (PlatformUtils.isDesktop && targetSite.isCatVodConfig) {
-      SmartDialog.showToast('猫影视配置仅支持移动端');
-      return;
-    }
+    // if (PlatformUtils.isDesktop && targetSite.isCatVodConfig) {
+    //   SmartDialog.showToast('猫影视配置仅支持移动端');
+    //   return;
+    // }
 
     // 1. 立即更新选中状态（同步）
     currentSiteKey.value = key;
@@ -85,10 +85,10 @@ class SiteConfigController extends GetxController {
 
   // ===== 手动添加远端配置 =====
   void addSite(String name, String api, {String configType = 'tvbox'}) {
-    if (PlatformUtils.isDesktop && configType == 'catvod') {
-      SmartDialog.showToast('桌面端不支持猫影视配置');
-      return;
-    }
+    // if (PlatformUtils.isDesktop && configType == 'catvod') {
+    //   SmartDialog.showToast('桌面端不支持猫影视配置');
+    //   return;
+    // }
 
     final key = _generateKey(name);
     final newSite = Site(
@@ -119,10 +119,10 @@ class SiteConfigController extends GetxController {
   // ===== 本地缓存配置（手动输入/剪切板导入） =====
   void addLocalConfig(String name, String fileName, Map<String, dynamic> configPackage, {String configType = 'tvbox'}) {
     // ===== 桌面端拦截 =====
-    if (PlatformUtils.isDesktop && configType == 'catvod') {
-      SmartDialog.showToast('桌面端不支持猫影视配置');
-      return;
-    }
+    // if (PlatformUtils.isDesktop && configType == 'catvod') {
+    //   SmartDialog.showToast('桌面端不支持猫影视配置');
+    //   return;
+    // }
 
     final key = _generateKey(name);
     final packageKey = 'package_${DateTime.now().millisecondsSinceEpoch}_$key';
@@ -200,6 +200,8 @@ class SiteConfigController extends GetxController {
         source: site.source,
         configPackageKey: site.configPackageKey,
         ext: site.ext,
+        configType: site.configType,
+        zipFilePath: site.zipFilePath,
       );
       sites[index] = updatedSite;
       GStorage.updateCustomSite(key, updatedSite.toJson());

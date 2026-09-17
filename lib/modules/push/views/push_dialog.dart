@@ -324,7 +324,7 @@ class _PushDialogState extends State<PushDialog> {
     final items = [
       {'label': '直链', 'icon': Icons.check_rounded, 'mode': ParseMode.direct},
       {'label': '解析', 'icon': null, 'mode': ParseMode.parser},
-      {'label': '接口', 'icon': null, 'mode': ParseMode.api},
+      {'label': '网盘', 'icon': null, 'mode': ParseMode.api},
       {'label': '磁力', 'icon': Icons.flash_on_rounded, 'mode': ParseMode.magnet},
     ];
 

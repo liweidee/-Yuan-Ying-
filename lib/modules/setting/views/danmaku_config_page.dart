@@ -214,6 +214,7 @@ class DanmakuConfigPage extends StatelessWidget {
               PopupMenuButton<String>(
                 icon: Icon(Icons.more_vert, color: theme.colorScheme.outline),
                 offset: const Offset(0, 40),
+                tooltip: '显示菜单',
                 onSelected: (value) {
                   if (value == 'edit') _showEditDialog(context, controller, api);
                   else if (value == 'copy') _copyApiLink(context, api.api);

@@ -180,6 +180,11 @@ dependencies:
       url: https://github.com/bggRGjQaUbCoE/window_manager.git
       path: packages/window_manager
       ref: main
+  flutter_slidable: ^3.0.0
+  xml: ^6.5.0
+  pure_ftp: ^0.7.5
+  dartssh2: ^2.14.0
+  smb_connect: ^0.0.9
 
 dependency_overrides:
   file_picker: ^12.0.0-beta.7

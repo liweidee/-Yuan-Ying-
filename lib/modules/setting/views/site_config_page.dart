@@ -154,7 +154,8 @@ class SiteConfigPage extends StatelessWidget {
     required bool isCurrent,
     required SiteConfigController controller,
   }) {
-    final isLocal = site.isLocalConfig || site.isLocalFile;
+    final isLocalZip = site.isCatVodLocalZip;
+    final isLocal = site.isLocalConfig || site.isLocalFile || isLocalZip;
 
     return Material(
       color: Colors.transparent,
@@ -193,7 +194,7 @@ class SiteConfigPage extends StatelessWidget {
                     borderRadius: Style.mdRadius,
                   ),
                   child: Icon(
-                    site.isLocalFile ? Icons.insert_drive_file : (isLocal ? Icons.folder_open_outlined : Icons.link),
+                    isLocalZip ? Icons.folder_zip : (site.isLocalFile ? Icons.insert_drive_file : (isLocal ? Icons.folder_open_outlined : Icons.link)),
                     color: theme.colorScheme.primary,
                     size: 24,
                   ),
@@ -219,28 +220,61 @@ class SiteConfigPage extends StatelessWidget {
                           ),
                           if (isLocal) ...[
                             const SizedBox(width: 6),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: theme.colorScheme.secondaryContainer,
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: Text(
-                                site.isLocalFile ? '本地文件' : '本地缓存',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  color: theme.colorScheme.onSecondaryContainer,
-                                  fontWeight: FontWeight.w500,
+                            if (isLocalZip)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: theme.colorScheme.tertiaryContainer,
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  '本地ZIP',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    color: theme.colorScheme.onTertiaryContainer,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              )
+                            else if (site.isLocalFile)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: theme.colorScheme.secondaryContainer,
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  '本地文件',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    color: theme.colorScheme.onSecondaryContainer,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              )
+                            else if (site.isLocalConfig)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: theme.colorScheme.secondaryContainer,
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  '本地缓存',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    color: theme.colorScheme.onSecondaryContainer,
+                                    fontWeight: FontWeight.w500,
+                                  ),
                                 ),
                               ),
-                            ),
                           ],
                         ],
                       ),
                       Padding(
                         padding: const EdgeInsets.only(top: 4),
                         child: Text(
-                          site.api,
+                          isLocalZip ? (site.zipFilePath ?? site.api) : site.api,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(fontSize: 12, color: theme.colorScheme.outline),
@@ -966,11 +1000,15 @@ class SiteConfigPage extends StatelessWidget {
                         value: 'tvbox',
                         child: Text('TVBox', style: TextStyle(fontSize: 14)),
                       ),
-                      if (!PlatformUtils.isDesktop)
-                        const DropdownMenuItem(
-                          value: 'catvod',
-                          child: Text('CatVod (猫影视)', style: TextStyle(fontSize: 14)),
-                        ),
+                      // if (!PlatformUtils.isDesktop)
+                      //   const DropdownMenuItem(
+                      //     value: 'catvod',
+                      //     child: Text('CatVod (猫影视)', style: TextStyle(fontSize: 14)),
+                      //   ),
+                      DropdownMenuItem(
+                        value: 'catvod',
+                        child: Text('CatVod (猫影视)', style: TextStyle(fontSize: 14)),
+                      ),
                     ],
                     onChanged: (value) {
                       setState(() {
