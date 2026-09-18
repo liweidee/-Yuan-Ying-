@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:yuanying/modules/local_file/models/video_file.dart';
 
@@ -5,12 +6,14 @@ class FileListItem extends StatelessWidget {
   final VideoFile file;
   final VoidCallback onTap;
   final VoidCallback? onLongPress;
+  final VoidCallback? onDelete;
 
   const FileListItem({
     super.key,
     required this.file,
     required this.onTap,
     this.onLongPress,
+    this.onDelete,
   });
 
   @override
@@ -91,12 +94,27 @@ class FileListItem extends StatelessWidget {
                 ),
               ),
 
-              // 箭头
-              Icon(
-                Icons.chevron_right,
-                size: 18,
-                color: colorScheme.outline,
-              ),
+              // iOS：删除按钮；其他平台：箭头
+              if (Platform.isIOS && onDelete != null)
+                IconButton(
+                  icon: Icon(
+                    Icons.delete_outline,
+                    size: 20,
+                    color: colorScheme.error,
+                  ),
+                  onPressed: onDelete,
+                  padding: EdgeInsets.zero,
+                  constraints:
+                      const BoxConstraints(minWidth: 36, minHeight: 36),
+                  splashRadius: 20,
+                  tooltip: '删除',
+                )
+              else
+                Icon(
+                  Icons.chevron_right,
+                  size: 18,
+                  color: colorScheme.outline,
+                ),
             ],
           ),
         ),

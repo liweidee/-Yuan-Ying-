@@ -185,6 +185,8 @@ dependencies:
   pure_ftp: ^0.7.5
   dartssh2: ^2.14.0
   smb_connect: ^0.0.9
+  # iOS 接收「用其他应用打开」传入的文件
+  receive_sharing_intent: ^1.8.1
 
 dependency_overrides:
   file_picker: ^12.0.0-beta.7

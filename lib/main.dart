@@ -63,6 +63,10 @@ import 'package:yuanying/modules/smb_drive/controllers/smb_server_controller.dar
 
 import 'package:yuanying/modules/fnos/controllers/fnos_server_controller.dart';
 
+import 'dart:async';
+import 'package:receive_sharing_intent/receive_sharing_intent.dart';
+import 'package:yuanying/modules/local_file/controllers/local_file_controller.dart';
+
 // ============================================================================
 // 全局变量
 // ============================================================================
@@ -89,6 +93,7 @@ class _AppLifecycleObserver extends WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.detached) {
       PythonRuntime.dispose();
+      _sharingIntentSub?.cancel();
     }
   }
 }
@@ -311,7 +316,60 @@ void main() async {
   // 第十步：启动应用
   // ==========================================================================
   WidgetsBinding.instance.addObserver(_AppLifecycleObserver());
+
+  // iOS: 初始化「用其他应用打开」的文件接收
+  if (Platform.isIOS) {
+    _initIOSFileReceive();
+  }
+
   runApp(const MyApp());
+}
+
+// ============================================================================
+// iOS 文件接收（不依赖 Share Extension，走 Document Interaction）
+// ============================================================================
+StreamSubscription? _sharingIntentSub;
+
+void _initIOSFileReceive() {
+  // 冷启动：App 被「用其他应用打开」唤起
+  ReceiveSharingIntent.instance.getInitialMedia().then((files) {
+    if (files.isNotEmpty) {
+      _handleReceivedFiles(files);
+    }
+  });
+
+  // 热启动：App 已在后台，用户再次「用其他应用打开」
+  _sharingIntentSub = ReceiveSharingIntent.instance
+      .getMediaStream()
+      .listen((files) {
+    if (files.isNotEmpty) {
+      _handleReceivedFiles(files);
+    }
+  });
+}
+
+/// 把接收到的文件复制到 Documents/Imported/
+Future<void> _handleReceivedFiles(List<SharedMediaFile> files) async {
+  final appDocDir = await getApplicationDocumentsDirectory();
+  final importDir = Directory('${appDocDir.path}/Imported');
+  if (!await importDir.exists()) {
+    await importDir.create(recursive: true);
+  }
+
+  for (final f in files) {
+    final src = File(f.path);
+    if (!await src.exists()) continue;
+    final fileName = src.path.split('/').last;
+    final dest = File('${importDir.path}/$fileName');
+    await src.copy(dest.path);
+    await src.delete().catchError((_) {});
+  }
+
+  // 通知 LocalFileController 刷新
+  if (Get.isRegistered<LocalFileController>()) {
+    final c = Get.find<LocalFileController>();
+    await c.refreshImportedFolder();
+  }
 }
 
 // ============================================================================

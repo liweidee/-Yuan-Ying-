@@ -2,21 +2,26 @@
 import 'dart:io';
 import 'package:get/get.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:yuanying/core/constants/storage_keys.dart';
 import 'package:yuanying/modules/local_file/models/file_sort_type.dart';
 import 'package:yuanying/modules/local_file/models/scan_path.dart';
 import 'package:yuanying/modules/local_file/models/video_file.dart';
 import 'package:yuanying/modules/local_file/services/file_scanner_service.dart';
 import 'package:yuanying/utils/storage_manager.dart';
-import 'package:yuanying/utils/platform_utils.dart';        // 新增
-import 'package:yuanying/utils/permission_handler.dart';    // 新增
+import 'package:yuanying/utils/platform_utils.dart';
+import 'package:yuanying/utils/permission_handler.dart';
 
 /// 文件夹数据（用于混合列表）
 class FolderItemData {
   final String path;
   final String name;
   final bool isFolder;
-  const FolderItemData({required this.path, required this.name, this.isFolder = true});
+  const FolderItemData({
+    required this.path,
+    required this.name,
+    this.isFolder = true,
+  });
 }
 
 /// 面包屑节点
@@ -58,13 +63,17 @@ class LocalFileController extends GetxController {
   List<BreadcrumbItem> get breadcrumbs {
     if (currentFolderPath.value.isEmpty) return [];
     final rootPath = scanPaths.isNotEmpty
-        ? scanPaths.firstWhere((p) => p.enabled, orElse: () => scanPaths.first).path
+        ? scanPaths
+            .firstWhere((p) => p.enabled, orElse: () => scanPaths.first)
+            .path
         : '';
     if (rootPath.isEmpty || currentFolderPath.value == rootPath) return [];
     String relativePath = currentFolderPath.value;
     if (relativePath.startsWith(rootPath)) {
       var subPath = relativePath.substring(rootPath.length);
-      while (subPath.startsWith(Platform.pathSeparator)) subPath = subPath.substring(1);
+      while (subPath.startsWith(Platform.pathSeparator)) {
+        subPath = subPath.substring(1);
+      }
       if (subPath.isEmpty) return [];
       final parts = subPath.split(Platform.pathSeparator);
       final items = <BreadcrumbItem>[];
@@ -82,7 +91,9 @@ class LocalFileController extends GetxController {
   bool get isAtRootPath {
     if (currentFolderPath.value.isEmpty) return true;
     final rootPath = scanPaths.isNotEmpty
-        ? scanPaths.firstWhere((p) => p.enabled, orElse: () => scanPaths.first).path
+        ? scanPaths
+            .firstWhere((p) => p.enabled, orElse: () => scanPaths.first)
+            .path
         : '';
     return rootPath.isEmpty || currentFolderPath.value == rootPath;
   }
@@ -91,17 +102,81 @@ class LocalFileController extends GetxController {
   @override
   void onInit() {
     super.onInit();
-    _loadScanPaths();
-    if (scanPaths.isNotEmpty) {
-      final first = scanPaths.firstWhere((p) => p.enabled, orElse: () => scanPaths.first);
-      currentFolderPath.value = first.path;
-      _ensurePermissionAndScan(first.path); // 替换原 scanDirectory
+    if (Platform.isIOS) {
+      _initIOSMode();
+    } else {
+      _loadScanPaths();
+      if (scanPaths.isNotEmpty) {
+        final first = scanPaths
+            .firstWhere((p) => p.enabled, orElse: () => scanPaths.first);
+        currentFolderPath.value = first.path;
+        _ensurePermissionAndScan(first.path);
+      }
     }
+  }
+
+  // ===== iOS 模式 =====
+  /// iOS 扫描 App 沙盒内的 Imported 目录，不涉及任何外部路径
+  Future<void> _initIOSMode() async {
+    final appDocDir = await getApplicationDocumentsDirectory();
+    final importDir = Directory('${appDocDir.path}/Imported');
+    if (!await importDir.exists()) {
+      await importDir.create(recursive: true);
+    }
+    currentFolderPath.value = importDir.path;
+    await _loadFolderContent(importDir.path);
+  }
+
+  /// 供 main.dart 接收分享文件后调用，刷新导入目录
+  Future<void> refreshImportedFolder() async {
+    if (!Platform.isIOS) return;
+    final appDocDir = await getApplicationDocumentsDirectory();
+    final importDir = Directory('${appDocDir.path}/Imported');
+    if (!await importDir.exists()) {
+      await importDir.create(recursive: true);
+    }
+    currentFolderPath.value = importDir.path;
+    await _loadFolderContent(importDir.path);
+  }
+
+  // ===== iOS 文件删除 =====
+  /// 删除单个视频文件（仅沙盒内文件，无需权限）
+  Future<bool> deleteVideo(VideoFile video) async {
+    try {
+      final file = File(video.path);
+      if (await file.exists()) {
+        await file.delete();
+      }
+      videoFiles.removeWhere((f) => f.path == video.path);
+      filteredFiles.removeWhere((f) => f.path == video.path);
+      _mixedList.removeWhere(
+        (item) => item is VideoFile && item.path == video.path,
+      );
+      return true;
+    } catch (e) {
+      SmartDialog.showToast('删除失败: $e');
+      return false;
+    }
+  }
+
+  /// 批量删除
+  Future<int> deleteVideos(List<VideoFile> videos) async {
+    int count = 0;
+    for (final v in videos) {
+      if (await deleteVideo(v)) count++;
+    }
+    return count;
+  }
+
+  /// 清空当前目录下所有视频
+  Future<int> clearAllVideos() async {
+    final all = List<VideoFile>.from(videoFiles);
+    return deleteVideos(all);
   }
 
   // ===== 权限 + 扫描封装 =====
   Future<void> _ensurePermissionAndScan(String path) async {
-    if (PlatformUtils.isMobile) {
+    if (PlatformUtils.isMobile && !Platform.isIOS) {
       final status = await Permission.storage.request();
       if (status.isDenied) {
         SmartDialog.showToast('无法扫描，存储权限被拒绝');
@@ -122,7 +197,8 @@ class LocalFileController extends GetxController {
 
   // ===== 路径管理 =====
   void _loadScanPaths() {
-    final data = StorageManager.getSetting<List<dynamic>>(SettingBoxKey.localFileScanPaths);
+    final data =
+        StorageManager.getSetting<List<dynamic>>(SettingBoxKey.localFileScanPaths);
     if (data != null && data.isNotEmpty) {
       final paths = data.map((e) {
         final map = Map<String, dynamic>.from(e as Map);
@@ -148,7 +224,7 @@ class LocalFileController extends GetxController {
     scanPaths.add(scanPath);
     _saveScanPaths();
     currentFolderPath.value = path;
-    _ensurePermissionAndScan(path); // 添加路径后扫描
+    _ensurePermissionAndScan(path);
   }
 
   void removeScanPath(String id) {
@@ -195,7 +271,9 @@ class LocalFileController extends GetxController {
     parts.removeLast();
     final parentPath = parts.join(Platform.pathSeparator);
     final rootPath = scanPaths.isNotEmpty
-        ? scanPaths.firstWhere((p) => p.enabled, orElse: () => scanPaths.first).path
+        ? scanPaths
+            .firstWhere((p) => p.enabled, orElse: () => scanPaths.first)
+            .path
         : '';
     if (parentPath.isEmpty || parentPath == '/' || parentPath == rootPath) {
       currentFolderPath.value = rootPath;
@@ -219,7 +297,9 @@ class LocalFileController extends GetxController {
           name: dir.split(Platform.pathSeparator).last,
         ));
       }
-      for (final file in files) mixedList.add(file);
+      for (final file in files) {
+        mixedList.add(file);
+      }
       _mixedList.value = mixedList;
       videoFiles.value = files;
       _applyFilters();
@@ -230,12 +310,12 @@ class LocalFileController extends GetxController {
     }
   }
 
-  // ===== 扫描（添加权限前置检查） =====
+  // ===== 扫描 =====
   Future<void> scanDirectory(String path, {bool silent = false}) async {
     if (path.isEmpty || isScanning.value) return;
 
-    // 权限检查（防御）
-    if (PlatformUtils.isMobile) {
+    // 权限检查（iOS 跳过）
+    if (PlatformUtils.isMobile && !Platform.isIOS) {
       final status = await Permission.storage.status;
       if (!status.isGranted) {
         SmartDialog.showToast('没有存储权限，请在设置中授予');
@@ -253,7 +333,11 @@ class LocalFileController extends GetxController {
         final files = await _scanner.scanDirectory(path);
         videoFiles.value = files;
         _applyFilters();
-        _updatePathScanInfo(path, files.length, files.fold<int>(0, (sum, f) => sum + f.size));
+        _updatePathScanInfo(
+          path,
+          files.length,
+          files.fold<int>(0, (sum, f) => sum + f.size),
+        );
       }
       scanStatus.value = '扫描完成，发现 ${videoFiles.length} 个视频';
       SmartDialog.showToast('扫描完成，发现 ${videoFiles.length} 个视频');
@@ -297,7 +381,8 @@ class LocalFileController extends GetxController {
       } catch (_) {}
     }
     if (scanPaths.isNotEmpty) {
-      final first = scanPaths.firstWhere((p) => p.enabled, orElse: () => scanPaths.first);
+      final first = scanPaths
+          .firstWhere((p) => p.enabled, orElse: () => scanPaths.first);
       currentFolderPath.value = first.path;
       await scanDirectory(first.path);
     }
@@ -327,14 +412,16 @@ class LocalFileController extends GetxController {
   }
 
   void toggleViewMode() {
-    viewMode.value = viewMode.value == ViewMode.list ? ViewMode.grid : ViewMode.list;
+    viewMode.value =
+        viewMode.value == ViewMode.list ? ViewMode.grid : ViewMode.list;
   }
 
   void toggleFolderMode() {
     isFolderMode.value = !isFolderMode.value;
     if (isFolderMode.value) {
       if (currentFolderPath.value.isEmpty && scanPaths.isNotEmpty) {
-        final first = scanPaths.firstWhere((p) => p.enabled, orElse: () => scanPaths.first);
+        final first = scanPaths
+            .firstWhere((p) => p.enabled, orElse: () => scanPaths.first);
         currentFolderPath.value = first.path;
       }
       if (currentFolderPath.value.isNotEmpty) {
@@ -342,7 +429,8 @@ class LocalFileController extends GetxController {
       }
     } else {
       if (scanPaths.isNotEmpty) {
-        final first = scanPaths.firstWhere((p) => p.enabled, orElse: () => scanPaths.first);
+        final first = scanPaths
+            .firstWhere((p) => p.enabled, orElse: () => scanPaths.first);
         currentFolderPath.value = first.path;
         _ensurePermissionAndScan(first.path);
       }
@@ -400,8 +488,8 @@ class LocalFileController extends GetxController {
   String getLastScanTime() {
     final enabled = scanPaths.where((p) => p.enabled && p.lastScanTime != null);
     if (enabled.isEmpty) return '未扫描';
-    final latest = enabled.reduce((a, b) =>
-        a.lastScanTime!.isAfter(b.lastScanTime!) ? a : b);
+    final latest = enabled
+        .reduce((a, b) => a.lastScanTime!.isAfter(b.lastScanTime!) ? a : b);
     return _formatTime(latest.lastScanTime!);
   }
 

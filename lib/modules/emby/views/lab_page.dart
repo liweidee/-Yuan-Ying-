@@ -9,22 +9,20 @@ class LabPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    // 底部安全距离：系统手势条 / 导航栏 + 额外呼吸间距
+    // 顶部状态栏安全区（去掉 AppBar 后需要自己补）
+    final topInset = MediaQuery.of(context).padding.top;
+    // 底部安全区：系统手势条 / 导航栏 + 额外呼吸间距
     final bottomInset = MediaQuery.of(context).padding.bottom;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('实验室'),
-        elevation: 0,
-        backgroundColor: theme.colorScheme.surface,
-        foregroundColor: theme.colorScheme.onSurface,
-      ),
+      // 去掉 appBar，让内容从顶部开始
       body: ListView(
         padding: EdgeInsets.fromLTRB(
           Style.safeSpace,
+          // 顶部叠加状态栏高度 + 呼吸间距
+          topInset + Style.safeSpace,
           Style.safeSpace,
-          Style.safeSpace,
-          // 关键：底部叠加安全区高度 + 额外间距，避免与底部导航栏重叠
+          // 底部叠加安全区高度 + 呼吸间距
           Style.safeSpace + bottomInset + 12,
         ),
         children: [

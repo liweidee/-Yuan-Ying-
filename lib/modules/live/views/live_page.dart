@@ -80,7 +80,7 @@ class _LivePageState extends State<LivePage> {
       }
 
       if (errorMsg.isNotEmpty || !hasChannels) {
-        return _buildErrorPage(context);
+        return _buildEmptyOrErrorPage(context);
       }
 
       return _buildNormalContent(context);
@@ -144,6 +144,88 @@ class _LivePageState extends State<LivePage> {
         ),
       ),
     );
+  }
+
+  Widget _buildEmptyOrErrorPage(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final msg = controller.errorMessage.value;
+
+    // 判断是否是"无配置"的空状态
+    final isNoConfig = msg.isEmpty ||
+        msg.contains('暂无直播配置') ||
+        msg.contains('暂无有效的直播配置');
+
+    if (isNoConfig) {
+      // ===== 空状态：未添加任何配置 =====
+      return Scaffold(
+        appBar: null,
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  width: 88,
+                  height: 88,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: colorScheme.primary.withValues(alpha: 0.1),
+                  ),
+                  child: Icon(
+                    Icons.live_tv_outlined,
+                    size: 40,
+                    color: colorScheme.primary,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  '还没有直播配置',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: colorScheme.onSurface,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '添加直播源后即可观看电视直播',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: colorScheme.outline,
+                    height: 1.5,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 24),
+                FilledButton.icon(
+                  onPressed: () async {
+                    await Get.toNamed(AppPages.liveConfig);
+                    controller.refreshChannels(showLoading: true);
+                  },
+                  style: FilledButton.styleFrom(
+                    backgroundColor: colorScheme.primary,
+                    foregroundColor: colorScheme.onPrimary,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 18,
+                      vertical: 12,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                  icon: const Icon(Icons.add, size: 18),
+                  label: const Text('添加直播配置'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    // ===== 其它情况：保持原有的错误样式 =====
+    return _buildErrorPage(context);
   }
 
   Widget _buildNormalContent(BuildContext context) {
