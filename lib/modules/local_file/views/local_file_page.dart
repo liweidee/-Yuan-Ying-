@@ -86,7 +86,7 @@ class _LocalFilePageState extends State<LocalFilePage>
               StatisticsBar(
                 videoCount: controller.totalVideoCount,
                 totalSize: controller.totalSizeFormatted,
-                pathCount: controller.enabledPathCount,
+                pathCount: Platform.isIOS ? 1 : controller.enabledPathCount,
                 lastScanTime: controller.getLastScanTime(),
               ),
               if (controller.isFolderMode.value)
@@ -347,7 +347,7 @@ class _LocalFilePageState extends State<LocalFilePage>
                 shape: BoxShape.circle,
               ),
               child: Icon(
-                Icons.ios_share,
+                Icons.folder_open_outlined,
                 size: 36,
                 color: colorScheme.primary,
               ),
@@ -363,7 +363,7 @@ class _LocalFilePageState extends State<LocalFilePage>
             ),
             const SizedBox(height: 6),
             Text(
-              'iOS 系统限制，无法直接扫描任意文件夹\n请通过「分享」将视频导入到源影',
+              'iOS 系统限制，无法直接扫描任意文件夹\n请将视频手动保存到「源影」文件夹',
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 13,
@@ -372,9 +372,10 @@ class _LocalFilePageState extends State<LocalFilePage>
               ),
             ),
             const SizedBox(height: 24),
-            _buildGuideStep(context, '1', '在「文件」App 中找到视频'),
-            _buildGuideStep(context, '2', '长按视频，点击「分享」'),
-            _buildGuideStep(context, '3', '选择「源影」即可导入播放'),
+            _buildGuideStep(context, '1', '打开「文件」App'),
+            _buildGuideStep(context, '2', '找到「我的 iPhone」→「源影」'),
+            _buildGuideStep(context, '3', '把视频拖入或保存到该文件夹'),
+            _buildGuideStep(context, '4', '返回源影，下拉刷新即可看到'),
           ],
         ),
       ),

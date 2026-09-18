@@ -43,29 +43,49 @@ class LiveParserService {
     final channels = <LiveChannel>[];
     String? currentName;
     String? currentGroup;
+    String? currentTvgId;
+    String? currentTvgName;
+    String? currentLogo;
 
     for (var line in lines) {
       line = line.trim();
       if (line.isEmpty) continue;
 
       if (line.startsWith('#EXTINF:')) {
-        // 示例：#EXTINF:-1 tvg-logo="logo.png" group-title="央视",CCTV-1
+        // 频道名：最后一个逗号后的内容
         final nameMatch = RegExp(r',([^,]+)$').firstMatch(line);
         currentName = nameMatch?.group(1)?.trim() ?? '未知频道';
 
-        // 提取 group-title
+        // group-title
         final groupMatch = RegExp(r'group-title="([^"]+)"').firstMatch(line);
         currentGroup = groupMatch?.group(1)?.trim() ?? '未分组';
+
+        // tvg-id
+        final tvgIdMatch = RegExp(r'tvg-id="([^"]*)"').firstMatch(line);
+        currentTvgId = tvgIdMatch?.group(1)?.trim();
+
+        // tvg-name
+        final tvgNameMatch = RegExp(r'tvg-name="([^"]*)"').firstMatch(line);
+        currentTvgName = tvgNameMatch?.group(1)?.trim();
+
+        // tvg-logo
+        final logoMatch = RegExp(r'tvg-logo="([^"]*)"').firstMatch(line);
+        currentLogo = logoMatch?.group(1)?.trim();
       } else if (line.startsWith('http') || line.startsWith('rtmp')) {
-        // 遇到 URL，如果前面有 #EXTINF 则配对
         if (currentName != null) {
           channels.add(LiveChannel(
             name: currentName!,
             url: line,
             group: currentGroup ?? '未分组',
+            logo: (currentLogo != null && currentLogo!.isNotEmpty) ? currentLogo : null,
+            tvgId: (currentTvgId != null && currentTvgId!.isNotEmpty) ? currentTvgId : null,
+            tvgName: (currentTvgName != null && currentTvgName!.isNotEmpty) ? currentTvgName : null,
           ));
           currentName = null;
           currentGroup = null;
+          currentTvgId = null;
+          currentTvgName = null;
+          currentLogo = null;
         }
       }
     }

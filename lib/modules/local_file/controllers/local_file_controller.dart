@@ -1,13 +1,14 @@
-// lib/modules/local_file/controllers/local_file_controller.dart
 import 'dart:io';
 import 'package:get/get.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:yuanying/core/constants/storage_keys.dart';
+import 'package:yuanying/core/routes/app_pages.dart';
 import 'package:yuanying/modules/local_file/models/file_sort_type.dart';
 import 'package:yuanying/modules/local_file/models/scan_path.dart';
 import 'package:yuanying/modules/local_file/models/video_file.dart';
 import 'package:yuanying/modules/local_file/services/file_scanner_service.dart';
+import 'package:yuanying/t4/models/video_detail.dart';
 import 'package:yuanying/utils/storage_manager.dart';
 import 'package:yuanying/utils/platform_utils.dart';
 import 'package:yuanying/utils/permission_handler.dart';
@@ -116,27 +117,34 @@ class LocalFileController extends GetxController {
   }
 
   // ===== iOS 模式 =====
-  /// iOS 扫描 App 沙盒内的 Imported 目录，不涉及任何外部路径
+  /// iOS 默认进入文件模式：递归扫描 Documents 下所有视频，平铺展示
   Future<void> _initIOSMode() async {
     final appDocDir = await getApplicationDocumentsDirectory();
-    final importDir = Directory('${appDocDir.path}/Imported');
-    if (!await importDir.exists()) {
-      await importDir.create(recursive: true);
-    }
-    currentFolderPath.value = importDir.path;
-    await _loadFolderContent(importDir.path);
+    currentFolderPath.value = appDocDir.path;
+    await _scanIOSRecursive(appDocDir.path);
   }
 
-  /// 供 main.dart 接收分享文件后调用，刷新导入目录
+  /// 供下拉刷新 / AppBar 刷新按钮调用
   Future<void> refreshImportedFolder() async {
     if (!Platform.isIOS) return;
     final appDocDir = await getApplicationDocumentsDirectory();
-    final importDir = Directory('${appDocDir.path}/Imported');
-    if (!await importDir.exists()) {
-      await importDir.create(recursive: true);
+    currentFolderPath.value = appDocDir.path;
+    await _scanIOSRecursive(appDocDir.path);
+  }
+
+  /// iOS 递归扫描：遍历指定路径下所有子文件夹，平铺到列表
+  Future<void> _scanIOSRecursive(String rootPath) async {
+    if (rootPath.isEmpty || isLoading.value) return;
+    isLoading.value = true;
+    try {
+      final files = await _scanner.scanDirectory(rootPath, recursive: true);
+      videoFiles.value = files;
+      _applyFilters();
+    } catch (e) {
+      SmartDialog.showToast('扫描失败: $e');
+    } finally {
+      isLoading.value = false;
     }
-    currentFolderPath.value = importDir.path;
-    await _loadFolderContent(importDir.path);
   }
 
   // ===== iOS 文件删除 =====
@@ -168,7 +176,7 @@ class LocalFileController extends GetxController {
     return count;
   }
 
-  /// 清空当前目录下所有视频
+  /// 清空当前列表所有视频
   Future<int> clearAllVideos() async {
     final all = List<VideoFile>.from(videoFiles);
     return deleteVideos(all);
@@ -284,6 +292,7 @@ class LocalFileController extends GetxController {
     _loadFolderContent(parentPath);
   }
 
+  /// 加载单层目录内容（文件夹模式用），与其他平台一致，非递归
   Future<void> _loadFolderContent(String path) async {
     if (path.isEmpty || isLoading.value) return;
     isLoading.value = true;
@@ -419,20 +428,24 @@ class LocalFileController extends GetxController {
   void toggleFolderMode() {
     isFolderMode.value = !isFolderMode.value;
     if (isFolderMode.value) {
-      if (currentFolderPath.value.isEmpty && scanPaths.isNotEmpty) {
-        final first = scanPaths
-            .firstWhere((p) => p.enabled, orElse: () => scanPaths.first);
-        currentFolderPath.value = first.path;
-      }
+      // 进入文件夹模式：直接用当前路径（iOS 是 Documents 根）
       if (currentFolderPath.value.isNotEmpty) {
         _loadFolderContent(currentFolderPath.value);
       }
     } else {
-      if (scanPaths.isNotEmpty) {
-        final first = scanPaths
-            .firstWhere((p) => p.enabled, orElse: () => scanPaths.first);
-        currentFolderPath.value = first.path;
-        _ensurePermissionAndScan(first.path);
+      // 退出文件夹模式
+      if (Platform.isIOS) {
+        // iOS：回到递归平铺
+        if (currentFolderPath.value.isNotEmpty) {
+          _scanIOSRecursive(currentFolderPath.value);
+        }
+      } else {
+        if (scanPaths.isNotEmpty) {
+          final first = scanPaths
+              .firstWhere((p) => p.enabled, orElse: () => scanPaths.first);
+          currentFolderPath.value = first.path;
+          _ensurePermissionAndScan(first.path);
+        }
       }
     }
   }
@@ -468,11 +481,62 @@ class LocalFileController extends GetxController {
       SmartDialog.showToast('文件已移动或删除');
       return;
     }
-    Get.toNamed('/detail', arguments: {
-      'directUrl': video.path,
-      'directTitle': video.name,
-      'isPush': true,
-    });
+
+    // 构造 VideoDetail（单文件，不做多剧集）
+    final cleanName = _stripMediaExtension(video.name);
+    final videoDetail = VideoDetail(
+      vodId: 'local_${video.path.hashCode}',
+      vodName: cleanName,
+      vodPic: '',
+      vodContent: '来自本地文件',
+      vodYear: '',
+      vodActor: '',
+      vodDirector: '',
+      vodRemarks: video.sizeFormatted,
+      typeName: '本地文件',
+      playSources: [
+        PlaySource(
+          name: '本地文件',
+          episodes: [
+            Episode(name: cleanName, url: video.path),
+          ],
+        ),
+      ],
+    );
+
+    Get.toNamed(
+      AppPages.detail,
+      arguments: {
+        'isPush': true,
+        'directUrl': video.path,
+        'directTitle': cleanName,
+        'videoDetail': videoDetail,
+        'sourceName': '本地文件',
+        'vodPic': '',
+        'vodContent': '来自本地文件',
+        'vodYear': '',
+        'vodActor': '',
+        'vodDirector': '',
+        'vodRemarks': video.sizeFormatted,
+        'isSeries': false,
+        'isDirectPushMode': true,
+      },
+    );
+  }
+
+  /// 去除媒体扩展名，用于展示标题
+  static String _stripMediaExtension(String name) {
+    final idx = name.lastIndexOf('.');
+    if (idx <= 0) return name;
+    final ext = name.substring(idx + 1).toLowerCase();
+    const validExts = {
+      'mp4', 'mkv', 'avi', 'webm', 'mov', 'ts', 'm2ts', 'wmv', 'flv',
+      'ogv', 'rmvb', 'mpg', 'mpeg', 'vob', '3gp', 'm4v', 'rm',
+      'mp3', 'flac', 'wav', 'aac', 'm4a', 'ogg', 'opus', 'wma', 'ape',
+      'dsf', 'dff', 'aiff', 'alac',
+    };
+    if (!validExts.contains(ext)) return name;
+    return name.substring(0, idx);
   }
 
   // ===== 工具方法 =====
@@ -486,6 +550,7 @@ class LocalFileController extends GetxController {
   }
 
   String getLastScanTime() {
+    if (Platform.isIOS) return '沙盒';
     final enabled = scanPaths.where((p) => p.enabled && p.lastScanTime != null);
     if (enabled.isEmpty) return '未扫描';
     final latest = enabled

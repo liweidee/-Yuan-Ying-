@@ -1,4 +1,5 @@
 import 'package:get/get.dart';
+import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:yuanying/t4/models/video_detail.dart';
 import 'package:yuanying/core/constants/app_constants.dart';
 import 'package:yuanying/t4/services/source_manager.dart';
@@ -59,7 +60,15 @@ class IntroController extends GetxController {
   // ===== 收藏时存储 api_url =====
   void toggleFavorite() {
     final detail = videoDetail.value;
-    if (detail == null || originalVodId == null) return;
+
+    if (detail == null) return;
+
+    // 推送模式（本地文件 / WebDAV / Emby / Jellyfin / FTP / SMB / AList / 飞牛 等）没有 originalVodId，
+    // 无法构造收藏记录，直接提示用户
+    if (originalVodId == null || originalVodId!.isEmpty) {
+      SmartDialog.showToast('推送模式暂不支持收藏');
+      return;
+    }
 
     final site = Get.find<SourceManager>().currentSite.value;
     final sourceName = site?['name']?.toString() ?? (detail.typeName ?? '');

@@ -106,17 +106,6 @@
                 <string>yuanying://</string>
             </array>
         </dict>
-        <!-- 接收「用其他应用打开」的文件 -->
-        <dict>
-            <key>CFBundleTypeRole</key>
-            <string>Editor</string>
-            <key>CFBundleURLName</key>
-            <string>ShareMedia-yuanying</string>
-            <key>CFBundleURLSchemes</key>
-            <array>
-                <string>ShareMedia-$(PRODUCT_BUNDLE_IDENTIFIER)</string>
-            </array>
-        </dict>
     </array>
 
     <!-- DLNA 服务 -->
@@ -126,30 +115,5 @@
         <string>_http._tcp.</string>
         <string>_dlna._tcp.</string>
     </array>
-
-        <!-- 声明 App 支持打开的视频类型，让「文件」App 出现「用其他应用打开 → 源影」入口 -->
-    <key>CFBundleDocumentTypes</key>
-    <array>
-        <dict>
-            <key>CFBundleTypeName</key>
-            <string>Video</string>
-            <key>CFBundleTypeRole</key>
-            <string>Viewer</string>
-            <key>LSHandlerRank</key>
-            <string>Alternate</string>
-            <key>LSItemContentTypes</key>
-            <array>
-                <string>public.movie</string>
-                <string>public.video</string>
-                <string>public.audiovisual-content</string>
-            </array>
-        </dict>
-    </array>
-
-    <!-- 允许「文件」App 通过 iTunes/Finder 共享文件，以及开放 Documents 目录 -->
-    <key>LSSupportsOpeningDocumentsInPlace</key>
-    <true/>
-    <key>UIFileSharingEnabled</key>
-    <true/>
 </dict>
 </plist>

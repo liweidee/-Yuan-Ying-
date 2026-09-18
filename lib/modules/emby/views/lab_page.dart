@@ -51,7 +51,7 @@ class LabPage extends StatelessWidget {
             context,
             theme,
             icon: Icons.cloud_outlined,
-            title: 'AList 网盘',
+            title: 'AList / OpenList 网盘',
             subtitle: '连接您的 AList 服务器，浏览网盘文件',
             route: AppPages.alistServerConfig,
           ),

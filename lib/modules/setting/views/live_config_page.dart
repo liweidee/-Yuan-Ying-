@@ -109,7 +109,7 @@ class LiveConfigPage extends StatelessWidget {
             ),
             boxShadow: [BoxShadow(color: theme.shadowColor.withOpacity(0.08), blurRadius: 8, offset: const Offset(0, 2))],
           ),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           child: Row(
             children: [
               Container(
@@ -122,9 +122,11 @@ class LiveConfigPage extends StatelessWidget {
                 child: Icon(Icons.live_tv, color: theme.colorScheme.primary, size: 24),
               ),
               const SizedBox(width: 12),
+              // ===== 只保留名称 + 地址 =====
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
                       config.name,
@@ -133,34 +135,22 @@ class LiveConfigPage extends StatelessWidget {
                         fontWeight: FontWeight.w600,
                         color: isCurrent ? theme.colorScheme.primary : theme.colorScheme.onSurface,
                       ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                    Padding(
-                      padding: const EdgeInsets.only(top: 4),
-                      child: Text(
-                        config.url,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 12, color: theme.colorScheme.outline),
-                      ),
+                    const SizedBox(height: 4),
+                    Text(
+                      config.url,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 12, color: theme.colorScheme.outline),
                     ),
-                    if (config.ua != null || config.epg != null || config.logo != null)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 2),
-                        child: Wrap(
-                          spacing: 8,
-                          children: [
-                            if (config.ua != null) _buildTag(theme, 'UA', config.ua!),
-                            if (config.epg != null) _buildTag(theme, 'EPG', config.epg!),
-                            if (config.logo != null) _buildTag(theme, 'Logo', config.logo!),
-                          ],
-                        ),
-                      ),
                   ],
                 ),
               ),
               if (isCurrent) ...[
-                Icon(Icons.check_circle, color: theme.colorScheme.primary, size: 20),
                 const SizedBox(width: 8),
+                Icon(Icons.check_circle, color: theme.colorScheme.primary, size: 20),
               ],
               PopupMenuButton<String>(
                 icon: Icon(Icons.more_vert, color: theme.colorScheme.outline),
@@ -180,20 +170,6 @@ class LiveConfigPage extends StatelessWidget {
             ],
           ),
         ),
-      ),
-    );
-  }
-
-  Widget _buildTag(ThemeData theme, String label, String value) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.primaryContainer.withOpacity(0.2),
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Text(
-        '$label: $value',
-        style: TextStyle(fontSize: 10, color: theme.colorScheme.onSurface.withOpacity(0.6)),
       ),
     );
   }

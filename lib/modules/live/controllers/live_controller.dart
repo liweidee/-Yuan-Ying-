@@ -14,7 +14,11 @@ import 'package:screen_brightness_platform_interface/screen_brightness_platform_
 import 'package:yuanying/core/constants/storage_keys.dart';
 import 'package:yuanying/models/live/live_config.dart';
 import 'package:yuanying/modules/live/models/live_channel.dart';
+import 'package:yuanying/modules/live/models/epg_channel.dart';
+import 'package:yuanying/modules/live/models/epg_programme.dart';
 import 'package:yuanying/modules/live/services/live_parser_service.dart';
+import 'package:yuanying/modules/live/services/live_epg_service.dart';
+import 'package:yuanying/modules/live/services/channel_logo_service.dart';
 import 'package:yuanying/modules/live/widgets/live_player_view.dart';
 import 'package:yuanying/plugin/pl_player/player_pref.dart';
 import 'package:yuanying/utils/storage_manager.dart';
@@ -79,6 +83,54 @@ class LiveController extends GetxController {
   static const MethodChannel _mediaKitChannel =
       MethodChannel('com.alexmercerind/media_kit_video');
 
+  // ============================================================
+  // EPG 相关
+  // ============================================================
+  /// EPG 频道映射：channelId -> EpgChannel
+  final RxMap<String, EpgChannel> epgMap = <String, EpgChannel>{}.obs;
+
+  /// EPG 是否加载中
+  final RxBool epgLoading = false.obs;
+
+  /// EPG 错误信息
+  final RxString epgError = ''.obs;
+
+  /// 节目边界定时器（节目切换时触发刷新，其他时间不触发）
+  Timer? _epgBoundaryTimer;
+
+  /// 记录 EPG 最近一次加载成功的日期
+  /// 用于跨天检测：当 currentProgramme == null 且当前日期 != _epgLoadDate 时，
+  /// 说明 EPG 已过期（跨天），需要重新加载。
+  DateTime? _epgLoadDate;
+
+  /// 当前频道的 EPG
+  EpgChannel? get currentEpg {
+    final ch = currentChannel.value;
+    if (ch == null || epgMap.isEmpty) return null;
+    return EpgMatcher.match(ch, epgMap);
+  }
+
+  /// 当前节目
+  EpgProgramme? get currentProgramme {
+    final epg = currentEpg;
+    if (epg == null) return null;
+    return epg.currentProgramme();
+  }
+
+  /// 下一个节目
+  EpgProgramme? get nextProgramme {
+    final epg = currentEpg;
+    if (epg == null) return null;
+    return epg.nextProgramme();
+  }
+
+  /// 今天的节目单
+  List<EpgProgramme> get todayProgrammes {
+    final epg = currentEpg;
+    if (epg == null) return [];
+    return epg.todayProgrammes();
+  }
+
   // ===== 缓存参数 =====
   Map<String, String> get _buffer {
     final bufSec = 120.0;
@@ -108,6 +160,9 @@ class LiveController extends GetxController {
     _initPlayer();
     _loadConfigAndChannels(forceLoading: true);
     _initVolumeAndBrightness();
+
+    // 清理 7 天前的 EPG 缓存（非阻塞）
+    LiveEpgService.clearOldCache();
   }
 
   void ensurePlayerInitialized() {
@@ -166,6 +221,7 @@ class LiveController extends GetxController {
   @override
   void onClose() {
     _hideControlsTimer?.cancel();
+    _cancelEpgBoundaryTimer();
     _fullScreenOverlay?.remove();
     _fullScreenOverlay = null;
     if (PlatformUtils.isMobile) {
@@ -351,6 +407,12 @@ class LiveController extends GetxController {
       currentChannel.value = null;
       _player?.stop();
       isPlaying.value = false;
+
+      // ===== 配置变化时清空 EPG（下次加载新配置的 EPG） =====
+      epgMap.clear();
+      epgError.value = '';
+      _epgLoadDate = null;   // 同步清空加载日期
+      _cancelEpgBoundaryTimer();
     }
 
     try {
@@ -473,6 +535,15 @@ class LiveController extends GetxController {
         _playChannelInternal(channels.first);
       }
 
+      // ===== 追加：异步加载 EPG =====
+      // 仅在 EPG 尚未加载（epgMap 为空）时才加载，避免重复下载
+      if (epgMap.isEmpty && config.epg != null && config.epg!.isNotEmpty) {
+        _loadEpg(config);
+      } else if (epgMap.isNotEmpty) {
+        // EPG 已缓存，重新调度定时器（切换配置后可能当前节目变了）
+        _scheduleEpgBoundaryTimer();
+      }
+
     } catch (e) {
       errorMessage.value = '加载直播源失败: $e';
       resetPlayer();
@@ -542,6 +613,9 @@ class LiveController extends GetxController {
     _isPlayingChannel = true;
     currentChannel.value = channel;
 
+    // ===== 切换频道时重新调度 EPG 边界定时器（不重新加载 EPG） =====
+    _scheduleEpgBoundaryTimer();
+
     try {
       await _player!.stop();
 
@@ -581,6 +655,116 @@ class LiveController extends GetxController {
     } finally {
       _isPlayingChannel = false;
     }
+  }
+
+  // ============================================================
+  // EPG 相关方法
+  // ============================================================
+
+  /// 加载 EPG（异步，失败不影响直播）
+  /// 只在首次进入 + 切换配置 + 跨天时调用
+  Future<void> _loadEpg(LiveConfig config) async {
+    if (config.epg == null || config.epg!.isEmpty) {
+      epgMap.clear();
+      epgError.value = '';
+      _epgLoadDate = null;
+      return;
+    }
+
+    epgLoading.value = true;
+    epgError.value = '';
+
+    try {
+      final map = await LiveEpgService.load(
+        configKey: config.key,
+        url: config.epg!,
+      );
+      epgMap.assignAll(map);
+      epgError.value = '';
+
+      // 记录本次加载成功的日期，用于跨天检测
+      _epgLoadDate = DateTime.now();
+
+      // EPG 加载完成后，调度边界定时器
+      _scheduleEpgBoundaryTimer();
+    } catch (e) {
+      epgError.value = '节目单加载失败';
+    } finally {
+      epgLoading.value = false;
+    }
+  }
+
+  /// 调度节目边界定时器
+  ///
+  /// 策略：只在"当前节目结束 + 1 秒"时触发一次刷新，
+  /// 触发后递归调度下一个节目的边界。
+  /// 这样节目切换时立即更新，其他时间零刷新。
+  ///
+  /// 跨天处理：
+  ///   当 currentProgramme == null 时，检查 _epgLoadDate 是否是今天。
+  ///   如果不是今天，说明 EPG 数据已过期（跨天了），自动重新加载。
+  ///   否则直接 return（比如 EPG 本身就没有当前节目，无需重新加载）。
+  ///
+  /// 注意：此方法只做内存操作，不下载、不解析 EPG（除非跨天触发 _loadEpg）
+  void _scheduleEpgBoundaryTimer() {
+    _cancelEpgBoundaryTimer();
+
+    final programme = currentProgramme;
+    if (programme == null) {
+      // 跨天检测
+      // 当前无节目 → 可能是 EPG 过期（跨天），尝试重新加载
+      _tryReloadEpgIfCrossDay();
+      return;
+    }
+
+    final now = DateTime.now();
+    final stop = programme.stop;
+    if (stop.isBefore(now)) return;
+
+    // 距离节目结束的时长 + 1 秒缓冲
+    final delay = stop.difference(now) + const Duration(seconds: 1);
+
+    _epgBoundaryTimer = Timer(delay, () {
+      if (epgMap.isNotEmpty) {
+        // 触发监听者重算 currentProgramme
+        epgMap.refresh();
+      }
+      // 递归调度下一个节目的边界
+      _scheduleEpgBoundaryTimer();
+    });
+  }
+
+  /// 跨天时重新加载 EPG
+  ///
+  /// 触发条件（全部满足）：
+  ///   1. 当前没有正在播放的节目（currentProgramme == null）
+  ///   2. _epgLoadDate 不为 null（说明之前成功加载过 EPG）
+  ///   3. _epgLoadDate 的日期 != 今天（说明跨天了）
+  ///   4. 当前配置有 EPG 地址
+  ///
+  /// 满足时调用 _loadEpg 重新加载，加载完成后会重新调度定时器。
+  void _tryReloadEpgIfCrossDay() {
+    final loaded = _epgLoadDate;
+    if (loaded == null) return;
+
+    final now = DateTime.now();
+    final isCrossDay = loaded.year != now.year ||
+                       loaded.month != now.month ||
+                       loaded.day != now.day;
+    if (!isCrossDay) return;
+
+    final config = currentConfig.value;
+    if (config == null || config.epg == null || config.epg!.isEmpty) return;
+
+    // 防止并发重复加载
+    if (epgLoading.value) return;
+
+    _loadEpg(config);
+  }
+
+  void _cancelEpgBoundaryTimer() {
+    _epgBoundaryTimer?.cancel();
+    _epgBoundaryTimer = null;
   }
 
   // ============================================================
@@ -655,6 +839,30 @@ class LiveController extends GetxController {
   }
 
   // ============================================================
+  // 频道 Logo
+  // ============================================================
+
+  /// 解析指定频道的 Logo URL
+  ///
+  /// - 未配置 logo 模板 → null
+  /// - 模板无占位符 → 原样返回模板
+  /// - 模板含 {频道名} / {name} → 替换为归一化 + URL 编码后的频道名
+  String? logoUrlFor(LiveChannel channel) {
+    final template = currentConfig.value?.logo;
+    return ChannelLogoService.resolve(
+      template: template,
+      channelName: channel.name,
+    );
+  }
+
+  /// 当前频道的 Logo URL
+  String? get currentLogoUrl {
+    final ch = currentChannel.value;
+    if (ch == null) return null;
+    return logoUrlFor(ch);
+  }
+
+  // ============================================================
   // 工具
   // ============================================================
 
@@ -681,8 +889,6 @@ class _FullScreenOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ctrl = Get.find<LiveController>(tag: 'live');
-
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {

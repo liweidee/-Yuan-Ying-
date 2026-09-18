@@ -7,6 +7,8 @@ import 'package:yuanying/modules/live/widgets/live_player_view.dart';
 import 'package:yuanying/modules/live/widgets/live_group_list.dart';
 import 'package:yuanying/modules/live/widgets/live_channel_list.dart';
 import 'package:yuanying/plugin/pl_player/player_pref.dart';
+import 'package:yuanying/modules/live/widgets/live_channel_info_bar.dart';
+import 'package:yuanying/modules/live/widgets/live_epg_timeline.dart';
 
 class LivePage extends StatefulWidget {
   const LivePage({super.key});
@@ -263,6 +265,7 @@ class _LivePageState extends State<LivePage> {
           aspectRatio: 16 / 9,
           child: playerWidget,
         ),
+        const LiveChannelInfoBar(),
         const SizedBox(height: 6),
         Expanded(
           child: Padding(
@@ -299,6 +302,7 @@ class _LivePageState extends State<LivePage> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // ===== 左侧面板保持不变 =====
           Container(
             width: 320,
             decoration: BoxDecoration(
@@ -328,6 +332,7 @@ class _LivePageState extends State<LivePage> {
             ),
           ),
           const SizedBox(width: 16),
+          // ===== 右侧：视频 + 底部时间轴 =====
           Expanded(
             child: Container(
               decoration: BoxDecoration(
@@ -343,7 +348,12 @@ class _LivePageState extends State<LivePage> {
               ),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(12),
-                child: playerWidget,
+                child: Column(
+                  children: [
+                    Expanded(child: playerWidget),
+                    const LiveEpgTimeline(),
+                  ],
+                ),
               ),
             ),
           ),
