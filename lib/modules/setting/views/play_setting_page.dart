@@ -17,6 +17,8 @@ import 'package:yuanying/utils/platform_utils.dart';
 import 'package:yuanying/plugin/pl_player/models/external_player_type.dart';
 import 'package:yuanying/modules/setting/widgets/external_player_dialog.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
+import 'package:yuanying/services/ad_block_proxy_service.dart';
+import 'package:yuanying/modules/setting/models/setting_pref.dart';
 
 class PlaySettingPage extends StatefulWidget {
   const PlaySettingPage({super.key});
@@ -108,6 +110,20 @@ class _PlaySettingPageState extends State<PlaySettingPage> {
             value: PlayerPref.enableShowDanmaku,
             onChanged: (value) {
               PlayerPref.enableShowDanmaku = value;
+              _refresh();
+            },
+          ),
+          const SizedBox(height: 8),
+
+          // ===== 智能广告过滤 =====
+          _buildSwitchItem(
+            icon: Icons.block_outlined,
+            title: '智能广告过滤',
+            subtitle: '实验性功能，支持过滤 M3U8 切片广告',
+            value: SettingPref.enableAdBlock,
+            onChanged: (value) async {
+              SettingPref.enableAdBlock = value;
+              await AdBlockProxyService.instance.setEnabled(value);
               _refresh();
             },
           ),

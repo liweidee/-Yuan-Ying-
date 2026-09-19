@@ -63,6 +63,8 @@ import 'package:yuanying/modules/smb_drive/controllers/smb_server_controller.dar
 
 import 'package:yuanying/modules/fnos/controllers/fnos_server_controller.dart';
 
+import 'package:yuanying/services/ad_block_proxy_service.dart';
+
 // ============================================================================
 // 全局变量
 // ============================================================================
@@ -291,6 +293,11 @@ void main() async {
   // 音乐播放器初始化
   final musicController = Get.put(MusicPlayerController(), permanent: true);
   await musicController.init();
+
+  // 初始化智能广告过滤代理
+  await AdBlockProxyService.instance.init(
+    enabled: SettingPref.enableAdBlock,
+  );        
 
   // 初始化 AudioService（桌面端或全平台）
   if (PlatformUtils.isDesktop) {

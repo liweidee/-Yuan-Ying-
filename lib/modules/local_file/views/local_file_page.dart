@@ -34,7 +34,10 @@ class _LocalFilePageState extends State<LocalFilePage>
   @override
   void initState() {
     super.initState();
-    controller = Get.put(LocalFileController());
+    // 避免 Tab 重建时 Get.put 冲突
+    controller = Get.isRegistered<LocalFileController>()
+        ? Get.find<LocalFileController>()
+        : Get.put(LocalFileController(), permanent: true);
   }
 
   @override
@@ -50,6 +53,13 @@ class _LocalFilePageState extends State<LocalFilePage>
       backgroundColor: colorScheme.surface,
       appBar: _buildAppBar(context, colorScheme),
       body: Obx(() {
+        // 初始化完成前只显示 loading，不显示空状态
+        if (!controller.isInitialized.value) {
+          return const Center(
+            child: CircularProgressIndicator(strokeWidth: 2),
+          );
+        }
+
         if (controller.isLoading.value && controller.videoFiles.isEmpty) {
           return const Center(
             child: CircularProgressIndicator(strokeWidth: 2),
@@ -57,7 +67,9 @@ class _LocalFilePageState extends State<LocalFilePage>
         }
 
         // 空状态：iOS 显示引导，其他平台显示添加路径
-        if (controller.videoFiles.isEmpty && controller.scanPaths.isEmpty) {
+        final noContent = controller.videoFiles.isEmpty &&
+            (Platform.isIOS || controller.scanPaths.isEmpty);
+        if (noContent && !controller.isFolderMode.value) {
           if (Platform.isIOS) {
             return _buildIOSEmptyState(context);
           }
@@ -89,7 +101,9 @@ class _LocalFilePageState extends State<LocalFilePage>
                 pathCount: Platform.isIOS ? 1 : controller.enabledPathCount,
                 lastScanTime: controller.getLastScanTime(),
               ),
-              if (controller.isFolderMode.value)
+              // 面包屑：iOS 和其他平台统一显示
+              if (controller.isFolderMode.value &&
+                  !controller.isAtRootPath)
                 BreadcrumbBar(controller: controller),
               FileSearchBar(controller: controller),
               Expanded(
@@ -104,6 +118,16 @@ class _LocalFilePageState extends State<LocalFilePage>
 
   AppBar _buildAppBar(BuildContext context, ColorScheme colorScheme) {
     return AppBar(
+      // 文件夹模式下显示返回按钮（iOS 也能返回）
+      leading: Obx(() {
+        if (!controller.isFolderMode.value) return const SizedBox.shrink();
+        if (controller.isAtRootPath) return const SizedBox.shrink();
+        return IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => controller.goToParent(),
+          splashRadius: 20,
+        );
+      }),
       title: const Text('本地文件'),
       centerTitle: false,
       elevation: 0,
@@ -167,10 +191,15 @@ class _LocalFilePageState extends State<LocalFilePage>
     final colorScheme = theme.colorScheme;
 
     return Obx(() {
+      // 顶部强制读取所有响应式变量
+      // 避免条件分支导致 Obx 依赖丢失，从而视图切换失效
       final isFolderMode = controller.isFolderMode.value;
+      final viewMode = controller.viewMode.value;
+      final isAtRoot = controller.isAtRootPath;
+      final mixedList = controller.mixedListRx;   // 用 Rx 版本保留响应式
+      final files = controller.filteredFiles;
 
       if (isFolderMode) {
-        final mixedList = controller.mixedList;
         if (mixedList.isEmpty) {
           return Center(
             child: Column(
@@ -191,7 +220,7 @@ class _LocalFilePageState extends State<LocalFilePage>
           );
         }
 
-        if (controller.viewMode.value == ViewMode.list) {
+        if (viewMode == ViewMode.list) {
           return ListView.builder(
             padding: const EdgeInsets.only(
               left: 12,
@@ -259,7 +288,6 @@ class _LocalFilePageState extends State<LocalFilePage>
       }
 
       // 文件模式
-      final files = controller.filteredFiles;
       if (files.isEmpty) {
         return Center(
           child: Column(
@@ -280,7 +308,7 @@ class _LocalFilePageState extends State<LocalFilePage>
         );
       }
 
-      if (controller.viewMode.value == ViewMode.list) {
+      if (viewMode == ViewMode.list) {
         return ListView.builder(
           padding: const EdgeInsets.only(
             left: 16,
@@ -482,6 +510,7 @@ class _LocalFilePageState extends State<LocalFilePage>
   }
 
   void _showPathManagementDialog(BuildContext context) {
+    if (Platform.isIOS) return;   // iOS 不支持路径管理
     showDialog(context: context, builder: (_) => const PathManagementDialog());
   }
 }

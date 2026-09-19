@@ -307,4 +307,14 @@ abstract final class SettingPref {
       StorageManager.getSetting<String>(SettingBoxKey.tmdbImageProxy) ?? 'https://images.tmdb.org/t/p';
   static set tmdbImageProxy(String v) =>
       StorageManager.setSetting(SettingBoxKey.tmdbImageProxy, v);
+
+  // ============================================================
+  // 智能广告过滤
+  // ============================================================
+
+  /// 是否启用 M3U8 广告过滤（实验性功能，默认关闭）
+  static bool get enableAdBlock =>
+      StorageManager.getSetting<bool>(SettingBoxKey.enableAdBlock) ?? false;
+  static set enableAdBlock(bool v) =>
+      StorageManager.setSetting(SettingBoxKey.enableAdBlock, v);
 }

@@ -208,6 +208,9 @@ abstract final class SettingBoxKey {
   // ===== 音乐播放器设置 =====
   static const String musicPlayMode = 'music_play_mode';
   static const String musicPlayerPosition = 'music_player_position';
+
+  // ===== 智能广告过滤 =====
+  static const String enableAdBlock = 'enableAdBlock';
 }
 
 abstract final class VideoBoxKey {

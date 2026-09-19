@@ -45,6 +45,7 @@ import 'package:yuanying/core/constants/storage_keys.dart';
 import 'package:yuanying/services/external_player_service.dart';
 import 'package:yuanying/plugin/pl_player/models/external_player_type.dart';
 import 'package:yuanying/modules/setting/views/play_setting_page.dart';
+import 'package:yuanying/services/ad_block_proxy_service.dart';
 
 class DetailController extends GetxController with GetTickerProviderStateMixin {
   // ===== tag 用于隔离控制器 =====
@@ -1145,12 +1146,26 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
         break;
     }
 
+    // currentPlayUrl.value = defaultUrl;
+    // currentQualities.value = playUrl.qualities;
+    // currentHeaders.value = headers;
+
+    // final dataSource = NetworkSource(
+    //   videoSource: defaultUrl,
+    //   audioSource: null,
+    //   headers: headers,
+    // );
+
+    // UI / 投屏 / 第三方播放器用原始 URL
     currentPlayUrl.value = defaultUrl;
     currentQualities.value = playUrl.qualities;
     currentHeaders.value = headers;
 
+    // 只有播放器数据源走代理（M3U8 + 开关开启时）
+    final proxyUrl = _wrapUrlIfNeeded(defaultUrl, headers: headers);
+
     final dataSource = NetworkSource(
-      videoSource: defaultUrl,
+      videoSource: proxyUrl,
       audioSource: null,
       headers: headers,
     );
@@ -1281,6 +1296,22 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     } catch (_) {
       return '';
     }
+  }
+
+  /// 从 headers 里找 Referer（大小写不敏感）
+  String? _findReferer(Map<String, String> headers) {
+    for (final e in headers.entries) {
+      if (e.key.toLowerCase() == 'referer') return e.value;
+    }
+    return null;
+  }
+
+  /// 包装 URL：只有 M3U8 且开关开启时才走代理
+  String _wrapUrlIfNeeded(String url, {Map<String, String>? headers}) {
+    return AdBlockProxyService.instance.wrapIfNeeded(
+      url,
+      referer: headers != null ? _findReferer(headers) : null,
+    );
   }
 
   bool _isCloudStorage(String domain) {
@@ -1469,9 +1500,20 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     try {
       playerController.skipStartDuration.value = skipStartDuration.value;
       playerController.skipEndDuration.value = skipEndDuration.value;
+      // await playerController.setDataSource(
+      //   NetworkSource(
+      //     videoSource: quality.url,
+      //     audioSource: null,
+      //   ),
+      //   autoplay: true,
+      //   seekTo: position,
+      // );
+
+      // M3U8 走代理
+      final proxyUrl = _wrapUrlIfNeeded(quality.url);
       await playerController.setDataSource(
         NetworkSource(
-          videoSource: quality.url,
+          videoSource: proxyUrl,   // ← 改为 proxyUrl
           audioSource: null,
         ),
         autoplay: true,
@@ -1743,9 +1785,26 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
       final position = playerController.position;
       if (showLoading) _showPlayLoading();
       try {
+        // await playerController.setDataSource(
+        //   NetworkSource(
+        //     videoSource: currentPlayUrl.value,
+        //     audioSource: null,
+        //     headers: currentHeaders.value.isNotEmpty ? currentHeaders.value : null,
+        //   ),
+        //   autoplay: true,
+        //   seekTo: position,
+        //   vodId: introController.currentPlayEpisode?.name ?? '',
+        //   autoFullScreenFlag: PlayerPref.autoEnterFullScreen,
+        // );
+
+        // M3U8 走代理
+        final proxyUrl = _wrapUrlIfNeeded(
+          currentPlayUrl.value,
+          headers: currentHeaders.value.isNotEmpty ? currentHeaders.value : null,
+        );
         await playerController.setDataSource(
           NetworkSource(
-            videoSource: currentPlayUrl.value,
+            videoSource: proxyUrl,
             audioSource: null,
             headers: currentHeaders.value.isNotEmpty ? currentHeaders.value : null,
           ),
@@ -1754,6 +1813,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
           vodId: introController.currentPlayEpisode?.name ?? '',
           autoFullScreenFlag: PlayerPref.autoEnterFullScreen,
         );
+
         await playerController.applySkipStart();
         await playerController.play();
         isPlaying.value = true;
@@ -2055,10 +2115,21 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
         headers: headers.isEmpty ? null : headers,
       );
     } else {
+      // dataSource = NetworkSource(
+      //   videoSource: url,
+      //   audioSource: null,
+      //   headers: headers.isEmpty ? null : headers,
+      // );
+
+      // M3U8 走代理
+      final proxyUrl = _wrapUrlIfNeeded(
+        url,
+        headers: headers.isEmpty ? null : headers,
+      );
       dataSource = NetworkSource(
-        videoSource: url,
+        videoSource: proxyUrl,
         audioSource: null,
-        headers: headers.isEmpty ? null : headers, // ← 新增
+        headers: headers.isEmpty ? null : headers,
       );
     }
 

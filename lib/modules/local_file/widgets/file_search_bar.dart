@@ -35,7 +35,7 @@ class FileSearchBar extends StatelessWidget {
               ),
               child: TextField(
                 onChanged: controller.updateSearch,
-                textAlignVertical: TextAlignVertical.center,  // ← 关键修复
+                textAlignVertical: TextAlignVertical.center,
                 decoration: InputDecoration(
                   hintText: '搜索文件或文件夹...',
                   hintStyle: TextStyle(
@@ -97,8 +97,8 @@ class FileSearchBar extends StatelessWidget {
           Obx(() => IconButton(
             icon: Icon(
               controller.viewMode.value == ViewMode.list
-                  ? Icons.grid_view
-                  : Icons.view_list,
+                  ? Icons.view_list
+                  : Icons.grid_view,
               size: 20,
               color: colorScheme.outline,
             ),

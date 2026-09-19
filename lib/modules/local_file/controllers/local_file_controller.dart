@@ -41,6 +41,7 @@ class LocalFileController extends GetxController {
 
   final RxBool isLoading = false.obs;
   final RxBool isScanning = false.obs;
+  final RxBool isInitialized = false.obs;   // 初始化完成标志
   final RxString searchKeyword = ''.obs;
 
   final Rx<FileSortType> sortBy = FileSortType.name.obs;
@@ -54,87 +55,117 @@ class LocalFileController extends GetxController {
   final RxString currentFolderPath = ''.obs;
   final RxList<dynamic> _mixedList = <dynamic>[].obs;
 
+  /// iOS 根路径缓存（Documents 目录）
+  String _iosRootPath = '';
+
   // ===== Getters =====
   int get totalVideoCount => videoFiles.length;
   int get totalSize => videoFiles.fold<int>(0, (sum, f) => sum + f.size);
   String get totalSizeFormatted => _formatSize(totalSize);
   int get enabledPathCount => scanPaths.where((p) => p.enabled).length;
+
+  /// 混合列表 Rx 版本（保留响应式）
+  RxList<dynamic> get mixedListRx => _mixedList;
+
+  /// 普通 List 版本（兼容旧代码）
   List<dynamic> get mixedList => _mixedList;
 
-  List<BreadcrumbItem> get breadcrumbs {
-    if (currentFolderPath.value.isEmpty) return [];
-    final rootPath = scanPaths.isNotEmpty
-        ? scanPaths
-            .firstWhere((p) => p.enabled, orElse: () => scanPaths.first)
-            .path
-        : '';
-    if (rootPath.isEmpty || currentFolderPath.value == rootPath) return [];
-    String relativePath = currentFolderPath.value;
-    if (relativePath.startsWith(rootPath)) {
-      var subPath = relativePath.substring(rootPath.length);
-      while (subPath.startsWith(Platform.pathSeparator)) {
-        subPath = subPath.substring(1);
-      }
-      if (subPath.isEmpty) return [];
-      final parts = subPath.split(Platform.pathSeparator);
-      final items = <BreadcrumbItem>[];
-      String accumulated = rootPath;
-      for (final part in parts) {
-        if (part.isEmpty) continue;
-        accumulated += Platform.pathSeparator + part;
-        items.add(BreadcrumbItem(name: part, path: accumulated));
-      }
-      return items;
+  /// 当前平台的根路径
+  /// - iOS：Documents 目录
+  /// - 其他：第一个 enabled 的 scanPath
+  String get rootPath {
+    if (Platform.isIOS) {
+      return _iosRootPath;
     }
-    return [];
+    if (scanPaths.isEmpty) return '';
+    return scanPaths
+        .firstWhere((p) => p.enabled, orElse: () => scanPaths.first)
+        .path;
   }
 
+  /// 面包屑（iOS 和其他平台统一逻辑）
+  List<BreadcrumbItem> get breadcrumbs {
+    final root = rootPath;
+    if (root.isEmpty || currentFolderPath.value.isEmpty) return [];
+    if (currentFolderPath.value == root) return [];
+
+    String relativePath = currentFolderPath.value;
+    if (!relativePath.startsWith(root)) return [];
+
+    var subPath = relativePath.substring(root.length);
+    while (subPath.startsWith(Platform.pathSeparator)) {
+      subPath = subPath.substring(1);
+    }
+    if (subPath.isEmpty) return [];
+
+    final parts = subPath.split(Platform.pathSeparator);
+    final items = <BreadcrumbItem>[];
+    String accumulated = root;
+    for (final part in parts) {
+      if (part.isEmpty) continue;
+      accumulated += Platform.pathSeparator + part;
+      items.add(BreadcrumbItem(name: part, path: accumulated));
+    }
+    return items;
+  }
+
+  /// 是否在根目录
   bool get isAtRootPath {
+    final root = rootPath;
+    if (root.isEmpty) return true;
     if (currentFolderPath.value.isEmpty) return true;
-    final rootPath = scanPaths.isNotEmpty
-        ? scanPaths
-            .firstWhere((p) => p.enabled, orElse: () => scanPaths.first)
-            .path
-        : '';
-    return rootPath.isEmpty || currentFolderPath.value == rootPath;
+    return currentFolderPath.value == root;
   }
 
   // ===== 生命周期 =====
   @override
-  void onInit() {
+  void onInit() async {
     super.onInit();
     if (Platform.isIOS) {
-      _initIOSMode();
+      await _initIOSMode();
     } else {
       _loadScanPaths();
       if (scanPaths.isNotEmpty) {
         final first = scanPaths
             .firstWhere((p) => p.enabled, orElse: () => scanPaths.first);
         currentFolderPath.value = first.path;
-        _ensurePermissionAndScan(first.path);
+        await _ensurePermissionAndScan(first.path);
       }
     }
+    isInitialized.value = true;
   }
 
   // ===== iOS 模式 =====
   /// iOS 默认进入文件模式：递归扫描 Documents 下所有视频，平铺展示
   Future<void> _initIOSMode() async {
-    final appDocDir = await getApplicationDocumentsDirectory();
-    currentFolderPath.value = appDocDir.path;
-    await _scanIOSRecursive(appDocDir.path);
+    try {
+      final appDocDir = await getApplicationDocumentsDirectory();
+      _iosRootPath = appDocDir.path;
+      currentFolderPath.value = _iosRootPath;
+      await _scanIOSRecursive(_iosRootPath);
+    } catch (e) {
+      SmartDialog.showToast('初始化失败: $e');
+    }
   }
 
   /// 供下拉刷新 / AppBar 刷新按钮调用
   Future<void> refreshImportedFolder() async {
     if (!Platform.isIOS) return;
-    final appDocDir = await getApplicationDocumentsDirectory();
-    currentFolderPath.value = appDocDir.path;
-    await _scanIOSRecursive(appDocDir.path);
+    if (_iosRootPath.isEmpty) {
+      await _initIOSMode();
+      return;
+    }
+    currentFolderPath.value = _iosRootPath;
+    if (isFolderMode.value) {
+      await _loadFolderContent(_iosRootPath);
+    } else {
+      await _scanIOSRecursive(_iosRootPath);
+    }
   }
 
   /// iOS 递归扫描：遍历指定路径下所有子文件夹，平铺到列表
   Future<void> _scanIOSRecursive(String rootPath) async {
-    if (rootPath.isEmpty || isLoading.value) return;
+    if (rootPath.isEmpty) return;
     isLoading.value = true;
     try {
       final files = await _scanner.scanDirectory(rootPath, recursive: true);
@@ -205,8 +236,9 @@ class LocalFileController extends GetxController {
 
   // ===== 路径管理 =====
   void _loadScanPaths() {
-    final data =
-        StorageManager.getSetting<List<dynamic>>(SettingBoxKey.localFileScanPaths);
+    final data = StorageManager.getSetting<List<dynamic>>(
+      SettingBoxKey.localFileScanPaths,
+    );
     if (data != null && data.isNotEmpty) {
       final paths = data.map((e) {
         final map = Map<String, dynamic>.from(e as Map);
@@ -272,29 +304,32 @@ class LocalFileController extends GetxController {
     _loadFolderContent(path);
   }
 
+  /// iOS 下也能正确返回上一级
   void goToParent() {
-    if (currentFolderPath.value.isEmpty) return;
+    final root = rootPath;
+    if (currentFolderPath.value.isEmpty || root.isEmpty) return;
+    if (currentFolderPath.value == root) return;   // 已在根目录
+
     final parts = currentFolderPath.value.split(Platform.pathSeparator);
     if (parts.length <= 1) return;
     parts.removeLast();
     final parentPath = parts.join(Platform.pathSeparator);
-    final rootPath = scanPaths.isNotEmpty
-        ? scanPaths
-            .firstWhere((p) => p.enabled, orElse: () => scanPaths.first)
-            .path
-        : '';
-    if (parentPath.isEmpty || parentPath == '/' || parentPath == rootPath) {
-      currentFolderPath.value = rootPath;
-      _loadFolderContent(rootPath);
+
+    // 越界 / 已到根，直接回根
+    if (parentPath.isEmpty ||
+        parentPath == root ||
+        !parentPath.startsWith(root)) {
+      currentFolderPath.value = root;
+      _loadFolderContent(root);
       return;
     }
     currentFolderPath.value = parentPath;
     _loadFolderContent(parentPath);
   }
 
-  /// 加载单层目录内容（文件夹模式用），与其他平台一致，非递归
+  /// 去掉 isLoading 提前返回，避免 UI 卡在旧状态
   Future<void> _loadFolderContent(String path) async {
-    if (path.isEmpty || isLoading.value) return;
+    if (path.isEmpty) return;
     isLoading.value = true;
     try {
       final subDirs = await _scanner.getSubDirectories(path);
@@ -425,27 +460,26 @@ class LocalFileController extends GetxController {
         viewMode.value == ViewMode.list ? ViewMode.grid : ViewMode.list;
   }
 
+  /// iOS 下切换文件夹模式时回到 iOS 根目录
   void toggleFolderMode() {
     isFolderMode.value = !isFolderMode.value;
     if (isFolderMode.value) {
-      // 进入文件夹模式：直接用当前路径（iOS 是 Documents 根）
-      if (currentFolderPath.value.isNotEmpty) {
-        _loadFolderContent(currentFolderPath.value);
+      // 进入文件夹模式
+      final root = rootPath;
+      if (root.isNotEmpty) {
+        currentFolderPath.value = root;
+        _loadFolderContent(root);
       }
     } else {
       // 退出文件夹模式
+      final root = rootPath;
+      if (root.isEmpty) return;
+
+      currentFolderPath.value = root;
       if (Platform.isIOS) {
-        // iOS：回到递归平铺
-        if (currentFolderPath.value.isNotEmpty) {
-          _scanIOSRecursive(currentFolderPath.value);
-        }
+        _scanIOSRecursive(root);
       } else {
-        if (scanPaths.isNotEmpty) {
-          final first = scanPaths
-              .firstWhere((p) => p.enabled, orElse: () => scanPaths.first);
-          currentFolderPath.value = first.path;
-          _ensurePermissionAndScan(first.path);
-        }
+        _ensurePermissionAndScan(root);
       }
     }
   }
@@ -482,7 +516,6 @@ class LocalFileController extends GetxController {
       return;
     }
 
-    // 构造 VideoDetail（单文件，不做多剧集）
     final cleanName = _stripMediaExtension(video.name);
     final videoDetail = VideoDetail(
       vodId: 'local_${video.path.hashCode}',
