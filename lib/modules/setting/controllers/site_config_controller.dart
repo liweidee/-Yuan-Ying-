@@ -253,6 +253,9 @@ class SiteConfigController extends GetxController {
     if (key != null && key.startsWith('catvod_')) return '3';
     if (lower.endsWith('drpy2.min.js') || lower.endsWith('drpy2.js')) return '3';
     if (lower == 'csp_xbpq' || lower == 'csp_xyqhiker') return '3';
+    if (lower == 'csp_appcms') return '3';
+    if (lower == 'csp_appv2') return '3';
+    if (lower == 'csp_appysv2') return '3';
     if (lower.endsWith('.js')) return '3';
     return '4';
   }

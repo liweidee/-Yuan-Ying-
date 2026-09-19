@@ -38,6 +38,9 @@ class HomeController extends GetxController with GetTickerProviderStateMixin {
   final errorMsg = ''.obs;
   final isSwitchingSource = false.obs;
 
+  // ===== 首页数据加载版本号，防止快速切站导致旧响应覆盖新 UI =====
+  int _homeLoadId = 0;
+
   // ===== 分类控制器缓存（仅非推荐分类） =====
   final Map<String, CategoryController> _categoryControllers = {};
 
@@ -172,6 +175,9 @@ class HomeController extends GetxController with GetTickerProviderStateMixin {
 
   // ===== 加载首页数据 =====
   Future<void> _loadHomeData() async {
+    // 捕获本次请求版本号
+    final loadId = ++_homeLoadId;
+
     _tabController?.dispose();
     _tabController = null;
 
@@ -181,6 +187,9 @@ class HomeController extends GetxController with GetTickerProviderStateMixin {
     try {
       final apiService = _sourceManager.currentApiService;
       final result = await apiService.fetchHome();
+
+      // await 返回后立即检查，旧请求丢弃
+      if (loadId != _homeLoadId) return;
 
       _parseCategories(result);
       _parseFilters(result);
@@ -209,7 +218,7 @@ class HomeController extends GetxController with GetTickerProviderStateMixin {
       if (categories.isEmpty) {
         isHomeError.value = true;
         errorMsg.value = '暂无分类数据';
-        isHomeLoading.value = false;
+        // 【删除】isHomeLoading.value = false; 交由 finally 统一处理
         return;
       }
 
@@ -258,12 +267,17 @@ class HomeController extends GetxController with GetTickerProviderStateMixin {
       isHomeError.value = false;
 
     } catch (e) {
+      // 旧请求的异常不覆盖新请求状态
+      if (loadId != _homeLoadId) return;
       print('_loadHomeData error: $e');
       isHomeError.value = true;
       errorMsg.value = e.toString();
     } finally {
-      isHomeLoading.value = false;
-      isSwitchingSource.value = false;
+      // 只有最新请求才允许复位 loading 状态
+      if (loadId == _homeLoadId) {
+        isHomeLoading.value = false;
+        isSwitchingSource.value = false;
+      }
     }
   }
 

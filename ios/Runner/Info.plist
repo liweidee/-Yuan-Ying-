@@ -28,6 +28,12 @@
     <key>LSRequiresIPhoneOS</key>
     <true/>
 
+    <!-- 文件共享：允许通过系统「文件」App 访问 Documents 目录 -->
+    <key>UIFileSharingEnabled</key>
+    <true/>
+    <key>LSSupportsOpeningDocumentsInPlace</key>
+    <true/>
+
     <!-- 网络放行（允许http） -->
     <key>NSAppTransportSecurity</key>
     <dict>

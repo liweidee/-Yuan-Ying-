@@ -1330,18 +1330,6 @@ class _FnosDetailPageState extends State<FnosDetailPage> {
               child: InkWell(
                 onTap: () => _play(ep),
                 child: Container(
-                  decoration: BoxDecoration(
-                    border: Border(
-                      left: BorderSide(
-                        color: isContinue
-                            ? colorScheme.primary
-                            : (progress > 0
-                                ? colorScheme.primary.withOpacity(0.5)
-                                : Colors.transparent),
-                        width: 3,
-                      ),
-                    ),
-                  ),
                   padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
                   child: Row(
                     children: [

@@ -186,6 +186,10 @@ class _DebugLogPageState extends State<DebugLogPage>
         return Colors.orange;
       case 'xyq':
         return Colors.pink;
+      case 'appcms':
+        return Colors.indigo;
+      case 'appysv2':
+        return Colors.cyan;
       default:
         return Colors.grey;
     }

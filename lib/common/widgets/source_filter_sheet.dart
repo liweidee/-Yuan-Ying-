@@ -240,8 +240,8 @@ class _SourceFilterSheetContentState extends State<_SourceFilterSheetContent> {
                   child: Row(
                     children: [
                       SizedBox(
-                        width: 40,
-                        height: 24,
+                        width: 52,
+                        height: 32,
                         child: FittedBox(
                           fit: BoxFit.scaleDown,
                           child: Switch(

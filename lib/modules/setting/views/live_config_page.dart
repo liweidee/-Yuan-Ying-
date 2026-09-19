@@ -205,7 +205,7 @@ class LiveConfigPage extends StatelessWidget {
             children: [
               Text('新增直播配置', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: colorScheme.onSurface)),
               const SizedBox(height: 20),
-              _buildTextField(controller: nameController, label: '名称 *', hint: '例如：央视频道', colorScheme: colorScheme),
+              _buildTextField(controller: nameController, label: '名称 *', hint: '例如：我的直播', colorScheme: colorScheme),
               const SizedBox(height: 14),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
@@ -237,7 +237,7 @@ class LiveConfigPage extends StatelessWidget {
               const SizedBox(height: 14),
               _buildTextField(controller: epgController, label: 'EPG节目表（可选）', hint: 'EPG接口地址', colorScheme: colorScheme),
               const SizedBox(height: 14),
-              _buildTextField(controller: logoController, label: 'Logo图标（可选）', hint: '图标图片地址', colorScheme: colorScheme),
+              _buildTextField(controller: logoController, label: '台标LOGO（可选）', hint: '台标LOGO地址', colorScheme: colorScheme),
               const SizedBox(height: 24),
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,

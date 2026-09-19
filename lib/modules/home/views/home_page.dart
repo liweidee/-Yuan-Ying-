@@ -1150,11 +1150,19 @@ class _SourceSwitchDialogContentState extends State<_SourceSwitchDialogContent> 
 
   String get _scrollOffsetKey => 'source_switch_scroll_${_isGridView ? 'grid' : 'list'}';
   String get _viewModeKey => 'source_switch_view_mode';
+  String get _selectedTagKey => 'source_switch_selected_tag';
 
   @override
   void initState() {
     super.initState();
     _isGridView = GStorage.getSetting<bool>(_viewModeKey) ?? true;
+
+    // 恢复上次选中的标签
+    _selectedTag = GStorage.getSetting<String>(_selectedTagKey) ?? '全部';
+    if (_selectedTag != '全部' && !widget.tagList.contains(_selectedTag)) {
+      _selectedTag = '全部';
+    }
+
     _scrollController = ScrollController();
     _scrollController.addListener(() {
       if (_scrollController.hasClients) {
@@ -1200,6 +1208,13 @@ class _SourceSwitchDialogContentState extends State<_SourceSwitchDialogContent> 
         });
       }
     });
+  }
+
+  void _selectTag(String tag) {
+    setState(() {
+      _selectedTag = tag;
+    });
+    GStorage.setSetting(_selectedTagKey, tag);
   }
 
   List<Map<String, dynamic>> get _filteredSites {
@@ -1304,7 +1319,7 @@ class _SourceSwitchDialogContentState extends State<_SourceSwitchDialogContent> 
                   _buildTagChip(
                     label: '全部',
                     isSelected: _selectedTag == '全部',
-                    onTap: () => setState(() => _selectedTag = '全部'),
+                    onTap: () => _selectTag('全部'),
                   ),
                   const SizedBox(width: 8),
                   ...widget.tagList.map((tag) {
@@ -1313,7 +1328,7 @@ class _SourceSwitchDialogContentState extends State<_SourceSwitchDialogContent> 
                       child: _buildTagChip(
                         label: tag,
                         isSelected: _selectedTag == tag,
-                        onTap: () => setState(() => _selectedTag = tag),
+                        onTap: () => _selectTag(tag),
                       ),
                     );
                   }),

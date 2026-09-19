@@ -76,6 +76,12 @@ class LiveController extends GetxController {
   bool _isFirstLoad = true;
   bool _isPlayingChannel = false;
 
+  // 静默刷新令牌
+  // 每次 _silentRefreshChannels 开始时自增，playChannel / _playChannelInternal
+  // 也会自增。Dio 返回后校验令牌，不一致则丢弃本次结果，
+  // 避免用旧的 currentChannelUrl 覆盖用户的新选择。
+  int _refreshToken = 0;
+
   // ===== 记录当前加载的配置 key，用于检测是否切换了配置 =====
   String? _currentConfigKey;
 
@@ -447,13 +453,17 @@ class LiveController extends GetxController {
   }
 
   /// 静默刷新频道数据（不显示 loading）
+  ///
+  /// 关键：Dio 返回后必须重新读取 currentChannel，而不是用请求前记录的值。
+  /// 因为用户在请求期间可能已经切换了频道，用旧值会覆盖用户的选择，
+  /// 导致"播放的是 B，但高亮显示 A"的状态错乱。
   Future<void> _silentRefreshChannels() async {
     final config = currentConfig.value;
     if (config == null) return;
 
-    // 保存当前播放状态
+    // 生成本次刷新的令牌
+    final token = ++_refreshToken;
     final bool wasPlaying = isPlaying.value;
-    final String? currentChannelUrl = currentChannel.value?.url;
 
     try {
       final response = await Dio().get(
@@ -464,7 +474,14 @@ class LiveController extends GetxController {
           receiveTimeout: const Duration(seconds: 30),
         ),
       );
-      final content = response.data is String ? response.data as String : response.data.toString();
+
+      // 令牌校验：如果刷新期间用户操作过（playChannel 会 ++_refreshToken），
+      //    或者又触发了新的刷新，本次结果直接丢弃
+      if (token != _refreshToken) return;
+
+      final content = response.data is String
+          ? response.data as String
+          : response.data.toString();
       final parsed = LiveParserService.parse(content);
 
       if (parsed.isEmpty) {
@@ -476,25 +493,23 @@ class LiveController extends GetxController {
       channels.assignAll(parsed);
       _updateGroups();
 
-      // 尝试恢复当前频道
-      if (currentChannelUrl != null) {
-        final found = parsed.where((ch) => ch.url == currentChannelUrl).toList();
-        if (found.isNotEmpty) {
-          currentChannel.value = found.first;
-          // 如果之前在播放，继续播放
-          if (wasPlaying && !isPlaying.value && !userPaused.value) {
-            _player?.play();
-          }
-        } else {
-          // 当前频道不在新列表中，自动播放第一个
-          if (parsed.isNotEmpty) {
-            _playChannelInternal(parsed.first);
-          }
-        }
-      } else if (parsed.isNotEmpty && currentChannel.value == null) {
-        _playChannelInternal(parsed.first);
-      }
+      // 关键：Dio 返回后重新读取当前频道 URL，而不是用请求前记录的值
+      final currentUrl = currentChannel.value?.url;
+      if (currentUrl == null) return;
 
+      final found = parsed.where((ch) => ch.url == currentUrl).toList();
+      if (found.isNotEmpty) {
+        // 用新列表里的同 URL 对象替换，保持引用一致
+        currentChannel.value = found.first;
+
+        // 如果之前在播放且现在没在播，恢复播放
+        if (wasPlaying && !isPlaying.value && !userPaused.value) {
+          _player?.play();
+        }
+      }
+      // 如果 found 为空：当前频道不在新列表中。
+      //    不要自动切换到第一个！用户可能刚点了别的频道，
+      //    或者当前频道确实失效了。静默保留现状比乱切更安全。
     } catch (_) {
       // 静默刷新失败，不处理
     }
@@ -602,6 +617,10 @@ class LiveController extends GetxController {
     if (!_isPlayerInitialized) _initPlayer();
     if (_isPlayingChannel) return;
     if (currentChannel.value?.url == channel.url && isPlaying.value) return;
+
+    // 作废进行中的静默刷新，避免它返回后覆盖用户的新选择
+    _refreshToken++;
+
     userPaused.value = false;
     _playChannelInternal(channel);
     showControls();
@@ -610,6 +629,10 @@ class LiveController extends GetxController {
   Future<void> _playChannelInternal(LiveChannel channel) async {
     if (!_isPlayerInitialized) _initPlayer();
     if (_isPlayingChannel) return;
+
+    // 作废进行中的静默刷新
+    _refreshToken++;
+
     _isPlayingChannel = true;
     currentChannel.value = channel;
 

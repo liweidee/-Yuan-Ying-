@@ -15,6 +15,8 @@ import 'package:yuanying/t4/services/xbpq_service.dart';
 import 'package:yuanying/t4/services/xyq_service.dart';
 import 'package:yuanying/t4/services/catvod_open_service.dart';
 import 'package:yuanying/t4/services/py3_spider_service.dart';
+import 'package:yuanying/t4/services/app_cms_service.dart';
+import 'package:yuanying/t4/services/app_ysv2_service.dart';
 import 'package:yuanying/core/constants/storage_keys.dart';
 import 'package:yuanying/t4/services/nodejs_spider_service.dart';
 import 'package:yuanying/nodejs/nodejs_service.dart';
@@ -98,6 +100,21 @@ class SourceManager extends GetxController {
     return type == '3' && key.startsWith('nodejs_');
   }
 
+  static bool isAppCmsSite(Map<String, dynamic> site) {
+    final api = site['api']?.toString() ?? '';
+    return api == 'csp_AppCMS';
+  }
+
+  static bool isAppV2Site(Map<String, dynamic> site) {
+    final api = site['api']?.toString() ?? '';
+    return api == 'csp_APPV2';
+  }
+
+  static bool isAppYsV2Site(Map<String, dynamic> site) {
+    final api = site['api']?.toString() ?? '';
+    return api == 'csp_AppYsV2';
+  }
+
   /// 根据站点配置判断详情类型（video / novel / manga）
   static String getDetailTypeFromSite(Map<String, dynamic>? site) {
     if (site == null) return DetailType.video;
@@ -118,6 +135,9 @@ class SourceManager extends GetxController {
     if (isPurePy3Site(site)) return _getOrCreatePy3Service(site);
     if (isDrpy2Site(site)) return _drpy2Service;
     if (isNodeJSSite(site)) return _getNodeJSService();
+    if (isAppCmsSite(site)) return _getOrCreateAppCmsService(site);
+    if (isAppYsV2Site(site)) return _getOrCreateAppYsV2Service(site);
+    if (isAppV2Site(site)) return _getOrCreateAppYsV2Service(site); // 兼容 csp_APPV2
     return _apiService;
   }
 
@@ -158,6 +178,22 @@ class SourceManager extends GetxController {
     if (isDrpy2Site(site)) return _drpy2Service;
     if (isCatVodOpenSite(site)) return Get.find<CatvodOpenService>();
     if (isNodeJSSite(site)) return _getNodeJSService();
+    if (isAppCmsSite(site)) {
+      final tag = 'appcms_$key';
+      if (!Get.isRegistered<AppCmsService>(tag: tag)) {
+        final service = AppCmsService(key, ext?.toString() ?? '');
+        Get.put(service, tag: tag, permanent: true);
+      }
+      return Get.find<AppCmsService>(tag: tag);
+    }
+    if (isAppYsV2Site(site) || isAppV2Site(site)) {
+      final tag = 'appysv2_$key';
+      if (!Get.isRegistered<AppYsV2Service>(tag: tag)) {
+        final service = AppYsV2Service(key, ext?.toString() ?? '');
+        Get.put(service, tag: tag, permanent: true);
+      }
+      return Get.find<AppYsV2Service>(tag: tag);
+    }
     return currentApiService;
   }
 
@@ -188,6 +224,9 @@ class SourceManager extends GetxController {
     if (apiWithoutQuery.endsWith('drpy2.min.js') || apiWithoutQuery.endsWith('drpy2.js')) return true;
     if (api == 'csp_XBPQ') return true;
     if (api == 'csp_XYQHiker') return true;
+    if (api == 'csp_AppCMS') return true;
+    if (api == 'csp_APPV2') return true;
+    if (api == 'csp_AppYsV2') return true;
     if (apiWithoutQuery.endsWith('.py')) return true;
     return false;
   }
@@ -877,6 +916,18 @@ class SourceManager extends GetxController {
       await _switchToPy3Site(site);
     } else if (isNodeJSSite(site)) {
       await _switchToNodeJSSite(site);
+    } else if (isAppCmsSite(site)) {
+      _getOrCreateAppCmsService(site).switchSite(
+        site['api']?.toString() ?? '',
+        site['key']?.toString() ?? '',
+        ext: site['ext'],
+      );
+    } else if (isAppYsV2Site(site) || isAppV2Site(site)) {
+      _getOrCreateAppYsV2Service(site).switchSite(
+        site['api']?.toString() ?? '',
+        site['key']?.toString() ?? '',
+        ext: site['ext'],
+      );
     } else {
       _switchToT4Site(site);
     }
@@ -964,6 +1015,24 @@ class SourceManager extends GetxController {
       Get.put(service, tag: key, permanent: true);
     }
     return Get.find<Py3SpiderService>(tag: key);
+  }
+
+  AppCmsService _getOrCreateAppCmsService(Map<String, dynamic> site) {
+    final key = site['key']?.toString() ?? 'appcms_default';
+    if (!Get.isRegistered<AppCmsService>(tag: key)) {
+      final service = AppCmsService(key, site['ext']?.toString() ?? '');
+      Get.put(service, tag: key, permanent: true);
+    }
+    return Get.find<AppCmsService>(tag: key);
+  }
+
+  AppYsV2Service _getOrCreateAppYsV2Service(Map<String, dynamic> site) {
+    final key = site['key']?.toString() ?? 'appysv2_default';
+    if (!Get.isRegistered<AppYsV2Service>(tag: key)) {
+      final service = AppYsV2Service(key, site['ext']?.toString() ?? '');
+      Get.put(service, tag: key, permanent: true);
+    }
+    return Get.find<AppYsV2Service>(tag: key);
   }
 
   Future<void> _switchToPy3Site(Map<String, dynamic> site) async {

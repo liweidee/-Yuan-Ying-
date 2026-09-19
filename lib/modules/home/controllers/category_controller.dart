@@ -36,6 +36,9 @@ class CategoryController extends GetxController {
   VideoItem? _lastItem;
   int _lastCount = 0;
 
+  // 请求版本号，防止旧请求污染新数据
+  int _requestId = 0;
+
   CategoryController({
     required this.categoryId,
     required this.categoryName,
@@ -65,6 +68,8 @@ class CategoryController extends GetxController {
 
   @override
   void onClose() {
+    // 软 abort：让所有飞行中的请求失效（回调会自行 return）
+    _requestId++;
     scrollController.dispose();
     super.onClose();
   }
@@ -107,6 +112,9 @@ class CategoryController extends GetxController {
 
     if (isLoading.value && !refresh) return;
 
+    // 捕获本次请求版本号
+    final requestId = ++_requestId;
+
     if (refresh) {
       _page = 1;
       _isEnd = false;
@@ -123,11 +131,10 @@ class CategoryController extends GetxController {
     try {
       final site = sourceManager.currentSite.value;
       if (site == null) {
+        // 旧请求不走这里；新请求交给 finally 复位
+        if (requestId != _requestId) return;
         errorMsg.value = '暂无配置';
         isError.value = true;
-        isLoading.value = false;
-        isLoadingMore.value = false;
-        hasLoaded.value = true;
         return;
       }
 
@@ -145,6 +152,9 @@ class CategoryController extends GetxController {
         ext: ext,
       );
 
+      // await 返回后立即检查，旧请求丢弃
+      if (requestId != _requestId) return;
+
       final newList = _parseVideoList(result);
 
       if (_isNoDataIndicator(newList)) {
@@ -158,9 +168,8 @@ class CategoryController extends GetxController {
               item.vodName.contains('防无限请求'));
           videoList.addAll(newList);
         }
-        isLoading.value = false;
-        isLoadingMore.value = false;
-        hasLoaded.value = true;
+        // 【删除】isLoading.value = false; isLoadingMore.value = false; hasLoaded.value = true;
+        // 交由 finally 统一处理
         return;
       }
 
@@ -171,8 +180,8 @@ class CategoryController extends GetxController {
           final last = newList.last;
           if (last.vodId == _lastItem!.vodId && last.vodName == _lastItem!.vodName) {
             _isEnd = true;
-            isLoadingMore.value = false;
-            hasLoaded.value = true;
+            // 【删除】isLoadingMore.value = false; hasLoaded.value = true;
+            // 交由 finally 统一处理
             return;
           }
         }
@@ -187,14 +196,19 @@ class CategoryController extends GetxController {
 
       isError.value = false;
     } catch (e, stack) {
+      // 旧请求的异常不覆盖新请求状态
+      if (requestId != _requestId) return;
       print('[CategoryController] error: $e');
       print('[CategoryController] stack: $stack');
       errorMsg.value = e.toString();
       isError.value = true;
     } finally {
-      isLoading.value = false;
-      isLoadingMore.value = false;
-      hasLoaded.value = true;
+      // 只有最新请求才允许复位 loading 状态
+      if (requestId == _requestId) {
+        isLoading.value = false;
+        isLoadingMore.value = false;
+        hasLoaded.value = true;
+      }
     }
   }
 

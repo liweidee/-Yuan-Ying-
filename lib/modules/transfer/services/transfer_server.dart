@@ -3,6 +3,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:yuanying/core/constants/storage_keys.dart';
@@ -167,8 +168,26 @@ class TransferServer {
     });
   }
 
+  /// 判断是否为 iOS 平台
+  bool get _isIOS => !kIsWeb && Platform.isIOS;
+
   Future<Directory> _getSaveDirectory() async {
-    // 优先使用用户配置的下载路径
+    // ===== iOS 特殊处理：直传 Documents 目录，便于在「文件」App 中访问 =====
+    if (_isIOS) {
+      final docs = await getApplicationDocumentsDirectory();
+      // iOS 的 getApplicationDocumentsDirectory 即 App 沙盒 Documents 目录，
+      // 需要确保 Info.plist 中设置了：
+      //   UIFileSharingEnabled = YES
+      //   LSSupportsOpeningDocumentsInPlace = YES
+      // 这样用户才能在「文件」App 中看到并访问此目录
+      final iosDir = Directory(p.join(docs.path, 'Transfers'));
+      if (!await iosDir.exists()) {
+        await iosDir.create(recursive: true);
+      }
+      return iosDir;
+    }
+
+    // ===== 其他平台：优先使用用户配置的下载路径 =====
     final configPath = StorageManager.getSetting<String>(SettingBoxKey.downloadPath);
     if (configPath != null && configPath.isNotEmpty) {
       final dir = Directory(configPath);
@@ -219,6 +238,10 @@ class TransferServer {
 
   String _uploadPage() {
     final sizeLimit = (maxUploadBytes ~/ (1024 * 1024));
+    // iOS 端提示文案不同
+    final tipText = _isIOS
+        ? '文件将保存到 App「文件」→「我的 iPhone」→「源影」目录<br>可在系统「文件」App 中直接查看和分享'
+        : '文件将保存到应用「下载路径」目录<br>上传过程中请保持此页面打开';
     return '''
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -275,7 +298,7 @@ body {
   </div>
   <input type="file" id="file" multiple>
   <div class="list" id="list"></div>
-  <div class="tip">文件将保存到应用「下载路径」目录<br>上传过程中请保持此页面打开</div>
+  <div class="tip">$tipText</div>
 </div>
 <script>
 const drop = document.getElementById('drop');
