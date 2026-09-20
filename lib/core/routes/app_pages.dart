@@ -22,6 +22,7 @@ import 'package:yuanying/modules/disclaimer/views/disclaimer_page.dart';
 import 'package:yuanying/modules/debug_log/views/debug_log_page.dart';
 import 'package:yuanying/modules/setting/views/about_page.dart';
 import 'package:yuanying/modules/catvod_log/views/catvod_log_page.dart';
+import 'package:yuanying/modules/system_log/views/system_log_page.dart';
 import 'package:yuanying/modules/setting/views/danmaku_config_page.dart';
 import 'package:yuanying/modules/setting/views/tmdb_config_page.dart';
 import 'package:yuanying/modules/setting/views/tmdb_match_page.dart';
@@ -95,6 +96,7 @@ class AppPages {
   static const String about = '/about';
   static const String debugLogs = '/debugLogs';
   static const String catvodLog = '/catvodLog';
+  static const String systemLog = '/systemLog';
   static const String danmakuConfig = '/danmakuConfig';
   static const String tmdbConfig = '/tmdbConfig';
   static const String tmdbMatch = '/tmdbMatch';
@@ -182,6 +184,7 @@ class AppPages {
       name: catvodLog,
       page: () => const CatVodLogPage(),
     ),
+    GetPage(name: systemLog, page: () => const SystemLogPage()),
     GetPage(name: danmakuConfig, page: () => const DanmakuConfigPage()),
     GetPage(name: tmdbConfig, page: () => const TmdbConfigPage()),
     GetPage(name: tmdbMatch, page: () => const TmdbMatchPage()),

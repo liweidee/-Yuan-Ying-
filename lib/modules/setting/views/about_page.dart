@@ -9,6 +9,7 @@ import 'package:yuanying/common/extensions/num_ext.dart';
 import 'package:yuanying/core/constants/app_constants.dart';
 import 'package:yuanying/core/theme/style.dart';
 import 'package:yuanying/services/debug_log_service.dart';
+import 'package:yuanying/services/system_log_service.dart';
 import 'package:yuanying/utils/cache_manager.dart';
 import 'package:yuanying/utils/page_utils.dart';
 import 'package:yuanying/utils/platform_utils.dart';
@@ -181,13 +182,47 @@ class _AboutPageState extends State<AboutPage> {
               ),
               trailing: Switch(
                 value: enabled,
-                onChanged: (v) => DebugLogService.instance.setEnabled(v),
+                onChanged: (v) {
+                  DebugLogService.instance.setEnabled(v);
+                  // 同步到 SystemLogService
+                  if (Get.isRegistered<SystemLogService>()) {
+                    Get.find<SystemLogService>().setEnabled(v);
+                  }
+                },
               ),
             );
           }),
 
           // =============================================================
-          // 查看日志入口（仅在开关开启时显示）
+          // 系统日志入口（仅在调试日志开关开启时显示）
+          // =============================================================
+          Obx(() {
+            final enabled = DebugLogService.instance.enabled.value;
+            if (!enabled) return const SizedBox.shrink();
+
+            final count = Get.isRegistered<SystemLogService>()
+                ? Get.find<SystemLogService>().logCount.value
+                : 0;
+            return ListTile(
+              onTap: () => Get.toNamed('/systemLog'),
+              onLongPress: () async {
+                if (Get.isRegistered<SystemLogService>()) {
+                  await Get.find<SystemLogService>().clearLogs();
+                  SmartDialog.showToast('日志已清除');
+                }
+              },
+              leading: const Icon(Icons.terminal_outlined),
+              title: const Text('系统日志'),
+              subtitle: Text(
+                '共 $count 条日志记录（广告过滤 / 代理 / 播放器等）',
+                style: subTitleStyle,
+              ),
+              trailing: Icon(Icons.arrow_forward, size: 16, color: outline),
+            );
+          }),
+
+          // =============================================================
+          // 接口日志入口（仅在开关开启时显示）
           // =============================================================
           Obx(() {
             final enabled = DebugLogService.instance.enabled.value;

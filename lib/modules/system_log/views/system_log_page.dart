@@ -1,27 +1,31 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
-import 'package:yuanying/services/catvod_log_service.dart';
-import 'package:yuanying/nodejs/nodejs_service.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
-import 'dart:convert';
 
-class CatVodLogPage extends StatefulWidget {
-  const CatVodLogPage({super.key});
+import 'package:yuanying/services/system_log_service.dart';
+
+/// 通用系统日志页
+///
+/// 样式参考 CatVodLogPage，但：
+///   - AppBar 无"诊断"按钮
+///   - 底部按钮文案为"复制系统日志"
+class SystemLogPage extends StatefulWidget {
+  const SystemLogPage({super.key});
 
   @override
-  State<CatVodLogPage> createState() => _CatVodLogPageState();
+  State<SystemLogPage> createState() => _SystemLogPageState();
 }
 
-class _CatVodLogPageState extends State<CatVodLogPage> {
+class _SystemLogPageState extends State<SystemLogPage> {
   final ScrollController _scrollController = ScrollController();
   bool _isAutoScroll = true;
-  late CatVodLogService _logService;
+  late SystemLogService _logService;
 
   @override
   void initState() {
     super.initState();
-    _logService = Get.find<CatVodLogService>();
+    _logService = Get.find<SystemLogService>();
     _scrollController.addListener(_onScroll);
   }
 
@@ -49,7 +53,7 @@ class _CatVodLogPageState extends State<CatVodLogPage> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('清除日志'),
-        content: const Text('确定要清除所有猫影视日志吗？'),
+        content: const Text('确定要清除所有系统日志吗？'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -74,44 +78,6 @@ class _CatVodLogPageState extends State<CatVodLogPage> {
     SmartDialog.showToast('已复制到剪贴板');
   }
 
-  /// 诊断蜘蛛源
-  Future<void> _diagnoseSpider() async {
-    SmartDialog.showToast('正在诊断...');
-    try {
-      final result = await NodeJSService.instance.diagnoseSpider();
-      final text = const JsonEncoder.withIndent('  ').convert(result);
-      if (mounted) {
-        showDialog(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: const Text('蜘蛛源诊断结果'),
-            content: SingleChildScrollView(
-              child: SelectableText(
-                text,
-                style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () {
-                  Clipboard.setData(ClipboardData(text: text));
-                  SmartDialog.showToast('已复制到剪贴板');
-                },
-                child: const Text('复制'),
-              ),
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('关闭'),
-              ),
-            ],
-          ),
-        );
-      }
-    } catch (e) {
-      SmartDialog.showToast('诊断失败: $e');
-    }
-  }
-
   @override
   void dispose() {
     _scrollController.dispose();
@@ -125,11 +91,14 @@ class _CatVodLogPageState extends State<CatVodLogPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('猫影视日志'),
+        title: const Text('系统日志'),
         backgroundColor: isDark ? Colors.grey[800] : null,
         actions: [
+          // 自动滚动
           IconButton(
-            icon: Icon(_isAutoScroll ? Icons.vertical_align_bottom : Icons.vertical_align_center),
+            icon: Icon(_isAutoScroll
+                ? Icons.vertical_align_bottom
+                : Icons.vertical_align_center),
             tooltip: _isAutoScroll ? '自动滚动已开启' : '自动滚动已关闭',
             onPressed: () {
               setState(() {
@@ -138,34 +107,33 @@ class _CatVodLogPageState extends State<CatVodLogPage> {
               });
             },
           ),
+          // 复制所有日志
           IconButton(
             icon: const Icon(Icons.copy),
             tooltip: '复制所有日志',
             onPressed: _copyAllLogs,
           ),
+          // 清除日志
           IconButton(
             icon: const Icon(Icons.delete),
             tooltip: '清除日志',
             onPressed: _clearLogs,
           ),
-          IconButton(
-            icon: Icon(Icons.bug_report, color: Theme.of(context).colorScheme.primary),
-            tooltip: '诊断蜘蛛源',
-            onPressed: _diagnoseSpider,
-          ),
+          // ★ 无诊断按钮
         ],
       ),
       body: Container(
         color: isDark ? Colors.black87 : Colors.grey[100],
         child: Column(
           children: [
-            // 顶部提示横幅（完全复制 tvbox_flutter）
+            // 顶部提示横幅
             Container(
               padding: const EdgeInsets.all(12),
               color: isDark ? Colors.blueGrey[900] : Colors.blueGrey[100],
               child: Row(
                 children: [
-                  const Icon(Icons.info_outline, color: Colors.white70, size: 20),
+                  const Icon(Icons.info_outline,
+                      color: Colors.white70, size: 20),
                   const SizedBox(width: 8),
                   const Expanded(
                     child: Text(
@@ -185,7 +153,6 @@ class _CatVodLogPageState extends State<CatVodLogPage> {
             Expanded(
               child: Obx(() {
                 final logs = _logService.logs;
-                // 自动滚动到最新
                 WidgetsBinding.instance.addPostFrameCallback((_) {
                   if (_isAutoScroll && logs.isNotEmpty) {
                     _scrollToBottom();
@@ -195,7 +162,7 @@ class _CatVodLogPageState extends State<CatVodLogPage> {
                 if (logs.isEmpty) {
                   return const Center(
                     child: Text(
-                      '暂无猫影视日志',
+                      '暂无系统日志',
                       style: TextStyle(color: Colors.white54),
                     ),
                   );
@@ -214,6 +181,9 @@ class _CatVodLogPageState extends State<CatVodLogPage> {
                       textColor = Colors.orange[300]!;
                     } else if (line.contains('[INFO]') || line.contains('✅')) {
                       textColor = Colors.green[300]!;
+                    } else if (line.contains('[DEBUG]')) {
+                      textColor =
+                          isDark ? Colors.blue[200]! : Colors.blue[700]!;
                     } else {
                       textColor = isDark ? Colors.white70 : Colors.black87;
                     }
@@ -256,24 +226,24 @@ class _CatVodLogPageState extends State<CatVodLogPage> {
                 ],
               ),
             ),
-            // 底部诊断按钮（预留 iOS Home Indicator 安全区）
+            // ★ 底部按钮（文案改为"复制系统日志"）
             Container(
               width: double.infinity,
               padding: EdgeInsets.fromLTRB(
                 8,
                 8,
                 8,
-                8 + MediaQuery.viewPaddingOf(context).bottom,   // ★ 关键：加底部安全区
+                8 + MediaQuery.viewPaddingOf(context).bottom,
               ),
               color: isDark ? Colors.grey[850] : Colors.grey[300],
               child: ElevatedButton.icon(
-                icon: const Icon(Icons.bug_report),
+                icon: const Icon(Icons.copy_all),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Theme.of(context).colorScheme.primary,
                   foregroundColor: Theme.of(context).colorScheme.onPrimary,
                 ),
-                label: const Text('诊断蜘蛛源'),
-                onPressed: _diagnoseSpider,
+                label: const Text('复制系统日志'),
+                onPressed: _copyAllLogs,
               ),
             ),
           ],

@@ -118,16 +118,7 @@ class _LocalFilePageState extends State<LocalFilePage>
 
   AppBar _buildAppBar(BuildContext context, ColorScheme colorScheme) {
     return AppBar(
-      // 文件夹模式下显示返回按钮（iOS 也能返回）
-      leading: Obx(() {
-        if (!controller.isFolderMode.value) return const SizedBox.shrink();
-        if (controller.isAtRootPath) return const SizedBox.shrink();
-        return IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => controller.goToParent(),
-          splashRadius: 20,
-        );
-      }),
+      automaticallyImplyLeading: false,
       title: const Text('本地文件'),
       centerTitle: false,
       elevation: 0,

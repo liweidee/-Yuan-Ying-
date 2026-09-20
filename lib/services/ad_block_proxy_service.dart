@@ -1,5 +1,7 @@
 // lib/services/ad_block_proxy_service.dart
 import 'package:flutter/foundation.dart';
+import 'package:get/get.dart';
+import 'package:yuanying/services/system_log_service.dart';
 
 import 'package:yuanying/services/ad_block_proxy.dart';
 
@@ -62,11 +64,20 @@ class AdBlockProxyService {
     if (_proxy?.isRunning == true) return;
     try {
       _proxy = AdBlockProxy(
-        onLog: (msg) => debugPrint(msg),
+        onLog: (msg) {
+          debugPrint(msg);
+          // 写入系统日志（仅调试日志开关开启时生效）
+          if (Get.isRegistered<SystemLogService>()) {
+            Get.find<SystemLogService>().info(msg);
+          }
+        },
       );
       await _proxy!.start();
     } catch (e) {
       debugPrint('[AdBlockProxyService] 启动失败: $e');
+      if (Get.isRegistered<SystemLogService>()) {
+        Get.find<SystemLogService>().error('[AdBlockProxyService] 启动失败: $e');
+      }
       _proxy = null;
       _enabled = false;
     }

@@ -290,7 +290,7 @@ class AdBlockProxy {
       final processed = await _processM3u8(content, url, referer);
       request.response.write(processed);
     } catch (e) {
-      _log('代理失败: $url | $e');
+      _log('代理失败: ${_shortUrl(url)} | $e');
       try {
         request.response.statusCode = HttpStatus.badGateway;
       } catch (_) {}
@@ -313,7 +313,7 @@ class AdBlockProxy {
     final cacheKey = '$url|${referer ?? ''}';
     final cached = _getCache(cacheKey);
     if (cached != null) {
-      _log('缓存命中: $url');
+      _log('缓存命中: ${_shortUrl(url)}');
       return cached;
     }
 
@@ -321,13 +321,13 @@ class AdBlockProxy {
       final parsed = _parse(content, url);
 
       if (!parsed.isValid) {
-        _log('无效 M3U8: $url');
+        _log('无效 M3U8: ${_shortUrl(url)}');
         return content;
       }
 
       // 加密 HLS：不处理，避免删切片后 KEY 对不上
       if (parsed.lines.any((l) => l.startsWith('#EXT-X-KEY'))) {
-        _log('加密 HLS，跳过过滤: $url');
+        _log('加密 HLS，跳过过滤: ${_shortUrl(url)}');
         final result = _rewrite(parsed.lines, parsed.segments, {});
         _setCache(cacheKey, result);
         return result;
@@ -351,18 +351,18 @@ class AdBlockProxy {
       }
 
       if (detection.adIndices.isEmpty) {
-        _log('无广告: $url');
+        _log('无广告: ${_shortUrl(url)}');
         final result = _rewrite(parsed.lines, parsed.segments, {});
         _setCache(cacheKey, result);
         return result;
       }
 
       final result = _rewrite(parsed.lines, parsed.segments, detection.adIndices);
-      _log('去广告完成: $url | 移除 ${detection.adIndices.length}/${parsed.segments.length}');
+      _log('去广告完成: ${_shortUrl(url)} | 移除 ${detection.adIndices.length}/${parsed.segments.length}');
       _setCache(cacheKey, result);
       return result;
     } catch (e) {
-      _log('M3U8 处理失败: $url | $e');
+      _log('M3U8 处理失败: ${_shortUrl(url)} | $e');
       return content;
     }
   }
@@ -487,26 +487,67 @@ class AdBlockProxy {
       return _DetectionResult.abort('无法建立基准模式');
     }
 
+    _log('基准: 主域名=${baseline.mainDomain}, 平均时长=${baseline.avgDuration.toStringAsFixed(2)}s, 样本=${baseline.sampleSize}');
+
     // 第 2 层：逐 segment 打分
-    final candidates = <int>{};
+    final scoreMap = <int, _ScoreResult>{};
     for (int i = 0; i < segments.length; i++) {
-      if (_score(segments[i], baseline, segments) >= 0.7) {
-        candidates.add(i);
+      final r = _scoreWithSignals(segments[i], baseline, segments);
+      if (r.score >= 0.7) {
+        scoreMap[i] = r;
       }
     }
-    if (candidates.isEmpty) return _DetectionResult.none();
+
+    if (scoreMap.isEmpty) return _DetectionResult.none();
+
+    // 打印每个候选
+    _log('候选切片 (${scoreMap.length} 个):');
+    // scoreMap.forEach((idx, r) {
+    //   _log('  #$idx $r → ${_shortUrl(segments[idx].url)}');
+    // });
+    scoreMap.forEach((idx, r) {
+      _log('  #$idx $r → ${segments[idx].url}');   // 完整 URL
+    });
+
+    final candidates = scoreMap.keys.toSet();
 
     // 第 3 层：连续性校验
     final valid = <int>{};
+    final rejectedGroups = <List<int>>[];
     for (final group in _continuousGroups(candidates)) {
-      if (group.length < config.minContinuousAdSegments) continue;
-      if (group.length > config.maxContinuousAdSegments) continue;
+      if (group.length < config.minContinuousAdSegments) {
+        rejectedGroups.add(group);
+        continue;
+      }
+      if (group.length > config.maxContinuousAdSegments) {
+        rejectedGroups.add(group);
+        continue;
+      }
       valid.addAll(group);
     }
+
+    // 打印连续性淘汰
+    if (rejectedGroups.isNotEmpty) {
+      _log('连续性校验淘汰:');
+      for (final g in rejectedGroups) {
+        _log('  组 $g (长度 ${g.length})');
+      }
+    }
+
     if (valid.isEmpty) return _DetectionResult.none();
 
     // 第 4 层：白名单
-    valid.removeWhere((i) => segments[i].isWhitelisted);
+    final whitelistRemoved = <int>[];
+    valid.removeWhere((i) {
+      if (segments[i].isWhitelisted) {
+        whitelistRemoved.add(i);
+        return true;
+      }
+      return false;
+    });
+    if (whitelistRemoved.isNotEmpty) {
+      _log('白名单放行: $whitelistRemoved');
+    }
     if (valid.isEmpty) return _DetectionResult.none();
 
     // 第 5 层：占比安全阀
@@ -518,8 +559,22 @@ class AdBlockProxy {
     }
 
     // 第 6 层：边缘保护（首尾各 1 个不删）
-    valid.remove(0);
-    valid.remove(segments.length - 1);
+    final edgeProtected = <int>[];
+    if (valid.remove(0)) edgeProtected.add(0);
+    if (valid.remove(segments.length - 1)) edgeProtected.add(segments.length - 1);
+    if (edgeProtected.isNotEmpty) {
+      _log('边缘保护保留: $edgeProtected');
+    }
+
+    // 打印最终被删切片
+    if (valid.isNotEmpty) {
+      _log('最终被删切片 (${valid.length} 个):');
+      final sorted = valid.toList()..sort();
+      for (final idx in sorted) {
+        final r = scoreMap[idx];
+        _log('  #$idx ${r ?? ""} → ${segments[idx].url}');   // 完整 URL
+      }
+    }
 
     return valid.isEmpty ? _DetectionResult.none() : _DetectionResult(adIndices: valid);
   }
@@ -586,12 +641,14 @@ class AdBlockProxy {
     );
   }
 
-  /// 返回 [0, 1]，越高越像广告
-  double _score(_Segment seg, _Baseline baseline, List<_Segment> all) {
-    if (seg.isWhitelisted) return 0;
+  /// 返回打分结果（含命中的信号名）
+  _ScoreResult _scoreWithSignals(_Segment seg, _Baseline baseline, List<_Segment> all) {
+    if (seg.isWhitelisted) {
+      return _ScoreResult(0, []);
+    }
 
     double score = 0;
-    int signals = 0;
+    final signals = <String>[];
 
     // 信号 1：域名（0.4）
     if (seg.rootDomain != baseline.mainDomain) {
@@ -599,7 +656,7 @@ class AdBlockProxy {
           ? baseline.domainCount[seg.rootDomain]! / baseline.sampleSize
           : 0.0;
       score += (ratio < config.rareDomainThreshold ? 1.0 : 0.5) * 0.4;
-      signals++;
+      signals.add('域名');
     }
 
     // 信号 2：前缀（0.4）
@@ -608,13 +665,13 @@ class AdBlockProxy {
         : _commonPrefix(seg.url, baseline.mainPrefix).length / baseline.mainPrefix.length;
     if (prefixSim < config.prefixSimilarityThreshold) {
       score += (1 - prefixSim) * 0.4;
-      signals++;
+      signals.add('前缀');
     }
 
     // 信号 3：关键词（0.2）
     if (seg.hasAdKeyword) {
       score += 0.2;
-      signals++;
+      signals.add('关键词');
     }
 
     // 信号 4：时长异常（0.3）
@@ -622,7 +679,7 @@ class AdBlockProxy {
       final r = seg.duration / baseline.avgDuration;
       if (r < 0.3 || r > 3.0) {
         score += 0.3;
-        signals++;
+        signals.add('时长');
       }
     }
 
@@ -630,11 +687,19 @@ class AdBlockProxy {
     if (RegExp(r'[_\-/](ad|ads|banner|promo|sponsor)\d*[_\-.$]',
         caseSensitive: false).hasMatch(seg.url)) {
       score += 0.2;
-      signals++;
+      signals.add('命名');
     }
 
     // 投票：至少 2 个信号
-    return signals < 2 ? 0.0 : score.clamp(0.0, 1.0);
+    if (signals.length < 2) {
+      return _ScoreResult(0, []);
+    }
+    return _ScoreResult(score.clamp(0.0, 1.0), signals);
+  }
+
+  /// 兼容旧调用（只返回分数）
+  double _score(_Segment seg, _Baseline baseline, List<_Segment> all) {
+    return _scoreWithSignals(seg, baseline, all).score;
   }
 
   List<List<int>> _continuousGroups(Set<int> indices) {
@@ -751,6 +816,19 @@ class AdBlockProxy {
     }
   }
 
+  /// 截断 URL，日志里只显示尾部关键部分
+  String _shortUrl(String url) {
+    try {
+      final uri = Uri.parse(url);
+      final segments = uri.pathSegments;
+      if (segments.isEmpty) return url;
+      if (segments.length <= 2) return segments.join('/');
+      return '.../${segments.sublist(segments.length - 2).join('/')}';
+    } catch (_) {
+      return url.length > 60 ? '...${url.substring(url.length - 60)}' : url;
+    }
+  }
+
   // ----------------------------------------------------------
   // 缓存
   // ----------------------------------------------------------
@@ -852,6 +930,18 @@ class _Baseline {
     required this.sampleSize,
     required this.domainCount,
   });
+}
+
+/// 单个切片的打分结果
+class _ScoreResult {
+  final double score;
+  final List<String> signals;   // 命中的信号名，便于排查
+
+  _ScoreResult(this.score, this.signals);
+
+  @override
+  String toString() =>
+      'score=${score.toStringAsFixed(2)}, 信号: ${signals.isEmpty ? "无" : signals.join("/")}';
 }
 
 class _DetectionResult {
