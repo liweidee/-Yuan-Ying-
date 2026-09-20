@@ -2,6 +2,7 @@ abstract final class StorageKeys {
   // Hive Box 名称
   static const String settingBox = 'app_settings';
   static const String cacheBox = 'app_cache';
+  static const String tmdbMatchBox = 'tmdb_matches';
 
   // T4 相关
   static const String t4Sites = 't4_sites';

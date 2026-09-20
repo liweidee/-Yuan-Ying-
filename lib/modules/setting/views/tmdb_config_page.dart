@@ -6,6 +6,8 @@ import 'package:yuanying/core/theme/style.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:yuanying/modules/setting/controllers/tmdb_config_controller.dart';
 import 'package:yuanying/modules/setting/views/tmdb_match_page.dart';
+import 'package:yuanying/services/tmdb_match_cache_service.dart';
+import 'package:yuanying/modules/setting/views/tmdb_cache_page.dart';
 
 class TmdbConfigPage extends StatelessWidget {
   const TmdbConfigPage({super.key});
@@ -40,6 +42,8 @@ class TmdbConfigPage extends StatelessWidget {
               _buildGlobalSwitch(context, theme, controller),
               const SizedBox(height: Style.cardSpace),
               _buildSourceMatchCard(context, theme, controller),
+              const SizedBox(height: Style.cardSpace),
+              _buildCacheManageCard(context, theme, controller),
               const SizedBox(height: Style.cardSpace),
               _buildAccessTokenCard(context, theme, controller),
               const SizedBox(height: Style.cardSpace),
@@ -165,6 +169,63 @@ class TmdbConfigPage extends StatelessWidget {
                         style: TextStyle(fontSize: 13, color: colorScheme.outline),
                       );
                     }),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right, color: colorScheme.outline),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCacheManageCard(
+    BuildContext context,
+    ThemeData theme,
+    TmdbConfigController controller,
+  ) {
+    final colorScheme = theme.colorScheme;
+    final cacheService = Get.find<TmdbMatchCacheService>();
+
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(borderRadius: Style.mdRadius),
+      color: colorScheme.surface,
+      child: InkWell(
+        borderRadius: Style.mdRadius,
+        onTap: () => Get.to(() => const TmdbCachePage()),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: Colors.green.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.storage, color: Colors.green, size: 24),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '匹配缓存管理',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: colorScheme.onSurface,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '已缓存 ${cacheService.count} 条匹配记录',
+                      style: TextStyle(fontSize: 13, color: colorScheme.outline),
+                    ),
                   ],
                 ),
               ),

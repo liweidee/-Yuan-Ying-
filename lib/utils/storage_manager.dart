@@ -80,6 +80,14 @@ class StorageManager {
     await _settingBox.delete(key);
   }
 
+  static Future<void> resetSettingBox() async {
+    if (kIsWeb) {
+      _memoryStorage?.clear();
+      return;
+    }
+    await _settingBox.clear();
+  }
+
   static Future<void> setCache(String key, dynamic value) async {
     if (kIsWeb) {
       _memoryStorage?['cache_$key'] = value;

@@ -66,6 +66,8 @@ import 'package:yuanying/modules/fnos/controllers/fnos_server_controller.dart';
 
 import 'package:yuanying/services/ad_block_proxy_service.dart';
 
+import 'package:yuanying/services/tmdb_match_cache_service.dart';
+
 // ============================================================================
 // 全局变量
 // ============================================================================
@@ -321,6 +323,13 @@ void main() async {
       ),
     );
   }
+
+  // 初始化 TMDB 匹配缓存
+  await Get.putAsync<TmdbMatchCacheService>(() async {
+    final service = TmdbMatchCacheService();
+    await service.init();
+    return service;
+  }, permanent: true);
 
   // ==========================================================================
   // 第十步：启动应用

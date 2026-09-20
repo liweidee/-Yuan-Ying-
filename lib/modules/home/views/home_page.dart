@@ -33,6 +33,7 @@ import 'package:yuanying/modules/music/controllers/music_player_controller.dart'
 import 'package:yuanying/utils/storage_manager.dart';
 import 'package:yuanying/core/constants/storage_keys.dart';
 import 'package:yuanying/modules/tmdb/views/tmdb_detail_page.dart';
+import 'package:yuanying/services/tmdb_match_cache_service.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -190,13 +191,19 @@ class _HomePageState extends CommonPageState<HomePage>
       return;
     }
 
-    // TMDB 集成拦截 - 首页进入（fromHome: true，不传 tmdbId）
+    // TMDB 集成拦截 - 首页进入（fromHome: true）
     if (_shouldUseTmdb(siteKey)) {
+      // ↓ 查缓存
+      final cacheService = Get.find<TmdbMatchCacheService>();
+      final cached = cacheService.get(siteKey, item.vodId);
+
       Get.to(
         () => TmdbDetailPage(
           videoItem: item,
           site: site!,
-          fromHome: true,  // 首页进入，使用搜索
+          fromHome: true,
+          tmdbId: cached?.tmdbId,        // 命中缓存则直接带 ID
+          mediaType: cached?.mediaType,  // 命中缓存则直接带类型
         ),
         routeName: AppPages.tmdbDetail,
       );

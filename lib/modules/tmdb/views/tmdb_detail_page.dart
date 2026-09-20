@@ -11,13 +11,15 @@ import 'package:yuanying/core/routes/app_pages.dart';
 import 'package:yuanying/services/search_filter_service.dart';
 import 'package:yuanying/t4/services/source_manager.dart';
 import 'package:yuanying/modules/tmdb/views/tmdb_person_page.dart';
+import 'package:yuanying/models/tmdb_match_record.dart';
+import 'package:yuanying/services/tmdb_match_cache_service.dart';
 
 class TmdbDetailPage extends StatefulWidget {
   final VideoItem videoItem;
   final Map<String, dynamic> site;
   final bool fromHome;
-  final int? tmdbId;       // 新增：TMDB ID，用于直接获取详情
-  final String? mediaType; // 新增：'movie' 或 'tv'
+  final int? tmdbId;       // TMDB ID，用于直接获取详情
+  final String? mediaType; // 'movie' 或 'tv'
 
   const TmdbDetailPage({
     super.key,
@@ -37,6 +39,9 @@ class _TmdbDetailPageState extends State<TmdbDetailPage> {
       ? Get.find<TmdbConfigController>()
       : Get.put(TmdbConfigController());
 
+  /// TMDB 匹配缓存服务
+  late final TmdbMatchCacheService _cacheService = Get.find<TmdbMatchCacheService>();
+
   final Dio _dio = Dio();
 
   bool _isLoading = true;
@@ -45,6 +50,10 @@ class _TmdbDetailPageState extends State<TmdbDetailPage> {
   String? _mediaType;
 
   bool _overviewExpanded = false;
+
+  // ===== 内部可变的 tmdbId / mediaType（手动修改后会被更新） =====
+  int? _currentTmdbId;
+  String? _currentMediaType;
 
   // 详情字段
   String? _title;
@@ -77,9 +86,33 @@ class _TmdbDetailPageState extends State<TmdbDetailPage> {
   bool get _isMatchFailed =>
       _errorMsg == '未找到相关条目' || _errorMsg == '未找到电影或电视剧条目';
 
+  // ===== 缓存相关 getter =====
+
+  /// 当前站点 key
+  String get _siteKey => widget.site['key']?.toString() ?? '';
+
+  /// 当前视频真实 vodId
+  String get _vodId => widget.videoItem.vodId;
+
+  /// 是否允许写缓存
+  ///
+  /// - 只缓存首页进入的（fromHome: true）
+  /// - siteKey 为空不缓存
+  /// - 伪造的 tmdb_xxx vodId 不缓存
+  bool get _shouldCacheMatch {
+    if (!widget.fromHome) return false;
+    if (_siteKey.isEmpty) return false;
+    if (_vodId.isEmpty) return false;
+    if (_vodId.startsWith('tmdb_')) return false;
+    return true;
+  }
+
   @override
   void initState() {
     super.initState();
+    // ===== 初始化内部可变字段 =====
+    _currentTmdbId = widget.tmdbId;
+    _currentMediaType = widget.mediaType;
     _fetchTmdbData();
   }
 
@@ -87,6 +120,41 @@ class _TmdbDetailPageState extends State<TmdbDetailPage> {
   void dispose() {
     _scrollController.dispose();
     super.dispose();
+  }
+
+  /// 统一的写缓存入口
+  void _writeCache({
+    required int tmdbId,
+    required String mediaType,
+    required String title,
+    required String posterPath,
+    String? backdropPath,
+    String? releaseDate,
+    double? voteAverage,
+    required String source,
+  }) {
+    if (!_shouldCacheMatch) return;
+
+    int? year;
+    if (releaseDate != null && releaseDate.isNotEmpty) {
+      year = int.tryParse(releaseDate.split('-').first);
+    }
+
+    _cacheService.put(
+      _siteKey,
+      _vodId,
+      TmdbMatchRecord(
+        tmdbId: tmdbId,
+        mediaType: mediaType,
+        title: title,
+        posterPath: posterPath,
+        backdropPath: backdropPath,
+        releaseYear: year,
+        voteAverage: voteAverage,
+        source: source,
+        updatedAt: DateTime.now().millisecondsSinceEpoch,
+      ),
+    );
   }
 
   Future<void> _fetchTmdbData() async {
@@ -105,11 +173,11 @@ class _TmdbDetailPageState extends State<TmdbDetailPage> {
       int tmdbId;
       String? mediaType;
 
-      // ===== 优先使用传入的 tmdbId =====
-      if (widget.tmdbId != null && widget.tmdbId! > 0) {
-        tmdbId = widget.tmdbId!;
-        mediaType = widget.mediaType;
-        
+      // ===== 优先使用 _currentTmdbId（可能来自缓存或手动修改） =====
+      if (_currentTmdbId != null && _currentTmdbId! > 0) {
+        tmdbId = _currentTmdbId!;
+        mediaType = _currentMediaType;
+
         // 如果未指定 mediaType，通过搜索确定类型
         if (mediaType == null) {
           final searchUrl = '$apiProxy/3/search/multi'
@@ -198,8 +266,13 @@ class _TmdbDetailPageState extends State<TmdbDetailPage> {
         }
 
         tmdbId = selected['id'] as int;
+
+        // ===== 自动搜索命中不写缓存，只有手动修改/搜索匹配才写 =====
       }
 
+      // ===== 更新内部状态 =====
+      _currentTmdbId = tmdbId;
+      _currentMediaType = mediaType;
       _mediaType = mediaType;
 
       final detailUrl = _mediaType == 'movie'
@@ -221,6 +294,15 @@ class _TmdbDetailPageState extends State<TmdbDetailPage> {
       );
 
       if (detailResp.statusCode != 200) {
+        // ===== 缓存的 ID 失效 → 清除缓存 + 自动降级到搜索 =====
+        if (_currentTmdbId != null && _shouldCacheMatch) {
+          await _cacheService.remove(_siteKey, _vodId);
+          _currentTmdbId = null;
+          _currentMediaType = null;
+          _fetchTmdbData();
+          return;
+        }
+
         setState(() {
           _errorMsg = '获取 TMDB 详情失败 (${detailResp.statusCode})';
           _isLoading = false;
@@ -421,29 +503,111 @@ class _TmdbDetailPageState extends State<TmdbDetailPage> {
     }
   }
 
+  // ===== 从搜索结果应用（手动修改/搜索匹配入口） =====
   void _updateFromSearchResult(Map<String, dynamic> result) {
+    final tmdbId = result['id'] as int?;
+    final mediaType = result['media_type'] as String? ?? 'movie';
+    if (tmdbId == null) return;
+
+    // ===== 写缓存（manual_search） =====
+    _writeCache(
+      tmdbId: tmdbId,
+      mediaType: mediaType,
+      title: result['title'] as String? ?? result['name'] as String? ?? '',
+      posterPath: result['poster_path'] as String? ?? '',
+      backdropPath: result['backdrop_path'] as String?,
+      releaseDate: result['release_date'] as String? ??
+          result['first_air_date'] as String?,
+      voteAverage: (result['vote_average'] as num?)?.toDouble(),
+      source: 'manual_search',
+    );
+
+    // ===== 更新内部状态 =====
+    _currentTmdbId = tmdbId;
+    _currentMediaType = mediaType;
+
+    // ===== 重新拉完整详情 =====
     setState(() {
-      _title = result['title'] as String? ?? result['name'] as String?;
-      _overview = result['overview'] as String?;
-      _posterPath = result['poster_path'] as String?;
-      _backdropPath = result['backdrop_path'] as String?;
-      _releaseDate = result['release_date'] as String? ?? result['first_air_date'] as String?;
-      _voteAverage = (result['vote_average'] as num?)?.toDouble();
-      _voteCount = result['vote_count'] as int?;
-      _mediaType = result['media_type'] as String?;
-      _tmdbData = {'id': result['id']};
+      _isLoading = true;
       _errorMsg = null;
-      _isLoading = false;
     });
+    _fetchTmdbData();
+  }
+
+  // ===== 重新自动匹配（清缓存 + 清 tmdbId + 走搜索） =====
+  Future<void> _resetToAutoMatch() async {
+    final confirmed = await SmartDialog.show<bool>(
+      builder: (_) => AlertDialog(
+        title: const Text('重新自动匹配'),
+        content: const Text('将清除当前手动匹配结果，重新用视频名搜索 TMDB 条目。'),
+        actions: [
+          TextButton(
+            onPressed: () => SmartDialog.dismiss(result: false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => SmartDialog.dismiss(result: true),
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    if (_shouldCacheMatch) {
+      await _cacheService.remove(_siteKey, _vodId);
+    }
+
+    _currentTmdbId = null;
+    _currentMediaType = null;
+
+    setState(() {
+      _isLoading = true;
+      _errorMsg = null;
+    });
+    _fetchTmdbData();
+  }
+
+  // ===== 清除匹配记录 =====
+  Future<void> _clearMatch() async {
+    final confirmed = await SmartDialog.show<bool>(
+      builder: (_) => AlertDialog(
+        title: const Text('清除匹配记录'),
+        content: const Text('清除后，下次进入需要重新匹配 TMDB 条目。'),
+        actions: [
+          TextButton(
+            onPressed: () => SmartDialog.dismiss(result: false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => SmartDialog.dismiss(result: true),
+            child: const Text('清除'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    if (_shouldCacheMatch) {
+      await _cacheService.remove(_siteKey, _vodId);
+      SmartDialog.showToast('已清除匹配记录');
+    }
   }
 
   // ===== 手动搜索弹窗 =====
-  void _showManualSearchBottomSheet() {
+  ///
+  /// [autoSearch] 为 true 时，弹窗打开后立即用预填关键词搜索；
+  /// 为 false 时，等待用户输入后手动点击搜索。
+  void _showManualSearchBottomSheet({bool autoSearch = true}) {
     final colorScheme = Theme.of(Get.context!).colorScheme;
     final isLoading = false.obs;
     final searchResults = <dynamic>[].obs;
     final errorMsg = ''.obs;
-    final searchController = TextEditingController(text: widget.videoItem.vodName);
+
+    // ===== 关键词预填：优先用当前 TMDB 标题 =====
+    final searchController = TextEditingController(
+      text: _title ?? widget.videoItem.vodName,
+    );
 
     Future<void> doSearch() async {
       final keyword = searchController.text.trim();
@@ -593,7 +757,10 @@ class _TmdbDetailPageState extends State<TmdbDetailPage> {
       searchController.dispose();
     });
 
-    doSearch();
+    // ===== 根据参数决定是否自动搜索 =====
+    if (autoSearch) {
+      doSearch();
+    }
   }
 
   // ===== 搜索结果卡片 =====
@@ -776,7 +943,7 @@ class _TmdbDetailPageState extends State<TmdbDetailPage> {
     final tmdbId = item['id'] as int?;
     final posterPath = item['poster_path'] as String?;
     final mediaType = item['media_type'] as String? ?? 'movie';
-    
+
     if (tmdbId == null) {
       SmartDialog.showToast('无法获取影片信息');
       return;
@@ -951,6 +1118,18 @@ class _TmdbDetailPageState extends State<TmdbDetailPage> {
     );
   }
 
+  // ===== 右上角菜单行 =====
+  Widget _menuRow(IconData icon, String text, {Color? color}) {
+    final c = color ?? Theme.of(context).colorScheme.onSurface;
+    return Row(
+      children: [
+        Icon(icon, size: 18, color: c),
+        const SizedBox(width: 10),
+        Text(text, style: TextStyle(color: c, fontSize: 14)),
+      ],
+    );
+  }
+
   // ===== build =====
   @override
   Widget build(BuildContext context) {
@@ -973,6 +1152,11 @@ class _TmdbDetailPageState extends State<TmdbDetailPage> {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final backdropUrl = _getImageUrl(_backdropPath, size: 'original');
+
+    // ===== 读取缓存状态，供菜单展示 =====
+    final cached = _shouldCacheMatch
+        ? _cacheService.get(_siteKey, _vodId)
+        : null;
 
     return CustomScrollView(
       controller: _scrollController,
@@ -1039,31 +1223,48 @@ class _TmdbDetailPageState extends State<TmdbDetailPage> {
                 borderRadius: BorderRadius.circular(12),
               ),
               onSelected: (value) {
-                if (value == 'imdb') {
-                  _openImdb();
+                switch (value) {
+                  case 'imdb':
+                    _openImdb();
+                    break;
+                  case 'rematch':
+                    // 打开手动搜索面板，不自动搜索（让用户自己输入）
+                    _showManualSearchBottomSheet(autoSearch: false);
+                    break;
+                  case 'auto_match':
+                    _resetToAutoMatch();
+                    break;
+                  case 'clear_match':
+                    _clearMatch();
+                    break;
                 }
               },
               itemBuilder: (context) => [
                 PopupMenuItem<String>(
                   value: 'imdb',
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.open_in_new,
-                        size: 18,
-                        color: Theme.of(context).colorScheme.onSurface,
-                      ),
-                      const SizedBox(width: 10),
-                      Text(
-                        '在 IMDB 查看',
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.onSurface,
-                          fontSize: 14,
-                        ),
-                      ),
-                    ],
+                  child: _menuRow(Icons.open_in_new, '在 IMDB 查看'),
+                ),
+                PopupMenuItem<String>(
+                  value: 'rematch',
+                  child: _menuRow(
+                    Icons.swap_horiz,
+                    cached == null ? '手动匹配' : '修改匹配',
                   ),
                 ),
+                if (cached != null)
+                  PopupMenuItem<String>(
+                    value: 'auto_match',
+                    child: _menuRow(Icons.auto_awesome, '重新自动匹配'),
+                  ),
+                if (cached != null)
+                  PopupMenuItem<String>(
+                    value: 'clear_match',
+                    child: _menuRow(
+                      Icons.delete_outline,
+                      '清除匹配记录',
+                      color: Colors.red,
+                    ),
+                  ),
               ],
             ),
           ],
