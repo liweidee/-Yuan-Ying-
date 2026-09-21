@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:characters/characters.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:yuanying/t4/models/video_item.dart';
@@ -155,6 +156,17 @@ class CategoryController extends GetxController {
       // await 返回后立即检查，旧请求丢弃
       if (requestId != _requestId) return;
 
+      // 检查 error 响应
+      // 兼容 CatVodOpen 的 {'error': '...'} 和 Drpy2 的 {'success': false, 'error': '...'}
+      if (result is Map) {
+        final err = result['error']?.toString() ?? '';
+        if (err.isNotEmpty) {
+          errorMsg.value = _truncateError(err);
+          isError.value = true;
+          return;  // finally 会复位 loading
+        }
+      }
+
       final newList = _parseVideoList(result);
 
       if (_isNoDataIndicator(newList)) {
@@ -168,7 +180,7 @@ class CategoryController extends GetxController {
               item.vodName.contains('防无限请求'));
           videoList.addAll(newList);
         }
-        // 【删除】isLoading.value = false; isLoadingMore.value = false; hasLoaded.value = true;
+        // isLoading.value = false; isLoadingMore.value = false; hasLoaded.value = true;
         // 交由 finally 统一处理
         return;
       }
@@ -180,7 +192,7 @@ class CategoryController extends GetxController {
           final last = newList.last;
           if (last.vodId == _lastItem!.vodId && last.vodName == _lastItem!.vodName) {
             _isEnd = true;
-            // 【删除】isLoadingMore.value = false; hasLoaded.value = true;
+            // isLoadingMore.value = false; hasLoaded.value = true;
             // 交由 finally 统一处理
             return;
           }
@@ -245,6 +257,15 @@ class CategoryController extends GetxController {
     hasLoaded.value = false;
     isLoading.value = true;
     loadData(refresh: true);
+  }
+
+  /// 截断错误信息，避免 UI 溢出。
+  /// 按 grapheme 截断，避免 emoji 被切半。
+  String _truncateError(String err) {
+    const maxLen = 120;
+    if (err.length <= maxLen) return err;
+    final truncated = err.characters.take(maxLen).toString();
+    return '$truncated...';
   }
 
   List<VideoItem> _parseVideoList(dynamic result) {

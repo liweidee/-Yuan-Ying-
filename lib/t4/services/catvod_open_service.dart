@@ -18,8 +18,14 @@ class CatvodOpenService implements ISpiderService {
   Map<String, String>? _methodMap;
   bool _apiReady = false;
 
+  bool _isBroken = false;
+  bool get isBroken => _isBroken;
+
   late JavascriptRuntime _runtime;
   final Dio _reqDio = _createReqDio();
+
+  /// switchSite 之间的简单互斥，防止两个切站打架
+  Future<void>? _switchMutex;
 
   CatvodOpenService() {
     _runtime = getJavascriptRuntime();
@@ -45,7 +51,6 @@ class CatvodOpenService implements ISpiderService {
     return dio;
   }
 
-  /// 销毁旧运行时并重新创建，实现环境彻底刷新
   void _resetRuntime() {
     try {
       _runtime.dispose();
@@ -58,11 +63,9 @@ class CatvodOpenService implements ISpiderService {
     print('[CatvodOpen] New runtime created and initialized.');
   }
 
-  /// 初始化运行时：注入基础设施，注册消息回调
   void _initRuntime() {
     _runtime.evaluate('window = globalThis;');
 
-    // 注入 req, local, BaseSpider
     _runtime.evaluate('''
       (function() {
         if (typeof sendMessage === 'undefined') {
@@ -124,7 +127,6 @@ class CatvodOpenService implements ISpiderService {
         globalThis.req = window.req;
         globalThis.local = window.local;
 
-        // 使用 var 声明 BaseSpider，使其成为全局变量
         var BaseSpider = class BaseSpider {
           constructor() {}
           async fetch(url, options = {}, headers = {}) {
@@ -170,7 +172,6 @@ class CatvodOpenService implements ISpiderService {
       })();
     ''');
 
-    // 注册消息回调（每次重建都要注册，因为运行时是新的）
     _runtime.onMessage('catReq', (args) {
       dynamic payload = args;
       if (args is List && args.isNotEmpty) payload = args.first;
@@ -204,7 +205,6 @@ class CatvodOpenService implements ISpiderService {
   @override
   String? get currentKey => _currentKey;
 
-  // 以下 handleXXX 方法使用 _runtime，无需改动
   void handleCatReq(String payload) {
     String id = '';
     try {
@@ -289,13 +289,11 @@ class CatvodOpenService implements ISpiderService {
     } catch (e) {}
   }
 
-  // 网络请求（使用 _reqDio）
   Future<void> _executeReq(String id, String url, Map<String, dynamic> options) async {
     final method = (options['method'] as String? ?? 'GET').toUpperCase();
     final headers = Map<String, String>.from(options['headers'] as Map? ?? {});
     String? body = options['body'] as String?;
 
-    // 记录请求
     DebugLogService.instance.logRequest(
       method: method,
       url: url,
@@ -380,9 +378,7 @@ class CatvodOpenService implements ISpiderService {
     ''');
   }
 
-  // ---------- 规则加载 ----------
   Future<void> _loadRule(String ruleContent) async {
-    // 清理当前运行时的可能残留（但因为是重建的，其实不需要，保留以防万一）
     _runtime.evaluate('''
       (function() {
         window.__defaultExports = null;
@@ -395,7 +391,6 @@ class CatvodOpenService implements ISpiderService {
     ''');
 
     try {
-      // 预处理：处理 export function __jsEvalReturn 和 export default
       var lines = ruleContent.split('\n');
       var outputLines = <String>[];
       var inDefaultExport = false;
@@ -405,7 +400,6 @@ class CatvodOpenService implements ISpiderService {
         var trimmed = line.trim();
         if (trimmed.startsWith('import ')) continue;
 
-        // 处理 export function __jsEvalReturn
         if (trimmed.startsWith('export function __jsEvalReturn')) {
           line = line.replaceFirst('export function ', 'window.__jsEvalReturn = function ');
           outputLines.add(line);
@@ -459,47 +453,30 @@ class CatvodOpenService implements ISpiderService {
       final processed = outputLines.join('\n');
       final finalCode = 'var req = window.req;\n' + processed;
 
-      print('[CatvodOpen] _loadRule: evaluating rule code...');
       try {
         _runtime.evaluate(finalCode);
-        print('[CatvodOpen] Rule evaluation succeeded');
       } catch (e) {
-        print('[CatvodOpen] Rule evaluation threw: $e');
         rethrow;
       }
 
-      // 如果 __defaultExports 不是有效对象，尝试调用 __jsEvalReturn
       var defType = _runtime.evaluate('typeof window.__defaultExports');
       var defVal = _runtime.evaluate('window.__defaultExports');
-      print('[CatvodOpen] After eval, __defaultExports type: ${defType.stringResult}, value: ${defVal.stringResult}');
       if (defType.stringResult != 'object' || defVal.stringResult == 'null') {
         var jsEvalType = _runtime.evaluate('typeof window.__jsEvalReturn');
-        var jsEvalVal = _runtime.evaluate('window.__jsEvalReturn');
-        print('[CatvodOpen] __jsEvalReturn type: ${jsEvalType.stringResult}, value: ${jsEvalVal.stringResult}');
         if (jsEvalType.stringResult == 'function') {
-          var callResult = _runtime.evaluate('''
+          _runtime.evaluate('''
             (function() {
               try {
                 var obj = window.__jsEvalReturn();
                 if (obj && typeof obj === 'object') {
                   window.__defaultExports = obj;
-                  return 'ok';
                 }
-                return 'fail';
-              } catch(e) { return 'error: ' + e.message; }
+              } catch(e) {}
             })();
           ''');
-          print('[CatvodOpen] __jsEvalReturn call result: ${callResult.stringResult}');
-          // 再次检查
-          var def2 = _runtime.evaluate('typeof window.__defaultExports');
-          print('[CatvodOpen] After __jsEvalReturn call, __defaultExports type: ${def2.stringResult}');
-        } else {
-          print('[CatvodOpen] __jsEvalReturn is not a function, cannot fallback');
         }
       }
 
-      // 检测 API
-      print('[CatvodOpen] Detecting API...');
       final result = _runtime.evaluate('''
         (function() {
           var standardNames = ['init', 'home', 'homeVod', 'category', 'detail', 'play', 'search'];
@@ -537,7 +514,6 @@ class CatvodOpenService implements ISpiderService {
           }
 
           if (!apiObj || typeof apiObj !== 'object' || apiObj === null) {
-            console.log('[CatJS] No API object found');
             return null;
           }
 
@@ -553,7 +529,6 @@ class CatvodOpenService implements ISpiderService {
             }
           }
           if (Object.keys(methodMap).length === 0) {
-            console.log('[CatJS] No methods found');
             return null;
           }
 
@@ -563,7 +538,6 @@ class CatvodOpenService implements ISpiderService {
       ''');
 
       if (result.stringResult == 'null' || result.stringResult.isEmpty) {
-        print('[CatvodOpen] Detection returned null, throwing');
         throw Exception('No Cat API functions found');
       }
 
@@ -579,19 +553,41 @@ class CatvodOpenService implements ISpiderService {
     }
   }
 
-  // ---------- 切换站点 ----------
   @override
   void setBaseUrl(String url) {}
 
   @override
   Future<void> switchSite(String apiUrl, String siteKey, {dynamic ext}) async {
-    print('[CatvodOpen] 🔄 switchSite: $siteKey');
-    // 关键：销毁旧运行时并重建
-    _resetRuntime();
+    // 只串行化 switchSite 自身，防止两个切站打架
+    while (_switchMutex != null) {
+      await _switchMutex;
+    }
+    final lock = Completer<void>();
+    _switchMutex = lock.future;
+    try {
+      await _switchSiteInternal(apiUrl, siteKey, ext: ext);
+    } finally {
+      lock.complete();
+      _switchMutex = null;
+    }
+  }
 
+  Future<void> _switchSiteInternal(String apiUrl, String siteKey, {dynamic ext}) async {
+    print('[CatvodOpen] 🔄 switchSite: $siteKey');
+
+    // 保存旧 runtime 引用，用于成功后 dispose
+    final oldRuntime = _runtime;
+
+    // 直接创建新 runtime 并切换，不保存其他旧状态
+    final newRuntime = getJavascriptRuntime();
+    _runtime = newRuntime;
+    _initRuntime();
+
+    // 直接更新为新站点状态
     _currentKey = siteKey;
     _methodMap = null;
     _apiReady = false;
+    _isBroken = false;
 
     if (ext is String && ext.isNotEmpty) {
       try {
@@ -604,28 +600,64 @@ class CatvodOpenService implements ISpiderService {
     }
 
     try {
+      // 加载规则
       if (apiUrl.startsWith('http')) {
-        final response = await _reqDio.get(apiUrl, options: Options(responseType: ResponseType.plain));
+        final response = await _reqDio.get(
+          apiUrl,
+          options: Options(responseType: ResponseType.plain),
+        );
+        if (response.statusCode != 200) {
+          throw Exception('规则下载失败: HTTP ${response.statusCode}');
+        }
         final content = response.data as String? ?? '';
+        if (content.isEmpty) {
+          throw Exception('规则内容为空');
+        }
         await _loadRule(content);
       } else {
         await _loadRule(apiUrl);
       }
+
+      // 成功：dispose 旧 runtime
+      try {
+        oldRuntime.dispose();
+        print('[CatvodOpen] Old runtime disposed after successful switch.');
+      } catch (e) {
+        print('[CatvodOpen] Old runtime dispose error: $e');
+      }
+
+      _isBroken = false;
       print('[CatvodOpen] ✅ switchSite completed');
     } catch (e) {
-      print('[CatvodOpen] ❌ switchSite error: $e');
-      // 如果加载失败，可以保留当前运行时，但已经重置了，所以不需要额外处理
-      rethrow;
+      // 失败：不回滚，标记为 broken
+      print('[CatvodOpen] ❌ switchSite error: $e，标记为 broken（不回滚）');
+
+      // 新 runtime 保留（虽然规则加载失败，但 runtime 可用）
+      // _currentKey 保持为新站点
+      // _methodMap 保持 null（规则未加载成功）
+      _apiReady = false;
+      _isBroken = true;
+
+      // dispose 旧 runtime，避免资源泄漏
+      try {
+        oldRuntime.dispose();
+      } catch (_) {}
+
+      // 不 rethrow：让调用方正常继续
+      // 后续 _callApi 检查 _isBroken，返回错误给 UI
+      print('[CatvodOpen] ⚠️ 已进入 broken 状态，key=$siteKey');
     }
   }
 
-  // ---------- API 调用 ----------
   Future<Map<String, dynamic>> _callAsync(String method, List<dynamic> args) async {
-    if (_methodMap == null || !_methodMap!.containsKey(method)) {
+    // 快照 _runtime 和 _methodMap，防止 await 期间被 switchSite 替换
+    final runtime = _runtime;
+    final methodMap = _methodMap;
+    if (methodMap == null || !methodMap.containsKey(method)) {
       return {'error': 'Method not found: $method'};
     }
 
-    final actualMethod = _methodMap![method]!;
+    final actualMethod = methodMap[method]!;
     final argsJson = jsonEncode(args);
 
     final jsCode = '''
@@ -663,9 +695,9 @@ class CatvodOpenService implements ISpiderService {
       })();
     ''';
 
-    final jsResult = await _runtime.evaluateAsync(jsCode);
-    _runtime.executePendingJob();
-    final finalResult = await _runtime.handlePromise(jsResult);
+    final jsResult = await runtime.evaluateAsync(jsCode);
+    runtime.executePendingJob();
+    final finalResult = await runtime.handlePromise(jsResult);
     final raw = finalResult.stringResult;
 
     try {
@@ -679,20 +711,21 @@ class CatvodOpenService implements ISpiderService {
       }
       return {'error': 'Unexpected response'};
     } catch (e) {
-      return {'error': 'Parse error: $e'};
+      return {'error': '响应解析失败: $e'};
     }
   }
 
   Future<Map<String, dynamic>> _callApi(String method, {List<dynamic> args = const []}) async {
+    if (_isBroken) {
+      return {'error': '规则加载失败，请切换其他源'};
+    }
     try {
-      final result = await _callAsync(method, args);
-      return result;
+      return await _callAsync(method, args);
     } catch (e) {
       return {'error': e.toString()};
     }
   }
 
-  // ---------- ISpiderService 实现 ----------
   @override
   Future<Map<String, dynamic>> fetchHome({int filter = 1}) async {
     return await _callApi('home', args: [filter]);
@@ -700,7 +733,8 @@ class CatvodOpenService implements ISpiderService {
 
   @override
   Future<Map<String, dynamic>> fetchCate(String cateId, int page, {String? ext}) async {
-    final extend = _currentExtMap ?? {};
+    // 快照 _currentExtMap，避免 await 期间被 switchSite 替换
+    final extend = Map<String, dynamic>.from(_currentExtMap ?? {});
     if (ext != null && ext.isNotEmpty) {
       try {
         String decodedStr = ext;

@@ -128,6 +128,13 @@ class HomeController extends GetxController with GetTickerProviderStateMixin {
     StorageManager.setSetting(_getLayoutKey(siteKey), newMode.modeIndex);
   }
 
+  /// 截断错误信息，避免 UI 溢出
+  String _truncateError(String err) {
+    const maxLen = 120;
+    if (err.length <= maxLen) return err;
+    return '${err.substring(0, maxLen)}...';
+  }
+
   // ===== 筛选栏可见性 =====
   String _getFilterKey(String siteKey) => '$_filterBarKeyPrefix$siteKey';
 
@@ -190,6 +197,16 @@ class HomeController extends GetxController with GetTickerProviderStateMixin {
 
       // await 返回后立即检查，旧请求丢弃
       if (loadId != _homeLoadId) return;
+
+      // 检查 error 响应
+      if (result is Map) {
+        final err = result['error']?.toString() ?? '';
+        if (err.isNotEmpty) {
+          isHomeError.value = true;
+          errorMsg.value = _truncateError(err);
+          return;  // finally 会复位 loading
+        }
+      }
 
       _parseCategories(result);
       _parseFilters(result);

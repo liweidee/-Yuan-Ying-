@@ -81,10 +81,34 @@ class T4ApiService implements ISpiderService {
     return uri.replace(queryParameters: allParams).toString();
   }
 
+  /// 格式化 HTTP 错误信息
+  String _formatHttpError(int statusCode) {
+    if (statusCode >= 500) return '服务器错误 ($statusCode)';
+    if (statusCode == 404) return '接口不存在 (404)';
+    if (statusCode == 403) return '接口拒绝访问 (403)';
+    if (statusCode == 401) return '接口需要认证 (401)';
+    if (statusCode >= 400) return '请求错误 ($statusCode)';
+    return 'HTTP 错误 ($statusCode)';
+  }
+
+  String _formatException(Object e) {
+    final str = e.toString();
+    if (str.contains('TimeoutException') || str.contains('timeout')) {
+      return '请求超时';
+    }
+    if (str.contains('SocketException') || str.contains('Connection')) {
+      return '网络连接失败';
+    }
+    if (str.contains('FormatException')) {
+      return '响应解析失败';
+    }
+    return '请求失败';   // 兜底
+  }
+
   Future<Map<String, dynamic>> _get(Map<String, dynamic> params) async {
     if (!hasSite) {
       print('_get: 未配置接口源');
-      return {'list': []};
+      return {'error': '未配置接口源', 'list': []};
     }
     try {
       final Map<String, dynamic> stringParams = {};
@@ -104,15 +128,26 @@ class T4ApiService implements ISpiderService {
           return {'list': response.data};
         } else {
           print('_get 返回其他类型: ${response.data}');
-          return {'list': []};
+          return {
+            'error': '响应格式异常',
+            'url': url,
+            'list': [],
+          };
         }
       } else {
         print('_get 非 200 状态码: ${response.statusCode}，返回空列表');
-        return {'list': []};
+        return {
+          'error': _formatHttpError(response.statusCode!),
+          'url': url,   // 保留 URL 供诊断，UI 不显示
+          'list': [],
+        };
       }
     } catch (e) {
       print('_get 异常: $e');
-      return {'list': []};
+      return {
+        'error': _formatException(e),
+        'list': [],
+      };
     }
   }
 

@@ -40,6 +40,17 @@ class _CategoryPageState extends State<CategoryPage>
     ctrl.scrollController.addListener(_onScrollForLoadMore);
   }
 
+  @override
+  void didUpdateWidget(CategoryPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 如果 controller 变了，重新绑定
+    if (oldWidget.controller != widget.controller) {
+      ctrl.scrollController.removeListener(_onScrollForLoadMore);
+      ctrl = widget.controller;
+      ctrl.scrollController.addListener(_onScrollForLoadMore);
+    }
+  }
+
   // 仅用于加载更多
   void _onScrollForLoadMore() {
     if (ctrl.isLoadingMore.value || ctrl.isLoading.value) return;
@@ -91,19 +102,29 @@ class _CategoryPageState extends State<CategoryPage>
         );
       } else if (isError && videoList.isEmpty) {
         content = Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
-                errorMsg.isNotEmpty ? errorMsg : '加载失败，请重试',
-                style: TextStyle(color: theme.colorScheme.outline),
-              ),
-              const SizedBox(height: 16),
-              ElevatedButton(
-                onPressed: ctrl.refreshData,
-                child: const Text('重试'),
-              ),
-            ],
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),  // ★ 新增：左右留白
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  errorMsg.isNotEmpty ? errorMsg : '加载失败，请重试',
+                  style: TextStyle(color: theme.colorScheme.outline),
+                  textAlign: TextAlign.center,
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 16),
+                FilledButton(
+                  onPressed: ctrl.refreshData,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: theme.colorScheme.primary,
+                    foregroundColor: theme.colorScheme.onPrimary,
+                  ),
+                  child: const Text('重试'),
+                ),
+              ],
+            ),
           ),
         );
       } else if (videoList.isEmpty) {

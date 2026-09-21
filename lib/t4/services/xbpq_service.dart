@@ -411,6 +411,18 @@ class XbpqService extends T3JsonAdapter {
       print('fetchCate: 第一条视频 = ${videos[0]['vod_id']}, ${videos[0]['vod_name']}');
     }
 
+    // 列表为空且最后一次请求有错误，返回 error
+    final lastErr = lastRequestError;
+    if (videos.isEmpty && lastErr != null && lastErr.isNotEmpty) {
+      return {
+        'error': lastErr,
+        'list': [],
+        'page': page,
+        'pagecount': 0,
+        'total': 0,
+      };
+    }
+
     return {
       'list': videos,
       'page': page,

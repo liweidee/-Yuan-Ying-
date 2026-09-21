@@ -892,6 +892,7 @@ class _HomePageState extends CommonPageState<HomePage>
         }
         final ctrl = controller.getOrCreateController(category.typeId);
         return CategoryPage(
+          key: ValueKey('${siteKey}_${category.typeId}'),
           controller: ctrl!,
           onVideoTap: _navigateToDetail,
         );
@@ -1104,11 +1105,31 @@ class _HomePageState extends CommonPageState<HomePage>
                 _buildNormalTopBar(theme),
                 Expanded(
                   child: Center(
-                    child: Text(
-                      '暂无数据',
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: theme.colorScheme.outline,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 32),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            controller.errorMsg.value.isNotEmpty
+                                ? controller.errorMsg.value
+                                : '暂无数据',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: theme.colorScheme.outline,
+                            ),
+                            textAlign: TextAlign.center,
+                            maxLines: 6,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 16),
+                          FilledButton(
+                            onPressed: () {
+                              controller.refreshData();
+                            },
+                            child: const Text('重试'),
+                          ),
+                        ],
                       ),
                     ),
                   ),

@@ -564,7 +564,7 @@ try {
         await Future.delayed(Duration(milliseconds: 100));
       }
       if (!_ready) {
-        return {'success': false, 'error': 'not ready'};
+        return {'success': false, 'error': '服务未就绪，请稍后重试'};
       }
     }
     final argStr = args.map(_toJsArg).join(',');
@@ -578,11 +578,11 @@ try {
       } else if (result is String) {
         return jsonDecode(result) as Map<String, dynamic>;
       } else {
-        return {'success': false, 'error': 'invalid result type: ${result.runtimeType}'};
+        return {'success': false, 'error': '响应格式异常'};
       }
     } catch (e) {
       debugPrint('[drpy2] _call $fn error: $e');
-      return {'success': false, 'error': e.toString()};
+      return {'success': false, 'error': '脚本执行失败'};
     }
   }
 

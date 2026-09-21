@@ -295,6 +295,18 @@ class XyqService extends T3JsonAdapter {
       };
     }).toList();
 
+    // 列表为空且最后一次请求有错误，返回 error
+    final lastErr = lastRequestError;
+    if (videos.isEmpty && lastErr != null && lastErr.isNotEmpty) {
+      return {
+        'error': lastErr,
+        'list': [],
+        'page': page,
+        'pagecount': 0,
+        'total': 0,
+      };
+    }
+
     return {
       'list': videos,
       'page': page,

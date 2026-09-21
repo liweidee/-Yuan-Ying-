@@ -27,6 +27,10 @@ abstract class T3JsonAdapter implements ISpiderService {
   String target = '';
   final Dio dio = HttpClientFactory.dio;
 
+  // 记录最后一次请求的错误
+  String? _lastRequestError;
+  String? get lastRequestError => _lastRequestError;
+
   T3JsonAdapter(this.id, this.api, this.extUrl, this.categories);
 
   @override
@@ -82,6 +86,29 @@ abstract class T3JsonAdapter implements ISpiderService {
     final bytes = utf8.encode(input);
     final digest = crypto.md5.convert(bytes);
     return digest.toString();
+  }
+
+  String _formatHttpError(int statusCode) {
+    if (statusCode >= 500) return '服务器错误 ($statusCode)';
+    if (statusCode == 404) return '接口不存在 (404)';
+    if (statusCode == 403) return '接口拒绝访问 (403)';
+    if (statusCode == 401) return '接口需要认证 (401)';
+    if (statusCode >= 400) return '请求错误 ($statusCode)';
+    return 'HTTP 错误 ($statusCode)';
+  }
+
+  String _formatException(Object e) {
+    final str = e.toString();
+    if (str.contains('TimeoutException') || str.contains('timeout')) {
+      return '请求超时';
+    }
+    if (str.contains('SocketException') || str.contains('Connection')) {
+      return '网络连接失败';
+    }
+    if (str.contains('FormatException')) {
+      return '响应解析失败';
+    }
+    return '请求失败';
   }
 
   Future<String> req(String url, {Map<String, String>? headers}) async {
@@ -141,6 +168,7 @@ abstract class T3JsonAdapter implements ISpiderService {
       );
 
       if (response.statusCode == 200) {
+        _lastRequestError = null;
         List<int> rawBytes = response.data as List<int>;
 
         // ---- 获取 Content-Encoding ----
@@ -206,11 +234,13 @@ abstract class T3JsonAdapter implements ISpiderService {
         return rawData;
       }
       print('Request failed with status: ${response.statusCode}');
+      _lastRequestError = _formatHttpError(response.statusCode!);
       return '';
     } catch (e) {
       print('========== T3 REQUEST ERROR ==========');
       print('Error: $e');
       print('URL: $url');
+      _lastRequestError = _formatException(e);
       return '';
     }
   }
