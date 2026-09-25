@@ -1115,9 +1115,17 @@ class _JellyfinDetailPageState extends State<JellyfinDetailPage> {
         }
         final detail = item.value!;
         final server = serverController.currentServer!;
-        final backdropUrl = JellyfinApiService.backdropImage(
-            server.baseUrl, detail.id,
-            maxWidth: 1280);
+        // final backdropUrl = JellyfinApiService.backdropImage(
+        //     server.baseUrl, detail.id,
+        //     maxWidth: 1280);
+
+        // 优先用 Backdrop；没有则用 Primary 当背景
+        // （音乐专辑通常没有 Backdrop，只有 Primary）
+        final backdropUrl = JellyfinApiService.displayBackdropOrPrimary(
+            server.baseUrl, detail,
+            maxWidth: 1280,
+            apiKey: serverController.getToken(server.id));
+        
         final posterUrl = JellyfinApiService.primaryImage(
             server.baseUrl, detail.id,
             maxWidth: 400);

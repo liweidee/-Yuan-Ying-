@@ -93,6 +93,8 @@ class _SourceFilterSheetContentState extends State<_SourceFilterSheetContent> {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
+    // 获取底部安全区域高度，用于 iOS 等设备的底部预留
+    final bottomSafeArea = MediaQuery.of(context).padding.bottom;
 
     return Column(
       children: [
@@ -275,52 +277,56 @@ class _SourceFilterSheetContentState extends State<_SourceFilterSheetContent> {
         ),
 
         // 底部："只搜默认源"
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          decoration: BoxDecoration(
-            border: Border(
-              top: BorderSide(
-                color: colorScheme.outline.withOpacity(0.1),
-                width: 0.5,
+        // 增加底部安全区域 padding，避免在 iPhone 上与 Home Indicator 重叠
+        Padding(
+          padding: EdgeInsets.only(bottom: bottomSafeArea),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              border: Border(
+                top: BorderSide(
+                  color: colorScheme.outline.withOpacity(0.1),
+                  width: 0.5,
+                ),
               ),
             ),
-          ),
-          child: Obx(() {
-            return Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        '只搜默认源',
-                        style: textTheme.bodyMedium?.copyWith(
-                          fontWeight: FontWeight.w500,
+            child: Obx(() {
+              return Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          '只搜默认源',
+                          style: textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.w500,
+                          ),
                         ),
-                      ),
-                      Text(
-                        '当前只搜索: ${filterService.enabledSites.map((s) => s['name']?.toString() ?? '').join(', ')}',
-                        style: textTheme.bodySmall?.copyWith(
-                          color: colorScheme.outline,
+                        Text(
+                          '当前只搜索: ${filterService.enabledSites.map((s) => s['name']?.toString() ?? '').join(', ')}',
+                          style: textTheme.bodySmall?.copyWith(
+                            color: colorScheme.outline,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-                Switch(
-                  value: filterService.onlyDefaultSource.value,
-                  onChanged: (value) {
-                    filterService.toggleOnlyDefaultSource(value);
-                  },
-                  activeColor: colorScheme.primary,
-                  inactiveThumbColor: colorScheme.outline,
-                ),
-              ],
-            );
-          }),
+                  Switch(
+                    value: filterService.onlyDefaultSource.value,
+                    onChanged: (value) {
+                      filterService.toggleOnlyDefaultSource(value);
+                    },
+                    activeColor: colorScheme.primary,
+                    inactiveThumbColor: colorScheme.outline,
+                  ),
+                ],
+              );
+            }),
+          ),
         ),
       ],
     );

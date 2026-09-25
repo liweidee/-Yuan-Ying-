@@ -38,7 +38,6 @@ import 'package:yuanying/http/init.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:path/path.dart' as path;
 import 'package:yuanying/t4/services/catvod_open_service.dart';
-import 'package:flutter_js/flutter_js.dart';
 import 'package:yuanying/t4/services/python_runtime.dart';
 import 'package:yuanying/services/debug_log_service.dart';
 import 'package:yuanying/nodejs/nodejs_service.dart';
@@ -117,6 +116,10 @@ void main() async {
   await Hive.openBox('player_settings');
   await Hive.openBox('app_settings');
   await Hive.openBox('video_settings');
+
+  // 洛雪音乐 Box
+  await Hive.openBox('lx_music');
+  await Hive.openBox('lx_download');
 
   // ==========================================================================
   // 第三步：UI 缩放适配（现在可以安全调用 getSetting）

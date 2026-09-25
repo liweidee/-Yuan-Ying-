@@ -115,6 +115,19 @@ class SourceManager extends GetxController {
     return api == 'csp_AppYsV2';
   }
 
+  /// 该源是否支持"合并当前分类列表为播放列表"
+  static bool isMergeListSite(Map<String, dynamic>? site) {
+    if (site == null) return false;
+    final top = site['mergeList'];
+    if (top == 1 || top == true || top == '1') return true;
+    final more = site['more'];
+    if (more is Map) {
+      final inner = more['mergeList'];
+      if (inner == 1 || inner == true || inner == '1') return true;
+    }
+    return false;
+  }
+
   /// 根据站点配置判断详情类型（video / novel / manga）
   static String getDetailTypeFromSite(Map<String, dynamic>? site) {
     if (site == null) return DetailType.video;

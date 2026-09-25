@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:yuanying/t4/models/video_item.dart';
 import 'package:yuanying/t4/services/i_spider_service.dart';
 import 'package:yuanying/t4/services/source_manager.dart';
@@ -21,6 +22,9 @@ class HomeController extends GetxController with GetTickerProviderStateMixin {
   final hasFilter = false.obs;
   final filters = <String, List<FilterGroup>>{}.obs;
   final filterBarVisibility = <String, bool>{}.obs;
+
+  // ===== 合并列表模式（按 siteKey 隔离）=====
+  final mergeListMode = <String, bool>{}.obs;
 
   final Rx<Category?> selectedMainCategory = Rx<Category?>(null);
 
@@ -51,6 +55,7 @@ class HomeController extends GetxController with GetTickerProviderStateMixin {
   // ===== 存储键常量 =====
   static const String _layoutModeKeyPrefix = 'card_layout_mode_';
   static const String _filterBarKeyPrefix = 'filter_bar_visibility_';
+  static const String _mergeListKeyPrefix = 'merge_list_mode_';
 
   // ===== 生命周期 =====
   @override
@@ -59,16 +64,19 @@ class HomeController extends GetxController with GetTickerProviderStateMixin {
 
     _loadLayoutForCurrentSite();
     _loadFilterVisibilityForCurrentSite();
+    _loadMergeListModeForCurrentSite();
 
     ever(_sourceManager.currentSite, (_) {
       _loadLayoutForCurrentSite();
       _loadFilterVisibilityForCurrentSite();
+      _loadMergeListModeForCurrentSite();
     });
 
     ever(_sourceManager.isConfigLoaded, (loaded) {
       if (loaded) {
         _loadLayoutForCurrentSite();
         _loadFilterVisibilityForCurrentSite();
+        _loadMergeListModeForCurrentSite();
         _loadHomeData();
       }
     });
@@ -156,6 +164,33 @@ class HomeController extends GetxController with GetTickerProviderStateMixin {
 
   bool getFilterVisibility(String siteKey) {
     return filterBarVisibility[siteKey] ?? true;
+  }
+
+  // ===== 合并列表模式 =====
+  void _loadMergeListModeForCurrentSite() {
+    final site = _sourceManager.currentSite.value;
+    if (site == null) return;
+    final siteKey = site['key']?.toString() ?? '';
+    if (siteKey.isEmpty) return;
+    final saved =
+        StorageManager.getSetting<bool>('$_mergeListKeyPrefix$siteKey');
+    mergeListMode[siteKey] = saved ?? false;
+  }
+
+  bool isMergeListMode(String siteKey) {
+    return mergeListMode[siteKey] ?? false;
+  }
+
+  void toggleMergeListMode(String siteKey) {
+    final current = mergeListMode[siteKey] ?? false;
+    final newValue = !current;
+    mergeListMode[siteKey] = newValue;
+    StorageManager.setSetting('$_mergeListKeyPrefix$siteKey', newValue);
+    if (newValue) {
+      SmartDialog.showToast('已开启：当前分类从列表进入详情时将以列表为选集');
+    } else {
+      SmartDialog.showToast('已关闭');
+    }
   }
 
   // ===== 切换源 =====

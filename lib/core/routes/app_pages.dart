@@ -73,6 +73,12 @@ import 'package:yuanying/modules/fnos/views/fnos_detail_page.dart';
 import 'package:yuanying/modules/fnos/views/fnos_favorite_page.dart';
 import 'package:yuanying/modules/fnos/views/fnos_search_page.dart';
 
+import 'package:yuanying/modules/lx_music/views/lx_music_page.dart';
+import 'package:yuanying/modules/lx_music/views/lx_music_detail_page.dart';
+import 'package:yuanying/modules/lx_music/views/lx_favorites_page.dart';
+import 'package:yuanying/modules/lx_music/views/lx_recent_page.dart';
+import 'package:yuanying/modules/lx_music/views/lx_playlist_page.dart';
+
 
 class AppPages {
   static const String initial = '/';
@@ -150,6 +156,13 @@ class AppPages {
   static const String fnosDetail       = '/fnos/detail';
   static const String fnosFavorite     = '/fnos/favorite';
   static const String fnosSearch     = '/fnos/search';
+
+  // 洛雪音乐
+  static const String lxMusic = '/lab/lx_music';
+  static const String lxMusicDetail = '/lx_music_detail';
+  static const String lxFavorites = '/lx_favorites';
+  static const String lxRecent = '/lx_recent';
+  static const String lxPlaylist = '/lx_playlist';
 
   static final List<GetPage> routes = [
     GetPage(name: initial, page: () => const MainPage()),
@@ -301,5 +314,17 @@ class AppPages {
       name: fnosSearch,
       page: () => const FnosSearchPage()
     ),
+
+    GetPage(
+      name: lxMusic,
+      page: () => const LxMusicPage()
+    ),
+    GetPage(
+      name: lxMusicDetail,
+      page: () => const LxMusicDetailPage(),
+    ),
+    GetPage(name: lxFavorites, page: () => const LxFavoritesPage()),
+    GetPage(name: lxRecent, page: () => const LxRecentPage()),
+    GetPage(name: lxPlaylist, page: () => const LxPlaylistPage()),
   ];
 }

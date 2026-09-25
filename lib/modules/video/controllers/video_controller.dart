@@ -69,6 +69,9 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
   final RxBool isPlaying = false.obs;
   bool _isDirectPushMode = false;
 
+  /// 是否为合并列表模式（懒加载：每集先 getDetail 再 getPlayUrl）
+  bool _isMergeListMode = false;
+
   // 外部播放事件监听器（仅 Jellyfin 等需要主动上报的服务器会注入）
   //   未注入时为 null，所有相关调用都会短路返回，行为与原版一致。
   PlaybackEventListener? _playbackEventListener;
@@ -357,6 +360,12 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
 
     final args = Get.arguments;
     if (args is Map) {
+      // ---- 合并列表模式（优先级最高，命中即返回） ----
+      if (args['mergeDetail'] is VideoDetail) {
+        _initMergeListMode(args);
+        return;
+      }
+
       // ---- 推送模式（直接播放，提前返回） ----
       if (args['isPush'] == true) {
         if (args['directUrl'] != null && args['directUrl'].toString().isNotEmpty) {
@@ -563,6 +572,102 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     _locateCurrentEpisodeInPushMode(detail, url, title);
 
     _playDirect(url);
+  }
+
+  /// 合并列表模式初始化
+  ///
+  /// 与其它模式的区别：
+  /// - 调用方传入完整 VideoDetail，不请求详情 API
+  /// - `_isDirectPushMode` 保持 false，走 getPlayUrl 换真实地址
+  /// - 从 mergeStartVodId 定位起始集，然后自动播放
+  void _initMergeListMode(Map args) {
+    _isMergeListMode = true;   // 开启标志
+    final detail = args['mergeDetail'] as VideoDetail;
+    final startVodId = args['mergeStartVodId']?.toString() ?? '';
+
+    // ---- 1. _apiService + _currentSiteConfig ----
+    final independentSite = args['site'] as Map<String, dynamic>?;
+    if (independentSite != null) {
+      _apiService = Get.find<SourceManager>()
+          .createIndependentService(independentSite);
+      _currentSiteConfig = independentSite;
+      introController.setSourceName(
+          independentSite['name']?.toString() ?? '未知来源');
+    } else {
+      _apiService = Get.find<SourceManager>().currentApiService;
+      _currentSiteConfig = Get.find<SourceManager>().currentSite.value;
+      final currentSite = Get.find<SourceManager>().currentSite.value;
+      if (currentSite != null) {
+        introController.setSourceName(
+            currentSite['name']?.toString() ?? '未知来源');
+      }
+    }
+
+    // ---- 2. vodId / pwd ----
+    vodId = args['vodId']?.toString() ?? '';
+    pwd = args['pwd']?.toString() ?? 'tinydust';
+    introController.setOriginalVodId(vodId);
+    final currentSiteForApi = Get.find<SourceManager>().currentSite.value;
+    if (currentSiteForApi != null) {
+      introController.setCurrentApiUrl(
+          currentSiteForApi['api']?.toString() ?? '');
+    }
+
+    // ---- 3. 加载解析源 ----
+    _loadParsers();
+
+    // ---- 4. vodId 兜底校验 ----
+    if (vodId.isEmpty) {
+      detailError.value = '视频ID缺失';
+      isLoadingDetail.value = false;
+      return;
+    }
+
+    // ---- 5. TabController ----
+    tabCtr = TabController(
+      length: 3,
+      vsync: this,
+      initialIndex: 0,
+    );
+
+    // ---- 6. 设置详情 ----
+    introController.setVideoDetail(detail);
+    isLoadingDetail.value = false;
+
+    // ---- 7. 空列表兜底 ----
+    if (detail.playSources.isEmpty ||
+        detail.playSources[0].episodes.isEmpty) {
+      detailError.value = '合并列表为空';
+      return;
+    }
+
+    // ---- 8. 定位起始集（Episode.url == vodId）----
+    final episodes = detail.playSources[0].episodes;
+    int startIdx = 0;
+    if (startVodId.isNotEmpty) {
+      for (int i = 0; i < episodes.length; i++) {
+        if (episodes[i].url == startVodId) {
+          startIdx = i;
+          break;
+        }
+      }
+    }
+
+    _currentSourceIndex = 0;
+    _currentEpisodeIndex = startIdx;
+    _currentEpisode = episodes[startIdx];
+
+    // ---- 9. 同步 IntroController 索引 ----
+    introController.switchPlaySource(0);
+    introController.switchEpisode(startIdx);
+
+    // ---- 10. 走 API 播放（_isDirectPushMode 保持 false）----
+    _playEpisode(
+      _currentEpisode!,
+      sourceIndex: 0,
+      episodeIndex: startIdx,
+      autoPlay: true,
+    );
   }
 
   /// 在推送模式下定位当前集/曲目，同步到 [IntroController] 与本类状态
@@ -882,9 +987,41 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
         return;
       }
 
+      // 合并模式懒加载：
+      //   episode.url 是 vodId，先请求详情 API 拿真实 play 参数和 flag，
+      //   再走原有的 getPlayUrl 流程。
+      String realPlayParams = episode.url;
+      String realFlag = source.name;
+
+      if (_isMergeListMode) {
+        try {
+          final realDetail = await _apiService.getDetail(
+            vodId: episode.url,
+            pwd: pwd,
+          );
+          if (realDetail == null || realDetail.playSources.isEmpty) {
+            SmartDialog.dismiss();
+            SmartDialog.showToast('无法获取播放信息');
+            return;
+          }
+          final firstSource = realDetail.playSources.first;
+          if (firstSource.episodes.isEmpty) {
+            SmartDialog.dismiss();
+            SmartDialog.showToast('无法获取播放信息');
+            return;
+          }
+          realPlayParams = firstSource.episodes.first.url;
+          realFlag = firstSource.name;
+        } catch (e) {
+          SmartDialog.dismiss();
+          SmartDialog.showToast('获取详情失败: $e');
+          return;
+        }
+      }
+
       final playUrl = await _apiService.getPlayUrl(
-        playParams: episode.url,
-        flag: source.name,
+        playParams: realPlayParams,     // 用真实 play 参数
+        flag: realFlag,                 // 用真实 flag
         pwd: pwd,
       );
 

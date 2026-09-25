@@ -1049,9 +1049,17 @@ class _EmbyDetailPageState extends State<EmbyDetailPage> {
         }
         final detail = item.value!;
         final server = serverController.currentServer!;
-        final backdropUrl = EmbyApiService.backdropImage(
-            server.baseUrl, detail.id,
-            maxWidth: 1280);
+        // final backdropUrl = EmbyApiService.backdropImage(
+        //     server.baseUrl, detail.id,
+        //     maxWidth: 1280);
+
+        // 优先用 Backdrop；没有则用 Primary 当背景
+        // （音乐专辑通常没有 Backdrop，只有 Primary）
+        final backdropUrl = EmbyApiService.displayBackdropOrPrimary(
+            server.baseUrl, detail,
+            maxWidth: 1280,
+            apiKey: serverController.getToken(server.id));
+
         final posterUrl =
             EmbyApiService.primaryImage(server.baseUrl, detail.id,
                 maxWidth: 400);

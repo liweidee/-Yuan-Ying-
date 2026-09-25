@@ -1130,6 +1130,40 @@ class _TmdbDetailPageState extends State<TmdbDetailPage> {
     );
   }
 
+  // ===== 带半透明圆形背景的悬浮图标按钮 =====
+  //
+  // 用 SizedBox 强制锁定尺寸，Material 承担圆形背景 + 水波纹。
+  // 默认背景：黑色 28% 透明度圆底；默认图标：白色。
+  Widget _overlayCircleButton({
+    required IconData icon,
+    required VoidCallback? onPressed,
+    Color iconColor = Colors.white,
+    Color? backgroundColor,
+    String? tooltip,
+    double size = 44,
+    double iconSize = 22,
+  }) {
+    final btn = SizedBox(
+      width: size,
+      height: size,
+      child: Material(
+        color: backgroundColor ?? Colors.black.withOpacity(0.28),
+        shape: const CircleBorder(),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onPressed,
+          customBorder: const CircleBorder(),
+          child: Center(
+            child: Icon(icon, size: iconSize, color: iconColor),
+          ),
+        ),
+      ),
+    );
+
+    if (tooltip == null || tooltip.isEmpty) return btn;
+    return Tooltip(message: tooltip, child: btn);
+  }
+
   // ===== build =====
   @override
   Widget build(BuildContext context) {
@@ -1165,7 +1199,93 @@ class _TmdbDetailPageState extends State<TmdbDetailPage> {
           expandedHeight: 300,
           pinned: true,
           stretch: true,
-          backgroundColor: Colors.transparent,
+          backgroundColor: colorScheme.surface,
+          leadingWidth: 56,
+          leading: SizedBox(
+            width: 56,
+            height: 56,
+            child: Center(
+              child: _overlayCircleButton(
+                icon: Icons.arrow_back,
+                onPressed: () => Get.back(),
+                tooltip: '返回',
+              ),
+            ),
+          ),
+          actions: [
+            SizedBox(
+              width: 56,
+              height: 56,
+              child: Center(
+                child: Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.28),
+                    shape: BoxShape.circle,
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: PopupMenuButton<String>(
+                    padding: EdgeInsets.zero,
+                    tooltip: '更多',
+                    icon: const Icon(
+                      Icons.more_vert,
+                      color: Colors.white,
+                      size: 22,
+                    ),
+                    color: Theme.of(context).colorScheme.surface,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    onSelected: (value) {
+                      switch (value) {
+                        case 'imdb':
+                          _openImdb();
+                          break;
+                        case 'rematch':
+                          _showManualSearchBottomSheet(autoSearch: false);
+                          break;
+                        case 'auto_match':
+                          _resetToAutoMatch();
+                          break;
+                        case 'clear_match':
+                          _clearMatch();
+                          break;
+                      }
+                    },
+                    itemBuilder: (context) => [
+                      PopupMenuItem<String>(
+                        value: 'imdb',
+                        child: _menuRow(Icons.open_in_new, '在 IMDB 查看'),
+                      ),
+                      PopupMenuItem<String>(
+                        value: 'rematch',
+                        child: _menuRow(
+                          Icons.swap_horiz,
+                          cached == null ? '手动匹配' : '修改匹配',
+                        ),
+                      ),
+                      if (cached != null)
+                        PopupMenuItem<String>(
+                          value: 'auto_match',
+                          child: _menuRow(Icons.auto_awesome, '重新自动匹配'),
+                        ),
+                      if (cached != null)
+                        PopupMenuItem<String>(
+                          value: 'clear_match',
+                          child: _menuRow(
+                            Icons.delete_outline,
+                            '清除匹配记录',
+                            color: Colors.red,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 4),
+          ],
           flexibleSpace: FlexibleSpaceBar(
             stretchModes: const [StretchMode.zoomBackground],
             background: Stack(
@@ -1177,12 +1297,14 @@ class _TmdbDetailPageState extends State<TmdbDetailPage> {
                         fit: BoxFit.cover,
                         errorBuilder: (_, __, ___) => Container(
                           color: colorScheme.surfaceContainerHighest,
-                          child: Icon(Icons.image_not_supported, size: 60, color: colorScheme.outline),
+                          child: Icon(Icons.image_not_supported,
+                              size: 60, color: colorScheme.outline),
                         ),
                       )
                     : Container(
                         color: colorScheme.surfaceContainerHighest,
-                        child: Icon(Icons.image_not_supported, size: 60, color: colorScheme.outline),
+                        child: Icon(Icons.image_not_supported,
+                            size: 60, color: colorScheme.outline),
                       ),
                 Container(
                   decoration: BoxDecoration(
@@ -1202,72 +1324,6 @@ class _TmdbDetailPageState extends State<TmdbDetailPage> {
               ],
             ),
           ),
-          leading: IconButton(
-            icon: Icon(Icons.arrow_back_ios_new, color: Colors.white, shadows: const [
-              Shadow(blurRadius: 4, color: Colors.black26),
-            ]),
-            onPressed: () => Get.back(),
-          ),
-          actions: [
-            PopupMenuButton<String>(
-              icon: Icon(
-                Icons.more_vert,
-                color: Colors.white,
-                size: 28,
-                shadows: const [
-                  Shadow(blurRadius: 4, color: Colors.black26),
-                ],
-              ),
-              color: Theme.of(context).colorScheme.surface,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              onSelected: (value) {
-                switch (value) {
-                  case 'imdb':
-                    _openImdb();
-                    break;
-                  case 'rematch':
-                    // 打开手动搜索面板，不自动搜索（让用户自己输入）
-                    _showManualSearchBottomSheet(autoSearch: false);
-                    break;
-                  case 'auto_match':
-                    _resetToAutoMatch();
-                    break;
-                  case 'clear_match':
-                    _clearMatch();
-                    break;
-                }
-              },
-              itemBuilder: (context) => [
-                PopupMenuItem<String>(
-                  value: 'imdb',
-                  child: _menuRow(Icons.open_in_new, '在 IMDB 查看'),
-                ),
-                PopupMenuItem<String>(
-                  value: 'rematch',
-                  child: _menuRow(
-                    Icons.swap_horiz,
-                    cached == null ? '手动匹配' : '修改匹配',
-                  ),
-                ),
-                if (cached != null)
-                  PopupMenuItem<String>(
-                    value: 'auto_match',
-                    child: _menuRow(Icons.auto_awesome, '重新自动匹配'),
-                  ),
-                if (cached != null)
-                  PopupMenuItem<String>(
-                    value: 'clear_match',
-                    child: _menuRow(
-                      Icons.delete_outline,
-                      '清除匹配记录',
-                      color: Colors.red,
-                    ),
-                  ),
-              ],
-            ),
-          ],
         ),
 
         SliverPadding(

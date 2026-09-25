@@ -123,9 +123,12 @@ class EmbyLibraryPage extends StatelessWidget {
               );
             }
             final item = items[index];
-            final imageUrl = EmbyApiService.primaryImage(
-                server.baseUrl, item.id,
-                maxWidth: 300);
+            final imageUrl = EmbyApiService.displayPoster(
+              server.baseUrl,
+              item,
+              maxWidth: 300,
+              apiKey: ctrl.serverController.getToken(server.id),
+            );
             final videoItem = EmbyConverter.toVideoItem(item, imageUrl);
             return VideoCardV(
               videoItem: videoItem,

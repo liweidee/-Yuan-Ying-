@@ -100,6 +100,16 @@ class LabPage extends StatelessWidget {
             subtitle: '连接 FnOS / 飞牛影视服务器，浏览媒体库',
             route: AppPages.fnosServerConfig,
           ),
+          // ===== 洛雪音乐 =====
+          const SizedBox(height: 12),
+          _buildEntry(
+            context,
+            theme,
+            icon: Icons.music_note_rounded,
+            title: '洛雪音乐',
+            subtitle: '在线音乐搜索播放，支持自定义 JS 音源',
+            route: AppPages.lxMusic,
+          ),
         ],
       ),
     );

@@ -21,6 +21,10 @@ class JellyfinMediaItem {
   final String? albumArtist;     // 专辑艺术家
   final List<String> artists;    // 艺术家列表
   final String? albumId;         // 专辑 ID（曲目用）
+  final Map<String, String> imageTags;
+  final String? primaryImageItemId;
+  final String? primaryImageTag;
+  final List<String> backdropImageTags;
 
   JellyfinMediaItem({
     required this.id,
@@ -45,6 +49,10 @@ class JellyfinMediaItem {
     this.albumArtist,
     this.artists = const [],
     this.albumId,
+    this.imageTags = const {},
+    this.primaryImageItemId,
+    this.primaryImageTag,
+    this.backdropImageTags = const [],
   });
 
   factory JellyfinMediaItem.fromJson(Map<String, dynamic> json) => JellyfinMediaItem(
@@ -76,6 +84,15 @@ class JellyfinMediaItem {
     artists: (json['Artists'] as List?)?.map((e) => e as String).toList() ??
         const [],
     albumId: json['AlbumId'] as String?,
+    imageTags: (json['ImageTags'] as Map?)?.map(
+      (k, v) => MapEntry(k.toString(), v.toString()),
+    ) ?? const {},
+    primaryImageItemId: json['PrimaryImageItemId'] as String?,
+    primaryImageTag: json['PrimaryImageTag'] as String?,
+    backdropImageTags: (json['BackdropImageTags'] as List?)
+            ?.map((e) => e.toString())
+            .toList() ??
+        const [],
   );
 
   // ============ 视频类 getter ============
@@ -84,7 +101,7 @@ class JellyfinMediaItem {
   bool get isEpisode => type == 'Episode';
   bool get isSeason => type == 'Season';
 
-  // ============ 音乐类 getter（新增） ============
+  // ============ 音乐类 getter ============
   /// 是否为音乐曲目（歌）
   bool get isAudio => type == 'Audio' || mediaType == 'Audio';
 
@@ -100,6 +117,36 @@ class JellyfinMediaItem {
   /// 该库是否为音乐库（仅 CollectionFolder 有 collectionType）
   bool get isMusicLibrary =>
       type == 'CollectionFolder' && collectionType == 'music';
+
+  /// 自己是否有 Primary 图
+  bool get hasPrimaryImage =>
+      imageTags['Primary'] != null && imageTags['Primary']!.isNotEmpty;
+
+  /// 真正用于请求 Primary 图的 item id
+  ///
+  /// 规则：
+  /// - 自己就有 Primary 图 → 用自己
+  /// - 否则用 Emby 指派的 PrimaryImageItemId（音乐专辑常见）
+  /// - 都没有 → 退回自己（会 404，但有占位兜底）
+  String get effectivePrimaryImageId {
+    if (hasPrimaryImage) return id;
+    if (primaryImageItemId != null && primaryImageItemId!.isNotEmpty) {
+      return primaryImageItemId!;
+    }
+    return id;
+  }
+
+  /// 真正用于请求 Primary 图的 tag
+  String? get effectivePrimaryImageTag {
+    if (hasPrimaryImage) return imageTags['Primary'];
+    if (primaryImageTag != null && primaryImageTag!.isNotEmpty) {
+      return primaryImageTag;
+    }
+    return null;
+  }
+
+  /// 是否有 Backdrop 图
+  bool get hasBackdrop => backdropImageTags.isNotEmpty;
 
   /// 音频/视频 统一判断（用于播放分流）
   bool get isAudioPlayable => isAudio;

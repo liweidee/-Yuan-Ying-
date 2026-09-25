@@ -63,7 +63,7 @@ class CurrentList extends StatelessWidget {
                     episode: episode,
                     index: index,
                     isPlaying: isPlaying,
-                    backgroundColor: isCurrent ? colorScheme.primaryContainer : null,
+                    isCurrent: isCurrent,
                     onTap: () {
                       Navigator.pop(context);
                       controller.currentIndex.value = index;

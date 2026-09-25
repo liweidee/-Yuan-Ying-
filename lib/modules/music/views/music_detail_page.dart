@@ -815,7 +815,7 @@ class _CatalogGroupButton extends StatelessWidget {
             borderRadius: BorderRadius.circular(8),
           ),
           child: Icon(
-            Icons.more_vert,
+            Icons.segment_rounded,
             size: 20,
             color: selectedGroup != null ? colorScheme.primary : colorScheme.onSurface.withValues(alpha: 0.6),
           ),

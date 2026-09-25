@@ -493,10 +493,14 @@ class EmbyApiService {
     String itemId, {
     int maxWidth = 300,
     String? tag,
+    String? apiKey,
   }) {
     final query = StringBuffer('maxWidth=$maxWidth');
     if (tag != null && tag.isNotEmpty) {
       query.write('&tag=$tag');
+    }
+    if (apiKey != null && apiKey.isNotEmpty) {
+      query.write('&api_key=$apiKey');
     }
     return '$baseUrl/Items/$itemId/Images/Primary?$query';
   }
@@ -505,8 +509,13 @@ class EmbyApiService {
     String baseUrl,
     String itemId, {
     int maxWidth = 1280,
+    String? apiKey,
   }) {
-    return '$baseUrl/Items/$itemId/Images/Backdrop/0?maxWidth=$maxWidth';
+    final query = StringBuffer('maxWidth=$maxWidth');
+    if (apiKey != null && apiKey.isNotEmpty) {
+      query.write('&api_key=$apiKey');
+    }
+    return '$baseUrl/Items/$itemId/Images/Backdrop/0?$query';
   }
 
   static String albumCoverImage(
@@ -515,6 +524,27 @@ class EmbyApiService {
     int maxWidth = 300,
   }) {
     return '$baseUrl/Items/$itemId/Images/Primary?maxWidth=$maxWidth';
+  }
+
+  /// 详情页背景：优先 Backdrop，没有则用 Primary
+  ///
+  /// 规则：
+  /// - 有 BackdropImageTags → 用 Backdrop
+  /// - 否则用 Primary（音乐专辑常见）
+  static String displayBackdropOrPrimary(
+    String baseUrl,
+    EmbyMediaItem item, {
+    int maxWidth = 1280,
+    String? apiKey,
+  }) {
+    // 有 Backdrop → 用 Backdrop
+    if (item.hasBackdrop) {
+      return displayBackdrop(baseUrl, item,
+          maxWidth: maxWidth, apiKey: apiKey);
+    }
+    // 没 Backdrop → 用 Primary
+    return displayPoster(baseUrl, item,
+        maxWidth: maxWidth, apiKey: apiKey);
   }
 
   // ============================================================
@@ -529,21 +559,22 @@ class EmbyApiService {
     String baseUrl,
     EmbyMediaItem item, {
     int maxWidth = 1280,
+    String? apiKey,
   }) {
-    // Episode → Series Backdrop
     if (item.isEpisode &&
         item.seriesId != null &&
         item.seriesId!.isNotEmpty) {
-      return '$baseUrl/Items/${item.seriesId}/Images/Backdrop/0?maxWidth=$maxWidth';
+      return backdropImage(baseUrl, item.seriesId!,
+          maxWidth: maxWidth, apiKey: apiKey);
     }
-    // Audio → Album Backdrop
     if (item.isAudio &&
         item.albumId != null &&
         item.albumId!.isNotEmpty) {
-      return '$baseUrl/Items/${item.albumId}/Images/Backdrop/0?maxWidth=$maxWidth';
+      return backdropImage(baseUrl, item.albumId!,
+          maxWidth: maxWidth, apiKey: apiKey);
     }
-    // 其他 → 自身 Backdrop
-    return backdropImage(baseUrl, item.id, maxWidth: maxWidth);
+    return backdropImage(baseUrl, item.id,
+        maxWidth: maxWidth, apiKey: apiKey);
   }
 
   // ============================================================
@@ -558,21 +589,38 @@ class EmbyApiService {
     String baseUrl,
     EmbyMediaItem item, {
     int maxWidth = 300,
+    String? apiKey,
   }) {
     // Episode → Series 海报
     if (item.isEpisode &&
         item.seriesId != null &&
         item.seriesId!.isNotEmpty) {
-      return '$baseUrl/Items/${item.seriesId}/Images/Primary?maxWidth=$maxWidth';
+      return primaryImage(
+        baseUrl,
+        item.seriesId!,
+        maxWidth: maxWidth,
+        apiKey: apiKey,
+      );
     }
     // Audio → Album 封面
     if (item.isAudio &&
         item.albumId != null &&
         item.albumId!.isNotEmpty) {
-      return '$baseUrl/Items/${item.albumId}/Images/Primary?maxWidth=$maxWidth';
+      return primaryImage(
+        baseUrl,
+        item.albumId!,
+        maxWidth: maxWidth,
+        apiKey: apiKey,
+      );
     }
-    // 其他 → 自己的 Primary
-    return primaryImage(baseUrl, item.id, maxWidth: maxWidth);
+    // 其他（含 MusicAlbum）→ 用 effective id / tag
+    return primaryImage(
+      baseUrl,
+      item.effectivePrimaryImageId,
+      maxWidth: maxWidth,
+      tag: item.effectivePrimaryImageTag,
+      apiKey: apiKey,
+    );
   }
 
   // ============================================================

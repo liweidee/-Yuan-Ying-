@@ -38,16 +38,25 @@ class LyricScroller extends StatelessWidget {
               .bindLyricToMain(lyricText)
               .getModel();
 
-          return LyricsReader(
-            padding: const EdgeInsets.symmetric(horizontal: 40),
-            model: model,
-            position: controller.position.inMilliseconds,
-            lyricUi: UINetease(defaultSize: 16),
-            playing: controller.playing.value,
-            size: Size(
-              screenWidth,
-              screenHeight - 200,
-            ),
+          // 用 StreamBuilder 监听 positionStream，
+          // 让 position 变化时重建 LyricsReader，实现歌词自动滚动
+          return StreamBuilder<Duration>(
+            stream: controller.positionStream,
+            initialData: controller.position,
+            builder: (context, snapshot) {
+              final position = snapshot.data ?? Duration.zero;
+              return LyricsReader(
+                padding: const EdgeInsets.symmetric(horizontal: 40),
+                model: model,
+                position: position.inMilliseconds,
+                lyricUi: UINetease(defaultSize: 16),
+                playing: controller.playing.value,
+                size: Size(
+                  screenWidth,
+                  screenHeight - 200,
+                ),
+              );
+            },
           );
         } catch (e) {
           return _buildEmptyState(controller, '歌词格式解析失败');

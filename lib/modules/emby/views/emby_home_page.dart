@@ -235,6 +235,7 @@ class EmbyHomePage extends StatelessWidget {
                           server.baseUrl,
                           item,
                           maxWidth: 640,
+                          apiKey: controller.serverController.getToken(server.id),
                         );
                         final progress =
                             item.userData?.playedPercentage != null
@@ -369,6 +370,7 @@ class EmbyHomePage extends StatelessWidget {
                           server.baseUrl,
                           item,
                           maxWidth: 300,
+                          apiKey: controller.serverController.getToken(server.id),
                         );
                         return Padding(
                           padding: const EdgeInsets.only(right: 8),
@@ -492,6 +494,7 @@ class EmbyHomePage extends StatelessWidget {
                           server.baseUrl,
                           item,
                           maxWidth: 300,
+                          apiKey: controller.serverController.getToken(server.id),
                         );
                         return Padding(
                           padding: const EdgeInsets.only(right: 8),

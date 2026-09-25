@@ -64,6 +64,17 @@ class MusicPlayerController extends GetxController {
 
   final RxInt favoriteVersion = 0.obs;
 
+  // ===== 渠道标记 =====
+  // 't4'（默认，通用） / 'lx'（洛雪）
+  // 只在 _addToHistory / 收藏逻辑里区分，其它透明
+  final RxString currentChannel = 't4'.obs;
+
+  bool get isLxChannel => currentChannel.value == 'lx';
+
+  void setChannel(String channel) {
+    currentChannel.value = channel;
+  }
+
   // ===== 解析相关 =====
   final RxList<ParserSource> parserSources = <ParserSource>[].obs;
   final Rxn<ParserSource> currentParser = Rxn<ParserSource>();
@@ -162,6 +173,10 @@ class MusicPlayerController extends GetxController {
     if (_currentVodId == null || _currentVodId!.isEmpty) return;
     final episode = currentEpisode;
     if (episode == null) return;
+
+    // 洛雪渠道：跳过通用历史（洛雪历史由 LxPlayerHelper 写 LxStorage）
+    if (isLxChannel) return;
+
     final sourceManager = Get.find<SourceManager>();
     final site = sourceManager.currentSite.value;
     final apiUrl = site?['api']?.toString() ?? '';
@@ -210,6 +225,11 @@ class MusicPlayerController extends GetxController {
   Future<void> playWithUrl(PlayUrl playUrl, {int? index}) async {
     final targetIndex = index ?? currentIndex.value;
     if (targetIndex < 0 || targetIndex >= playlist.length) return;
+
+    // 渠道保护：非洛雪时置回 t4，避免洛雪播放后残留标记
+    if (!isLxChannel) {
+      currentChannel.value = 't4';
+    }
 
     isLoading.value = true;
     currentIndex.value = targetIndex;

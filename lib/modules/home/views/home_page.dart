@@ -34,6 +34,7 @@ import 'package:yuanying/utils/storage_manager.dart';
 import 'package:yuanying/core/constants/storage_keys.dart';
 import 'package:yuanying/modules/tmdb/views/tmdb_detail_page.dart';
 import 'package:yuanying/services/tmdb_match_cache_service.dart';
+import 'package:yuanying/t4/models/video_detail.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -191,6 +192,15 @@ class _HomePageState extends CommonPageState<HomePage>
       return;
     }
 
+    // 合并列表模式（仅对"正常卡片"生效）
+    if (site != null &&
+        siteKey.isNotEmpty &&
+        controller.isMergeListMode(siteKey)) {
+      _mergeListPlay(item, site, pwd);
+      return;
+    }
+
+
     // TMDB 集成拦截 - 首页进入（fromHome: true）
     if (_shouldUseTmdb(siteKey)) {
       // ↓ 查缓存
@@ -273,6 +283,75 @@ class _HomePageState extends CommonPageState<HomePage>
   //     SmartDialog.showToast('加载失败：$e');
   //   }
   // }
+
+  /// 合并列表播放：把当前分类的已加载列表拼成播放列表并跳转
+  ///
+  /// 注意：Episode.url 直接使用 vodId，播放时由 DetailController
+  /// 走"先 getDetail 拿 play 参数 → 再 getPlayUrl 换真实地址"的懒加载流程。
+  void _mergeListPlay(
+    VideoItem clickedItem,
+    Map<String, dynamic> site,
+    String pwd,
+  ) {
+    // ---- 1. 定位当前分类 ----
+    final cat = controller.currentCategory.value;
+    if (cat == null) {
+      SmartDialog.showToast('无法定位当前分类');
+      return;
+    }
+
+    // ---- 2. 取当前分类的已加载列表 ----
+    List<VideoItem> list;
+    if (cat.typeId == 'recommend') {
+      list = controller.recommendList;
+    } else {
+      final ctrl = controller.getCategoryController(cat.typeId);
+      if (ctrl == null) {
+        SmartDialog.showToast('分类未加载');
+        return;
+      }
+      list = ctrl.videoList.toList();
+    }
+
+    // ---- 3. 过滤掉文件夹和 Action ----
+    final playable = list
+        .where((it) => it.vodTag != 'folder' && !it.isAction)
+        .toList();
+
+    if (playable.isEmpty) {
+      SmartDialog.showToast('当前列表无可播放内容');
+      return;
+    }
+
+    // ---- 4. 构造 VideoDetail（episode.url = vodId）----
+    final episodes = playable
+        .map((it) => Episode(name: it.vodName, url: it.vodId))
+        .toList();
+
+    final detail = VideoDetail(
+      vodId: clickedItem.vodId,
+      vodName: clickedItem.vodName,
+      vodPic: clickedItem.vodPic,
+      vodContent: '合并播放（共 ${episodes.length} 项）',
+      vodRemarks: clickedItem.vodRemarks,
+      typeName: cat.typeName,
+      playSources: [
+        PlaySource(name: cat.typeName, episodes: episodes),
+      ],
+    );
+
+    // ---- 5. 跳转播放页 ----
+    Get.toNamed(
+      AppPages.detail,
+      arguments: {
+        'vodId': clickedItem.vodId,
+        'pwd': pwd,
+        'site': site,
+        'mergeDetail': detail,
+        'mergeStartVodId': clickedItem.vodId,   // vod_id，用于定位起始集
+      },
+    );
+  }
 
   void _showPushDialog() {
     showModalBottomSheet(
@@ -835,6 +914,33 @@ class _HomePageState extends CommonPageState<HomePage>
             color: theme.colorScheme.surface,
             child: Row(
               children: [
+                // 合并播放按钮（仅 mergeList=1 的源显示）
+                Obx(() {
+                  final site = sourceManager.currentSite.value;
+                  if (site == null || !SourceManager.isMergeListSite(site)) {
+                    return const SizedBox.shrink();
+                  }
+                  final curSiteKey = site['key']?.toString() ?? '';
+                  final isOn = controller.mergeListMode[curSiteKey] ?? false;
+                  return IconButton(
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                    style: IconButton.styleFrom(
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    icon: Icon(
+                      isOn
+                          ? Icons.playlist_play
+                          : Icons.playlist_remove,
+                      size: 24,
+                    ),
+                    onPressed: () =>
+                        controller.toggleMergeListMode(curSiteKey),
+                    tooltip: isOn ? '关闭合并播放' : '开启合并播放',
+                    splashRadius: 20,
+                  );
+                }),
+                const SizedBox(width: 4),
                 Obx(() {
                   final cid = controller.currentCategory.value?.typeId;
                   final hasFilter = cid != null &&

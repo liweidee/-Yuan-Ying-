@@ -124,8 +124,10 @@ class JellyfinLibraryPage extends StatelessWidget {
             }
             final item = items[index];
             final imageUrl = JellyfinApiService.primaryImage(
-                server.baseUrl, item.id,
-                maxWidth: 300);
+              server.baseUrl, item.id,
+              maxWidth: 300,
+              apiKey: ctrl.serverController.getToken(server.id),
+            );
             final videoItem = JellyfinConverter.toVideoItem(item, imageUrl);
             return VideoCardV(
               videoItem: videoItem,

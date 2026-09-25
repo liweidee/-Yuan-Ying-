@@ -14,7 +14,17 @@ import 'package:yuanying/t4/services/source_manager.dart';
 class MusicPlayerView extends StatelessWidget {
   final bool cancelMargin;
 
-  const MusicPlayerView({super.key, this.cancelMargin = false});
+  /// 关闭回调（null 时不显示关闭按钮）
+  ///
+  /// 洛雪渠道传入后会显示「✕」按钮，点击执行关闭逻辑。
+  /// T4 渠道不传 → 不显示按钮，行为不变。
+  final VoidCallback? onClose;
+
+  const MusicPlayerView({
+    super.key,
+    this.cancelMargin = false,
+    this.onClose,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -243,6 +253,19 @@ class MusicPlayerView extends StatelessWidget {
                 icon: const Icon(Icons.queue_music, size: 22),
                 onPressed: () => _showPlayerList(context),
               ),
+              // 关闭按钮（洛雪渠道传入 onClose 时显示）
+              if (onClose != null) ...[
+                const SizedBox(width: 2),
+                IconButton(
+                  iconSize: 22,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                  color: colorScheme.outline,
+                  tooltip: '关闭',
+                  icon: const Icon(Icons.close_rounded, size: 20),
+                  onPressed: onClose,
+                ),
+              ],
             ],
           ),
         ),
@@ -382,6 +405,19 @@ class MusicPlayerView extends StatelessWidget {
               icon: const Icon(Icons.queue_music, size: 22),
               onPressed: () => _showPlayerList(context),
             ),
+            // 关闭按钮（洛雪渠道传入 onClose 时显示）
+            if (onClose != null) ...[
+              const SizedBox(width: 1),
+              IconButton(
+                iconSize: 22,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                color: colorScheme.outline,
+                tooltip: '关闭',
+                icon: const Icon(Icons.close_rounded, size: 20),
+                onPressed: onClose,
+              ),
+            ],
           ],
         ),
       ],
@@ -399,6 +435,12 @@ class MusicPlayerView extends StatelessWidget {
     return Obx(() {
       final _ = controller.favoriteVersion.value;
       final vodId = controller.currentVodId;
+
+      // 洛雪渠道：底条隐藏收藏按钮（收藏由 PlayerCard 处理）
+      if (controller.isLxChannel) {
+        return const SizedBox.shrink();
+      }
+
       bool isFav = false;
       if (vodId != null && vodId.isNotEmpty) {
         final favorites = GStorage.getFavorites();

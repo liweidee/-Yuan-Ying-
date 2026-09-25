@@ -293,3 +293,24 @@ abstract final class FnosStorageKeys {
   /// Token 前缀，实际存储键 = 'fnos_token_{serverId}'
   static const String tokenPrefix = 'fnos_token_';
 }
+
+// ============================================================================
+// 洛雪音乐（LxMusic）存储键
+// ============================================================================
+abstract final class LxMusicStorageKeys {
+  /// 主 box：脚本、激活ID、缓存、搜索历史、收藏
+  static const String box = 'lx_music';
+
+  /// 下载 box：下载队列、已下载列表
+  static const String downloadBox = 'lx_download';
+
+  // ===== 主 box 内的 key =====
+  static const String scripts = 'scripts';
+  static const String activeScriptId = 'active_script_id';
+  static const String searchHistory = 'search_history';
+  static const String favorites = 'lx_favorites';
+
+  // ===== 下载 box 内的 key =====
+  static const String downloadQueue = 'download_queue';
+  static const String downloadedSongs = 'downloaded_songs';
+}

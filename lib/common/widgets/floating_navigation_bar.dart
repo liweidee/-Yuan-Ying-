@@ -16,8 +16,11 @@ const _kNavigationShape = RoundedSuperellipseBorder(
   borderRadius: _kBorderRadius,
 );
 
+/// 底栏距离屏幕两侧的留白
+const double _kSideGap = 16.0;
+
 /// ref [NavigationBar]
-class FloatingNavigationBar extends StatelessWidget {
+class FloatingNavigationBar extends StatefulWidget {
   const FloatingNavigationBar({
     super.key,
     this.animationDuration = const Duration(milliseconds: 500),
@@ -35,6 +38,8 @@ class FloatingNavigationBar extends StatelessWidget {
     this.labelTextStyle,
     this.labelPadding,
     this.bottomPadding = 8.0,
+    // 每项宽度（默认沿用指示器宽度 86）
+    this.itemWidth = _kIndicatorWidth,
   }) : assert(destinations.length >= 2),
        assert(0 <= selectedIndex && selectedIndex < destinations.length);
 
@@ -53,46 +58,153 @@ class FloatingNavigationBar extends StatelessWidget {
   final WidgetStateProperty<TextStyle?>? labelTextStyle;
   final EdgeInsetsGeometry? labelPadding;
   final double bottomPadding;
+  final double itemWidth;
+
+  @override
+  State<FloatingNavigationBar> createState() => _FloatingNavigationBarState();
+}
+
+class _FloatingNavigationBarState extends State<FloatingNavigationBar> {
+  final ScrollController _scrollController = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance
+        .addPostFrameCallback((_) => _ensureSelectedVisible());
+  }
+
+  @override
+  void didUpdateWidget(covariant FloatingNavigationBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.selectedIndex != widget.selectedIndex) {
+      _ensureSelectedVisible();
+    }
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  /// 切换 Tab 时把选中项滚到视口居中（不依赖 GlobalKey，按 index 直接算偏移）
+  void _ensureSelectedVisible() {
+    if (!_scrollController.hasClients) return;
+    final viewportWidth = _scrollController.position.viewportDimension;
+    final itemW = widget.itemWidth;
+    final targetCenter = widget.selectedIndex * itemW + itemW / 2;
+    final currentOffset = _scrollController.offset;
+    final desiredOffset = targetCenter - viewportWidth / 2;
+    final maxOffset = _scrollController.position.maxScrollExtent;
+    final clamped = desiredOffset.clamp(0.0, maxOffset);
+    if ((clamped - currentOffset).abs() < 1.0) return;
+    _scrollController.animateTo(
+      clamped,
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOut,
+    );
+  }
 
   VoidCallback _handleTap(int index) {
-    return onDestinationSelected != null
-        ? () => onDestinationSelected!(index)
+    return widget.onDestinationSelected != null
+        ? () => widget.onDestinationSelected!(index)
         : () {};
   }
 
   @override
   Widget build(BuildContext context) {
+    final destinations = widget.destinations;
+    final selectedIndex = widget.selectedIndex;
+    final animationDuration = widget.animationDuration;
+    final itemWidth = widget.itemWidth;
+
     final defaults = _NavigationBarDefaultsM3(context);
 
     final navigationBarTheme = NavigationBarTheme.of(context);
     final effectiveLabelBehavior =
-        labelBehavior ??
+        widget.labelBehavior ??
         navigationBarTheme.labelBehavior ??
         defaults.labelBehavior!;
 
     final padding = MediaQuery.viewPaddingOf(context);
 
+    // ===== 溢出判断 & 宽度计算 =====
+    // 不溢出：宽度 = 内容自然宽度（与原版一致）
+    // 溢出：  宽度 = 屏幕可用宽 - 两侧留白（保证不贴边）
+    final double screenWidth = MediaQuery.sizeOf(context).width;
+    final double horizontalSafe = padding.left + padding.right;
+    final double usableWidth =
+        (screenWidth - horizontalSafe).clamp(0.0, double.infinity);
+    final double contentWidth = destinations.length * itemWidth;
+    final double maxAllowedWidth =
+        (usableWidth - _kSideGap * 2).clamp(0.0, double.infinity);
+    final bool needScroll = contentWidth > maxAllowedWidth;
+    final double barWidth = needScroll ? maxAllowedWidth : contentWidth;
+
+    // 内部横向内容：每项固定 itemWidth，保证 CustomMultiChildLayout 有确定约束
+    final Widget row = Row(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        for (int i = 0; i < destinations.length; i++)
+          SizedBox(
+            width: itemWidth,
+            child: _SelectableAnimatedBuilder(
+              duration: animationDuration,
+              isSelected: i == selectedIndex,
+              builder: (context, animation) {
+                return _NavigationDestinationInfo(
+                  index: i,
+                  selectedIndex: selectedIndex,
+                  totalNumberOfDestinations: destinations.length,
+                  selectedAnimation: animation,
+                  labelBehavior: effectiveLabelBehavior,
+                  indicatorColor: widget.indicatorColor,
+                  indicatorShape: widget.indicatorShape,
+                  overlayColor: widget.overlayColor,
+                  onTap: _handleTap(i),
+                  labelTextStyle: widget.labelTextStyle,
+                  labelPadding: widget.labelPadding,
+                  child: destinations[i],
+                );
+              },
+            ),
+          ),
+      ],
+    );
+
+    // 内容：溢出时横向滚动，否则平铺
+    final Widget content = needScroll
+        ? SingleChildScrollView(
+            controller: _scrollController,
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            child: row,
+          )
+        : row;
+
     return UnconstrainedBox(
       child: Padding(
         padding: EdgeInsets.fromLTRB(
-          padding.left,
+          padding.left + _kSideGap,
           0,
-          padding.right,
-          bottomPadding + padding.bottom,
+          padding.right + _kSideGap,
+          widget.bottomPadding + padding.bottom,
         ),
         child: SizedBox(
           height: _kNavigationHeight,
-          width: destinations.length * _kIndicatorWidth,
+          width: barWidth,
           child: DecoratedBox(
             decoration: ShapeDecoration(
               color: ElevationOverlay.applySurfaceTint(
-                backgroundColor ??
+                widget.backgroundColor ??
                     navigationBarTheme.backgroundColor ??
                     defaults.backgroundColor!,
-                surfaceTintColor ??
+                widget.surfaceTintColor ??
                     navigationBarTheme.surfaceTintColor ??
                     defaults.surfaceTintColor,
-                elevation ??
+                widget.elevation ??
                     navigationBarTheme.elevation ??
                     defaults.elevation!,
               ),
@@ -103,34 +215,7 @@ class FloatingNavigationBar extends StatelessWidget {
             ),
             child: Padding(
               padding: _kIndicatorPadding,
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: <Widget>[
-                  for (int i = 0; i < destinations.length; i++)
-                    Expanded(
-                      child: _SelectableAnimatedBuilder(
-                        duration: animationDuration,
-                        isSelected: i == selectedIndex,
-                        builder: (context, animation) {
-                          return _NavigationDestinationInfo(
-                            index: i,
-                            selectedIndex: selectedIndex,
-                            totalNumberOfDestinations: destinations.length,
-                            selectedAnimation: animation,
-                            labelBehavior: effectiveLabelBehavior,
-                            indicatorColor: indicatorColor,
-                            indicatorShape: indicatorShape,
-                            overlayColor: overlayColor,
-                            onTap: _handleTap(i),
-                            labelTextStyle: labelTextStyle,
-                            labelPadding: labelPadding,
-                            child: destinations[i],
-                          );
-                        },
-                      ),
-                    ),
-                ],
-              ),
+              child: content,
             ),
           ),
         ),

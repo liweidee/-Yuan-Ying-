@@ -12,6 +12,14 @@ import 'package:yuanying/utils/toast_utils.dart';
 import 'package:yuanying/utils/storage.dart';
 import 'package:yuanying/core/constants/app_constants.dart';
 import 'package:yuanying/t4/services/source_manager.dart';
+import 'package:yuanying/modules/lx_music/storage/lx_storage.dart';
+
+import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
+import 'package:yuanying/modules/lx_music/controllers/lx_download_controller.dart';
+import 'package:yuanying/modules/lx_music/models/lx_music_model.dart';
+import 'package:yuanying/modules/lx_music/services/lx_music_url_service.dart';
+import 'package:yuanying/modules/lx_music/utils/lx_player_helper.dart';
+import 'package:yuanying/modules/lx_music/utils/lx_playlist_helper.dart';
 
 class PlayerCard extends StatefulWidget {
   const PlayerCard({super.key});
@@ -30,15 +38,35 @@ class PlayerCardState extends State<PlayerCard> with SingleTickerProviderStateMi
     super.initState();
     _pageController = PageController(initialPage: 0);
     _loadFavoriteStatus();
+
+    // 渠道 / 歌曲切换时刷新收藏状态
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final controller = Get.find<MusicPlayerController>();
+      ever(controller.currentChannel, (_) => _loadFavoriteStatus());
+      ever(controller.currentIndex, (_) => _loadFavoriteStatus());
+    });
   }
 
   void _loadFavoriteStatus() {
     final controller = Get.find<MusicPlayerController>();
     final vodId = controller.currentVodId;
-    if (vodId != null && vodId.isNotEmpty) {
+    if (vodId == null || vodId.isEmpty) return;
+
+    if (controller.isLxChannel) {
+      _loadLxFavoriteStatus(vodId);
+    } else {
       final favorites = GStorage.getFavorites();
       _isLike.value = favorites.any((item) => item['vod_id'] == vodId);
     }
+  }
+
+  Future<void> _loadLxFavoriteStatus(String vodId) async {
+    try {
+      final list = await LxStorage.instance.getFavorites();
+      if (!mounted) return;
+      _isLike.value = list.any((item) => item['id'] == vodId);
+    } catch (_) {}
   }
 
   @override
@@ -54,6 +82,13 @@ class PlayerCardState extends State<PlayerCard> with SingleTickerProviderStateMi
       ToastUtils.show('无法获取歌曲ID');
       return;
     }
+
+    // 洛雪渠道：走洛雪收藏
+    if (controller.isLxChannel) {
+      await _toggleLxLike(vodId, controller);
+      return;
+    }
+
     final sourceManager = Get.find<SourceManager>();
     final site = sourceManager.currentSite.value;
     final sourceName = site?['name']?.toString() ?? '音乐';
@@ -87,6 +122,77 @@ class PlayerCardState extends State<PlayerCard> with SingleTickerProviderStateMi
     }
     // 通知其他界面刷新
     controller.notifyFavoriteChanged();
+  }
+
+  /// 洛雪渠道收藏切换
+  Future<void> _toggleLxLike(
+      String vodId, MusicPlayerController controller) async {
+    try {
+      final list = await LxStorage.instance.getFavorites();
+      final idx = list.indexWhere((item) => item['id'] == vodId);
+
+      if (idx >= 0) {
+        list.removeAt(idx);
+        await LxStorage.instance.saveFavorites(list);
+        _isLike.value = false;
+        ToastUtils.show('已取消收藏');
+      } else {
+        final episode = controller.currentEpisode;
+        list.insert(0, {
+          'id': vodId,
+          'name': episode?.name ?? '',
+          'singer': controller.author.value,
+          'album': controller.albumName.value,
+          'imgUrl': controller.coverUrl.value,
+          'source': 'lx',
+          'addTime': DateTime.now().millisecondsSinceEpoch,
+        });
+        await LxStorage.instance.saveFavorites(list);
+        _isLike.value = true;
+        ToastUtils.show('已收藏');
+      }
+      controller.notifyFavoriteChanged();
+    } catch (e) {
+      ToastUtils.show('操作失败: $e');
+    }
+  }
+
+  /// 洛雪：添加到歌单
+  void _lxAddToPlaylist() {
+    final music = LxPlayerHelper.currentLxMusic;
+    if (music == null) {
+      SmartDialog.showToast('无法获取歌曲信息');
+      return;
+    }
+    LxPlaylistHelper.showAddToPlaylistSheet(context, music);
+  }
+
+  /// 洛雪：下载
+  Future<void> _lxDownload() async {
+    final music = LxPlayerHelper.currentLxMusic;
+    if (music == null) {
+      SmartDialog.showToast('无法获取歌曲信息');
+      return;
+    }
+
+    try {
+      SmartDialog.showToast('正在获取下载地址...');
+      final url =
+          await LxMusicUrlService.instance.getMusicUrl(music: music);
+      if (url == null || url.isEmpty) {
+        SmartDialog.showToast('无法获取下载地址');
+        return;
+      }
+
+      final downloadCtrl = Get.isRegistered<LxDownloadController>()
+          ? Get.find<LxDownloadController>()
+          : Get.put(LxDownloadController());
+
+      await downloadCtrl.download(music.copyWith(songUrl: url));
+      SmartDialog.showToast('已加入下载队列');
+    } catch (e) {
+      SmartDialog.showToast('下载失败: $e');
+    }
   }
 
   void _goToLyrics() {
@@ -601,18 +707,51 @@ class PlayerCardState extends State<PlayerCard> with SingleTickerProviderStateMi
             final vodId = controller.currentVodId;
             bool isFav = false;
             if (vodId != null && vodId.isNotEmpty) {
-              final favorites = GStorage.getFavorites();
-              isFav = favorites.any((item) => item['vod_id'] == vodId);
+              if (controller.isLxChannel) {
+                // 洛雪渠道：读 _isLike 缓存（由 _loadLxFavoriteStatus 异步更新）
+                isFav = _isLike.value;
+              } else {
+                final favorites = GStorage.getFavorites();
+                isFav = favorites.any((item) => item['vod_id'] == vodId);
+              }
             }
-            // 同步 _isLike（用于其他逻辑）
-            _isLike.value = isFav;
             return IconButton(
               iconSize: 24,
               onPressed: _toggleLike,
               icon: Icon(
                 isFav ? Icons.favorite : Icons.favorite_border,
-                color: isFav ? colorScheme.primary : Colors.white.withOpacity(0.6),
+                color: isFav
+                    ? colorScheme.primary
+                    : Colors.white,
               ),
+            );
+          }),
+
+          // 洛雪渠道专属：添加到歌单 + 下载
+          Obx(() {
+            final controller = Get.find<MusicPlayerController>();
+            if (!controller.isLxChannel) return const SizedBox.shrink();
+
+            return Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(width: 20),
+                IconButton(
+                  iconSize: 24,
+                  tooltip: '添加到歌单',
+                  onPressed: () => _lxAddToPlaylist(),
+                  icon: const Icon(Icons.playlist_add_rounded,
+                      color: Colors.white),
+                ),
+                const SizedBox(width: 20),
+                IconButton(
+                  iconSize: 24,
+                  tooltip: '下载',
+                  onPressed: () => _lxDownload(),
+                  icon: const Icon(Icons.download_rounded,
+                      color: Colors.white),
+                ),
+              ],
             );
           }),
         ],
