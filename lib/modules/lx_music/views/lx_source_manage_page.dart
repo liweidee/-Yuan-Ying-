@@ -771,14 +771,14 @@ class _LxSourceManagePageState extends State<LxSourceManagePage> {
                   borderRadius: BorderRadius.circular(10),
                 ),
                 alignment: Alignment.center,
-                child: Icon(Icons.folder_open_rounded,
+                child: Icon(Icons.link_rounded,
                     color: colorScheme.primary, size: 20),
               ),
-              title: const Text('从本地文件导入'),
-              subtitle: const Text('选择 .js 文件'),
+              title: const Text('从远程 URL 导入'),
+              subtitle: const Text('输入脚本直链地址'),
               onTap: () {
                 Navigator.pop(ctx);
-                _importFromFile();
+                _importFromUrl();
               },
             ),
             ListTile(
@@ -811,14 +811,14 @@ class _LxSourceManagePageState extends State<LxSourceManagePage> {
                   borderRadius: BorderRadius.circular(10),
                 ),
                 alignment: Alignment.center,
-                child: Icon(Icons.link_rounded,
+                child: Icon(Icons.folder_open_rounded,
                     color: colorScheme.primary, size: 20),
               ),
-              title: const Text('从远程 URL 导入'),
-              subtitle: const Text('输入脚本直链地址'),
+              title: const Text('从本地文件导入'),
+              subtitle: const Text('选择 .js 文件'),
               onTap: () {
                 Navigator.pop(ctx);
-                _importFromUrl();
+                _importFromFile();
               },
             ),
             const SizedBox(height: 8),

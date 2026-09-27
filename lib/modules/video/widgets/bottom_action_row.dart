@@ -3,6 +3,7 @@ import 'package:get/get.dart';
 import 'package:yuanying/common/widgets/custom_icon.dart';
 import 'package:yuanying/modules/video/controllers/video_controller.dart';
 import 'package:yuanying/plugin/pl_player/controller.dart';
+import 'package:yuanying/plugin/pl_player/player_pref.dart';
 
 /// 底部操作按钮区（左右翻转、上下翻转、听视频、后台播放）
 class BottomActionRow extends StatelessWidget {
@@ -16,6 +17,8 @@ class BottomActionRow extends StatelessWidget {
     final controller = Get.find<DetailController>(tag: controllerTag);
     final playerController = controller.playerController;
     final theme = Theme.of(context);
+
+    final isFvpEngine = PlayerPref.playerEngine == PlayerEngineType.fvp;
 
     return Container(
       height: 44,
@@ -47,22 +50,31 @@ class BottomActionRow extends StatelessWidget {
             const SizedBox(width: 8),
             _buildActionChip(
               context,
-              icon: Icons.headphones,
-              label: '听视频',
-              selected: onlyPlayAudio,
-              onTap: () {
-                playerController.onlyPlayAudio.value = !onlyPlayAudio;
-                controller.playerInit();
-              },
+              icon: CustomIcons.view_headline_rotate_90,
+              label: '上下翻转',
+              selected: flipY,
+              onTap: () => playerController.flipY.value = !flipY,
             ),
-            const SizedBox(width: 8),
-            _buildActionChip(
-              context,
-              icon: Icons.play_circle_outline,
-              label: '后台播放',
-              selected: continueBg,
-              onTap: playerController.setContinuePlayInBackground,
-            ),
+            if (!isFvpEngine) ...[
+              const SizedBox(width: 8),
+              _buildActionChip(
+                context,
+                icon: Icons.headphones,
+                label: '听视频',
+                selected: onlyPlayAudio,
+                onTap: () {
+                  playerController.setOnlyPlayAudio();
+                },
+              ),
+              const SizedBox(width: 8),
+              _buildActionChip(
+                context,
+                icon: Icons.play_circle_outline,
+                label: '后台播放',
+                selected: continueBg,
+                onTap: playerController.setContinuePlayInBackground,
+              ),
+            ],
           ],
         );
       }),

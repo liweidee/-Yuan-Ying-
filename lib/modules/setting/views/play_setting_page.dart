@@ -67,14 +67,16 @@ class _PlaySettingPageState extends State<PlaySettingPage> {
               onTap: _showEngineDialog,
             ),
           const SizedBox(height: 8),
-          // ===== 第三方播放器 =====
-          _buildSettingItem(
-            icon: Icons.open_in_new,
-            title: '第三方播放器',
-            subtitle: _getExternalPlayerLabel(),
-            onTap: _showExternalPlayerDialog,
-          ),
-          const SizedBox(height: 8),
+          // ===== 第三方播放器（仅桌面端） =====
+          if (PlatformUtils.isDesktop) ...[
+            _buildSettingItem(
+              icon: Icons.open_in_new,
+              title: '第三方播放器',
+              subtitle: _getExternalPlayerLabel(),
+              onTap: _showExternalPlayerDialog,
+            ),
+            const SizedBox(height: 8),
+          ],
           // ===== 请求头策略 =====
           _buildSettingItem(
             icon: Icons.http_outlined,
@@ -86,7 +88,7 @@ class _PlaySettingPageState extends State<PlaySettingPage> {
 
           // ===== 解析模式 =====
           _buildSettingItem(
-            icon: Icons.transform_outlined,
+            icon: Icons.auto_awesome_outlined,
             title: '解析模式',
             subtitle: _getParseModeLabel(_parseMode),
             onTap: _showParseModeDialog,

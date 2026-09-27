@@ -49,7 +49,7 @@ class SettingPage extends StatelessWidget {
           const SizedBox(height: 8),
           _buildSettingItem(
             context: context,
-            icon: Icons.video_library,
+            icon: Icons.video_settings_outlined,
             title: '播放设置',
             subtitle: '播放请求头策略、播放器行为',
             onTap: () => Get.to(() => const PlaySettingPage()),

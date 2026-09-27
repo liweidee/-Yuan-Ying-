@@ -484,6 +484,12 @@ class MediaKitEngine implements IPlayerEngine {
       ),
       play: false,
     );
+
+    // 若当前处于"听视频"状态，重新同步到 mpv
+    // （file-local-options 在切换文件后会被 mpv 重置为默认值）
+    if (onlyPlayAudio.value) {
+      _applyOnlyPlayAudioToPlayer();
+    }
   }
 
   Map<String, String>? _cachedHeaders;
@@ -875,6 +881,11 @@ class MediaKitEngine implements IPlayerEngine {
         play: true,
       );
 
+      // 若当前处于"听视频"状态，重新同步到 mpv
+      if (onlyPlayAudio.value) {
+        _applyOnlyPlayAudioToPlayer();
+      }
+
       if (player.state.rate != _playbackSpeed.value) {
         await setPlaybackSpeed(_playbackSpeed.value);
       }
@@ -1246,7 +1257,30 @@ class MediaKitEngine implements IPlayerEngine {
 
   @override
   void setOnlyPlayAudio() {
-    // 仅音频模式，暂空实现
+    onlyPlayAudio.value = !onlyPlayAudio.value;
+    _applyOnlyPlayAudioToPlayer();
+  }
+
+  /// 把 onlyPlayAudio 状态同步到 mpv。
+  /// - vid=no：屏蔽视频轨（真正的"听视频"）
+  /// - vid=auto：恢复视频轨
+  /// 使用 file-local-options 前缀，保证只影响当前文件，
+  /// 切换视频后 mpv 会自动重置为 auto，避免污染下一个视频。
+  void _applyOnlyPlayAudioToPlayer() {
+    final player = _videoPlayerController;
+    if (player == null) return;
+    try {
+      // 将 platform 转换为 NativePlayer 后调用 setProperty
+      // 使用 dynamic 可绕过静态类型检查，兼容 Web 等不支持的平台
+      if (player.platform is NativePlayer) {
+        (player.platform as dynamic).setProperty(
+          'file-local-options/vid',
+          onlyPlayAudio.value ? 'no' : 'auto',
+        );
+      }
+    } catch (e) {
+      if (kDebugMode) debugPrint('setOnlyPlayAudio error: $e');
+    }
   }
 
   @override
@@ -1593,6 +1627,9 @@ class MediaKitEngine implements IPlayerEngine {
     // 防止重复销毁
     if (_isDisposed) return;
     _isDisposed = true;
+
+    // 重置听视频状态，避免污染下一个视频
+    onlyPlayAudio.value = false;
 
     resetScreenRotation();
     cancelLongPressTimer();

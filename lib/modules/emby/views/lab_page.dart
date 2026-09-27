@@ -30,7 +30,7 @@ class LabPage extends StatelessWidget {
           _buildEntry(
             context,
             theme,
-            icon: Icons.movie_filter_rounded,
+            icon: Icons.video_library_outlined,
             title: 'Emby 媒体服务器',
             subtitle: '连接您的 Emby 服务器，浏览媒体库',
             route: AppPages.embyServerConfig,
@@ -39,7 +39,7 @@ class LabPage extends StatelessWidget {
           _buildEntry(
             context,
             theme,
-            icon: Icons.live_tv_outlined,
+            icon: Icons.video_library_outlined,
             title: 'Jellyfin 媒体服务器',
             subtitle: '连接您的 Jellyfin 服务器，浏览媒体库',
             route: AppPages.jellyfinServerConfig,
@@ -95,7 +95,7 @@ class LabPage extends StatelessWidget {
           _buildEntry(
             context,
             theme,
-            icon: Icons.cloud_sync_outlined,
+            icon: Icons.video_library_outlined,
             title: '飞牛影视',
             subtitle: '连接 FnOS / 飞牛影视服务器，浏览媒体库',
             route: AppPages.fnosServerConfig,
@@ -105,7 +105,8 @@ class LabPage extends StatelessWidget {
           _buildEntry(
             context,
             theme,
-            icon: Icons.music_note_rounded,
+            // icon: Icons.music_note_rounded,
+            icon: Icons.my_library_music_outlined,
             title: '洛雪音乐',
             subtitle: '在线音乐搜索播放，支持自定义 JS 音源',
             route: AppPages.lxMusic,

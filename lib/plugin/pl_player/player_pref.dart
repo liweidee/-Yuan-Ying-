@@ -49,7 +49,7 @@ class PlayerPref {
   // ===== 缓冲 =====
 
   /// 缓冲大小 (MB)
-  static double get bufferSize => _box.get('bufferSize', defaultValue: 4.0);
+  static double get bufferSize => _box.get('bufferSize', defaultValue: 64.0);
   static set bufferSize(double value) => _box.put('bufferSize', value);
 
   /// 缓冲秒数

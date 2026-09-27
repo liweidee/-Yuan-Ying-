@@ -205,15 +205,14 @@ class _LxMusicDetailPageState extends State<LxMusicDetailPage> {
         await LxStorage.instance.saveFavorites(list);
         SmartDialog.showToast('已取消收藏');
       } else {
-        final episode = _controller.currentEpisode;
+        final music = LxPlayerHelper.currentLxMusic;
+        if (music == null) {
+          SmartDialog.showToast('无法获取歌曲信息');
+          return;
+        }
         list.insert(0, {
-          'id': vodId,
-          'name': episode?.name ?? '',
-          'singer': _controller.author.value,
-          'album': _controller.albumName.value,
-          'imgUrl': _controller.coverUrl.value,
-          'source': 'lx',
-          'addTime': DateTime.now().millisecondsSinceEpoch,
+          ...music.toJson(),
+          'addTime': DateTime.now().toIso8601String(),
         });
         await LxStorage.instance.saveFavorites(list);
         SmartDialog.showToast('已收藏');
@@ -258,13 +257,8 @@ class _LxMusicDetailPageState extends State<LxMusicDetailPage> {
         return;
       }
       list.insert(0, {
-        'id': music.id,
-        'name': music.name,
-        'singer': music.singer,
-        'album': music.album,
-        'imgUrl': music.imgUrl,
-        'source': music.source,
-        'addTime': DateTime.now().millisecondsSinceEpoch,
+        ...music.toJson(),
+        'addTime': DateTime.now().toIso8601String(),
       });
       await LxStorage.instance.saveFavorites(list);
       SmartDialog.showToast('已添加到「我喜欢」');

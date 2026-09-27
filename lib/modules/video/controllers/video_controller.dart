@@ -23,8 +23,8 @@ import 'package:yuanying/t4/models/video_detail.dart';
 import 'package:yuanying/t4/services/t4_api_service.dart';
 import 'package:yuanying/core/constants/app_constants.dart';
 import 'package:yuanying/t4/services/source_manager.dart';
-import 'package:yuanying/modules/audio/controllers/audio_controller.dart';
-import 'package:yuanying/modules/audio/views/audio_page.dart';
+// import 'package:yuanying/modules/audio/controllers/audio_controller.dart';
+// import 'package:yuanying/modules/audio/views/audio_page.dart';
 import 'package:yuanying/modules/danmaku/controllers/danmaku_controller.dart';
 import 'package:yuanying/modules/danmaku/services/danmaku_parser.dart';
 import 'package:yuanying/plugin/pl_player/models/play_status.dart';
@@ -2188,40 +2188,40 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     super.onClose();
   }
 
-  void toAudioPage() {
-    final detail = introController.videoDetail.value;
-    if (detail == null) return;
+  // void toAudioPage() {
+  //   final detail = introController.videoDetail.value;
+  //   if (detail == null) return;
 
-    final playlist = <AudioItem>[];
-    for (final source in detail.playSources) {
-      for (final episode in source.episodes) {
-        playlist.add(AudioItem(
-          title: episode.name,
-          url: episode.url,
-          artist: detail.vodName,
-          cover: detail.vodPic,
-        ));
-      }
-    }
+  //   final playlist = <AudioItem>[];
+  //   for (final source in detail.playSources) {
+  //     for (final episode in source.episodes) {
+  //       playlist.add(AudioItem(
+  //         title: episode.name,
+  //         url: episode.url,
+  //         artist: detail.vodName,
+  //         cover: detail.vodPic,
+  //       ));
+  //     }
+  //   }
 
-    if (playlist.isEmpty) return;
+  //   if (playlist.isEmpty) return;
 
-    int index = 0;
-    final currentEpisode = introController.currentPlayEpisode;
-    if (currentEpisode != null) {
-      for (int i = 0; i < playlist.length; i++) {
-        if (playlist[i].title == currentEpisode.name) {
-          index = i;
-          break;
-        }
-      }
-    }
+  //   int index = 0;
+  //   final currentEpisode = introController.currentPlayEpisode;
+  //   if (currentEpisode != null) {
+  //     for (int i = 0; i < playlist.length; i++) {
+  //       if (playlist[i].title == currentEpisode.name) {
+  //         index = i;
+  //         break;
+  //       }
+  //     }
+  //   }
 
-    AudioPage.toAudioPage(
-      playlist: playlist,
-      index: index,
-    );
-  }
+  //   AudioPage.toAudioPage(
+  //     playlist: playlist,
+  //     index: index,
+  //   );
+  // }
 
   Future<void> switchDecodeFormat(String format) async {
     PlayerPref.hardwareDecoding = format;

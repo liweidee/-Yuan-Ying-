@@ -305,11 +305,25 @@ class _HomePageState extends CommonPageState<HomePage>
     if (cat.typeId == 'recommend') {
       list = controller.recommendList;
     } else {
-      final ctrl = controller.getCategoryController(cat.typeId);
+      // 尝试直接查（主分类模式，且当前显示的确实是主分类）
+      CategoryController? ctrl = controller.getCategoryController(cat.typeId);
+
+      // 查不到 → 说明当前是"子文件夹模式"
+      // 子文件夹不是独立分类，它的列表存在"主分类控制器"的 videoList 里，
+      // 且主分类控制器的 videoList 永远是"当前显示的（最深）子目录列表"，
+      // 因为 switchToSubCategory 每次都会 clear + 重新加载。
+      if (ctrl == null) {
+        final mainCat = controller.selectedMainCategory.value;
+        if (mainCat != null) {
+          ctrl = controller.getCategoryController(mainCat.typeId);
+        }
+      }
+
       if (ctrl == null) {
         SmartDialog.showToast('分类未加载');
         return;
       }
+
       list = ctrl.videoList.toList();
     }
 

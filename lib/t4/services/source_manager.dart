@@ -10,6 +10,7 @@ import 'package:yuanying/modules/home/controllers/home_controller.dart';
 import 'package:yuanying/utils/storage.dart';
 import 'package:collection/collection.dart';
 import 'package:yuanying/t4/services/drpy2_api_service.dart';
+import 'package:yuanying/t4/services/drpy3_api_service.dart';
 import 'package:yuanying/t4/services/i_spider_service.dart';
 import 'package:yuanying/t4/services/xbpq_service.dart';
 import 'package:yuanying/t4/services/xyq_service.dart';
@@ -29,6 +30,7 @@ import 'package:yuanying/services/catvod_log_service.dart';
 class SourceManager extends GetxController {
   final T4ApiService _apiService = Get.find<T4ApiService>();
   final Drpy2ApiService _drpy2Service = Get.find<Drpy2ApiService>();
+  final Drpy3ApiService _drpy3Service = Get.find<Drpy3ApiService>();
 
   final RxList<Map<String, dynamic>> remoteSites = <Map<String, dynamic>>[].obs;
   final RxList<Map<String, dynamic>> remoteParses = <Map<String, dynamic>>[].obs;
@@ -68,6 +70,34 @@ class SourceManager extends GetxController {
     final apiWithoutQuery = api.split('?')[0];
     return type == '3' &&
         (apiWithoutQuery.endsWith('drpy2.min.js') || apiWithoutQuery.endsWith('drpy2.js'));
+  }
+
+  /// 判断是否为 drpy3 站点
+  ///
+  /// 判定条件（任一命中即可）：
+  ///   1. `lang` 字段为 `dr3` / `drpy3`（官方设计标识，最权威）
+  ///   2. `api` 文件名以 `drpy3.min.js` / `drpy3.js` 结尾
+  ///   3. `key` 以 `drpy3_` 开头（兜底）
+  static bool isDrpy3Site(Map<String, dynamic> site) {
+    // 条件 1：lang 字段（最权威）
+    final lang = site['lang']?.toString().toLowerCase() ?? '';
+    if (lang == 'dr3' || lang == 'drpy3') return true;
+
+    // 条件 2：api 文件名
+    final type = site['type']?.toString() ?? '';
+    final api = site['api']?.toString() ?? '';
+    final apiWithoutQuery = api.split('?')[0].toLowerCase();
+    if (type == '3' &&
+        (apiWithoutQuery.endsWith('drpy3.min.js') ||
+            apiWithoutQuery.endsWith('drpy3.js'))) {
+      return true;
+    }
+
+    // 条件 3：key 前缀兜底
+    final key = site['key']?.toString() ?? '';
+    if (key.startsWith('drpy3_')) return true;
+
+    return false;
   }
 
   static bool isXbpqSite(Map<String, dynamic> site) {
@@ -146,6 +176,7 @@ class SourceManager extends GetxController {
     if (isXyqSite(site)) return _getOrCreateXyqService(site);
     if (isCatVodOpenSite(site)) return _getOrCreateCatvodOpenService(site);
     if (isPurePy3Site(site)) return _getOrCreatePy3Service(site);
+    if (isDrpy3Site(site)) return _drpy3Service;
     if (isDrpy2Site(site)) return _drpy2Service;
     if (isNodeJSSite(site)) return _getNodeJSService();
     if (isAppCmsSite(site)) return _getOrCreateAppCmsService(site);
@@ -158,8 +189,13 @@ class SourceManager extends GetxController {
     final key = site['key']?.toString() ?? '';
     final api = site['api']?.toString() ?? '';
     final ext = site['ext'];
-    if (!isDrpy2Site(site) && !isXbpqSite(site) && !isCatVodOpenSite(site) &&
-        !isPurePy3Site(site) && !isXyqSite(site) && !isNodeJSSite(site)) {
+    if (!isDrpy3Site(site) &&
+        !isDrpy2Site(site) &&
+        !isXbpqSite(site) &&
+        !isCatVodOpenSite(site) &&
+        !isPurePy3Site(site) &&
+        !isXyqSite(site) &&
+        !isNodeJSSite(site)) {
       final service = T4ApiService();
       service.switchSite(api, key, ext: ext);
       return service;
@@ -188,6 +224,7 @@ class SourceManager extends GetxController {
       }
       return Get.find<Py3SpiderService>(tag: tag);
     }
+    if (isDrpy3Site(site)) return _drpy3Service;
     if (isDrpy2Site(site)) return _drpy2Service;
     if (isCatVodOpenSite(site)) return Get.find<CatvodOpenService>();
     if (isNodeJSSite(site)) return _getNodeJSService();
@@ -234,6 +271,7 @@ class SourceManager extends GetxController {
     if (type != '3') return false;
     if (key.contains('catvod_')) return true;
     if (key.startsWith('nodejs_')) return true;
+    if (isDrpy3Site(site)) return true;
     if (apiWithoutQuery.endsWith('drpy2.min.js') || apiWithoutQuery.endsWith('drpy2.js')) return true;
     if (api == 'csp_XBPQ') return true;
     if (api == 'csp_XYQHiker') return true;
@@ -917,7 +955,9 @@ class SourceManager extends GetxController {
 
   Future<void> _switchToSite(Map<String, dynamic> site) async {
     print('_switchToSite received: key=${site['key']}, api=${site['api']}');
-    if (isDrpy2Site(site)) {
+    if (isDrpy3Site(site)) {
+      await _switchToDrpy3Site(site);
+    } else if (isDrpy2Site(site)) {
       await _switchToDrpy2Site(site);
     } else if (isXbpqSite(site)) {
       await _switchToXbpqSite(site);
@@ -953,6 +993,19 @@ class SourceManager extends GetxController {
       return;
     }
     _drpy2Service.switchSite(
+      site['api']?.toString() ?? '',
+      site['key']?.toString() ?? '',
+      ext: site['ext'],
+    );
+  }
+
+  Future<void> _switchToDrpy3Site(Map<String, dynamic> site) async {
+    final ok = await _drpy3Service.ensureInitialized();
+    if (!ok) {
+      print('[SourceManager] drpy3 init failed, cannot switch to drpy3 site');
+      return;
+    }
+    _drpy3Service.switchSite(
       site['api']?.toString() ?? '',
       site['key']?.toString() ?? '',
       ext: site['ext'],

@@ -391,13 +391,8 @@ class LxPlaylistHelper {
         return;
       }
       list.insert(0, {
-        'id': music.id,
-        'name': music.name,
-        'singer': music.singer,
-        'album': music.album,
-        'imgUrl': music.imgUrl,
-        'source': music.source,
-        'addTime': DateTime.now().millisecondsSinceEpoch,
+        ...music.toJson(),
+        'addTime': DateTime.now().toIso8601String(),
       });
       await LxStorage.instance.saveFavorites(list);
       SmartDialog.showToast('已添加到「我喜欢」');

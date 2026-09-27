@@ -24,6 +24,7 @@ import 'package:yuanying/modules/danmaku/controllers/danmaku_controller.dart';
 import 'package:yuanying/t4/services/source_manager.dart';
 import 'package:yuanying/t4/services/t4_api_service.dart';
 import 'package:yuanying/t4/services/drpy2_api_service.dart';
+import 'package:yuanying/t4/services/drpy3_api_service.dart';
 import 'package:yuanying/utils/platform_utils.dart';
 import 'package:yuanying/utils/storage.dart';
 import 'package:yuanying/utils/storage_manager.dart';
@@ -67,11 +68,16 @@ import 'package:yuanying/services/ad_block_proxy_service.dart';
 
 import 'package:yuanying/services/tmdb_match_cache_service.dart';
 
+import 'package:yuanying/services/media_proxy/media_proxy_server.dart';
+
 // ============================================================================
 // 全局变量
 // ============================================================================
 // ===== WebView 环境（用于 Windows 平台） =====
 WebViewEnvironment? webViewEnvironment;
+
+/// MediaProxy 全局实例（固定端口 9988）
+MediaProxyServer? mediaProxyServer;
 
 // ============================================================================
 // 自定义 HttpOverrides
@@ -93,6 +99,10 @@ class _AppLifecycleObserver extends WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.detached) {
       PythonRuntime.dispose();
+
+      // 停止 MediaProxy
+      mediaProxyServer?.stop();
+      mediaProxyServer = null;
     }
   }
 }
@@ -274,6 +284,7 @@ void main() async {
   // 2. 其他服务
   Get.put(T4ApiService(), permanent: true);
   Get.put(Drpy2ApiService(), permanent: true);
+  Get.put(Drpy3ApiService(), permanent: true);
   Get.put(CatvodOpenService(), permanent: true);
   Get.put(NodeJSService(), permanent: true);
   Get.put(NodeJSSpiderService(), permanent: true);
@@ -335,6 +346,28 @@ void main() async {
   }, permanent: true);
 
   // ==========================================================================
+  // 启动 MediaProxy 代理服务（固定端口 5575）
+  // 说明：代理服务独立运行在固定端口 5575，任何播放器/代码只需访问
+  //      http://127.0.0.1:5575/proxy?url=xxx 即可使用，无需额外调用。
+  // ==========================================================================
+  try {
+    mediaProxyServer = MediaProxyServer(
+      port: 5575,
+      log: (msg) {
+        debugPrint(msg);
+        if (Get.isRegistered<SystemLogService>()) {
+          Get.find<SystemLogService>().info(msg);
+        }
+      },
+    );
+    await mediaProxyServer!.start();
+    debugPrint('[MediaProxy] 已启动: http://127.0.0.1:5575/proxy');
+  } catch (e) {
+    debugPrint('[MediaProxy] 启动失败: $e');
+    mediaProxyServer = null;
+  }
+
+  // ==========================================================================
   // 第十步：启动应用
   // ==========================================================================
   WidgetsBinding.instance.addObserver(_AppLifecycleObserver());
@@ -376,6 +409,12 @@ class _WindowListener extends WindowListener {
     // 避免 exitCode 回调误触发重启，形成幽灵进程
     try {
       await NodeJSService.instance.shutdown();
+    } catch (_) {}
+
+    // 停止 MediaProxy
+    try {
+      await mediaProxyServer?.stop();
+      mediaProxyServer = null;
     } catch (_) {}
   }
 

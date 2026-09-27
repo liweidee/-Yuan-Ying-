@@ -383,27 +383,27 @@ class _SettingSheetState extends State<SettingSheet> {
               },
             ),
             const SizedBox(width: 10),
-            _buildActionChip(
-              icon: Icons.headphones,
-              label: '听视频',
-              selected: playerController.onlyPlayAudio.value,
-              onTap: () {
-                playerController.onlyPlayAudio.value =
-                    !playerController.onlyPlayAudio.value;
-                controller.playerInit();
-                setState(() {});
-              },
-            ),
-            const SizedBox(width: 10),
-            _buildActionChip(
-              icon: Icons.play_circle_outline,
-              label: '后台播放',
-              selected: playerController.continuePlayInBackground.value,
-              onTap: () {
-                playerController.setContinuePlayInBackground();
-                setState(() {});
-              },
-            ),
+            if (!isFvpEngine) ...[
+              _buildActionChip(
+                icon: Icons.headphones,
+                label: '听视频',
+                selected: playerController.onlyPlayAudio.value,
+                onTap: () {
+                  playerController.setOnlyPlayAudio();
+                  setState(() {});
+                },
+              ),
+              const SizedBox(width: 10),
+              _buildActionChip(
+                icon: Icons.play_circle_outline,
+                label: '后台播放',
+                selected: playerController.continuePlayInBackground.value,
+                onTap: () {
+                  playerController.setContinuePlayInBackground();
+                  setState(() {});
+                },
+              ),
+            ],
           ],
         ),
       ),
