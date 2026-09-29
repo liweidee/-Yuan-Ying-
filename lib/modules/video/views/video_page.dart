@@ -189,30 +189,44 @@ class _DetailPageState extends State<DetailPage>
             ],
           ),
         ),
-        // 居中播放按钮（纯白色，无主题颜色）
+        // 居中播放按钮 + 失败错误提示
         Center(
-          child: IconButton(
-            iconSize: 80,
-            // onPressed: () {
-            //   if (controller.currentPlayUrl.value.isNotEmpty) {
-            //     controller.autoPlay.value = true;
-            //     controller.playerController.play();
-            //   } else {
-            //     controller.autoPlay.value = true;
-            //     controller.reloadCurrentEpisode();
-            //   }
-            // },
-            onPressed: () {
-              controller.autoPlay.value = true;
-              controller.reloadCurrentEpisode(seekTo: controller.savedPosition);
-            },
-            icon: Icon(
-              Icons.play_circle_filled,
-              size: 80,
-              color: Colors.white.withOpacity(0.9),
-            ),
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                iconSize: 80,
+                onPressed: () {
+                  controller.autoPlay.value = true;
+                  controller.reloadCurrentEpisode(seekTo: controller.savedPosition);
+                },
+                icon: Icon(
+                  Icons.play_circle_filled,
+                  size: 80,
+                  color: Colors.white.withOpacity(0.9),
+                ),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+              ),
+              // ===== 播放失败时显示错误信息 =====
+              Obx(() {
+                if (!controller.playFailed.value) {
+                  return const SizedBox.shrink();
+                }
+                return Padding(
+                  padding: const EdgeInsets.only(top: 12, left: 40, right: 40),
+                  child: Text(
+                    controller.playErrorMessage.value,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 13,
+                      height: 1.4,
+                    ),
+                  ),
+                );
+              }),
+            ],
           ),
         ),
       ],

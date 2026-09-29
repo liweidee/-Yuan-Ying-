@@ -156,6 +156,33 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
   /// 自动播放状态（用于控制封面显示）
   final RxBool autoPlay = false.obs;
 
+  /// 播放失败状态（用于切集失败时回退到封面 + 错误提示）
+  final RxBool playFailed = false.obs;
+  final RxString playErrorMessage = ''.obs;
+
+  /// 统一处理播放失败：
+  /// - 关闭残留弹窗
+  /// - toast 提示用户
+  /// - 记录失败状态
+  /// - 把 autoPlay 拉回 false，触发 video_page 的封面 UI
+  /// - 清掉 dataStatus，避免 loading 卡死
+  void _handlePlayFailure(String message) {
+    SmartDialog.dismiss(force: true);
+    SmartDialog.showToast(message);
+    playFailed.value = true;
+    playErrorMessage.value = message;
+    autoPlay.value = false;
+    try {
+      playerController.dataStatus.value = DataStatus.none;
+    } catch (_) {}
+  }
+
+  /// 清除播放失败状态（每次开始新的播放前调用）
+  void _clearPlayFailure() {
+    if (playFailed.value) playFailed.value = false;
+    if (playErrorMessage.value.isNotEmpty) playErrorMessage.value = '';
+  }
+
   /// 保存离开页面时的播放进度
   Duration? savedPosition;
 
@@ -952,25 +979,27 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
   }
 
   /// 切集时的"立即反馈"：
-  /// 把 UI 切到"封面 + 播放按钮"状态，暂停旧播放器，让用户感觉点击即刻生效。
-  /// 
-  /// 关键点：
-  /// - autoPlay = false 会让 video_page.dart 里 plPlayer() 的 Obx 立即隐藏 PLVideoPlayer，
-  ///   显示 _buildManualPlayerUI（封面 + 播放按钮）
-  /// - 同时暂停旧播放器，避免旧音频继续出声
-  /// - 不 dispose 播放器，让 _playEpisode 里的 setDataSource 平滑换源
+  /// 暂停旧播放器并清空数据状态，让 UI 立即切到"加载中"。
+  ///
+  /// 注意（与旧实现的区别）：
+  /// - 旧实现把 autoPlay 置 false，导致 video_page 显示"封面 + 播放按钮"，
+  ///   但封面停留时间受网络影响（20ms~800ms），常出现"封面一闪而过"的闪烁；
+  /// - 新实现保持 autoPlay 为 true，让视频区始终是"黑底 + 加载中"，
+  ///   视觉上只有一次跳变（loading → 首帧），与专业播放器一致；
+  /// - 失败时由 _handlePlayFailure 主动把 autoPlay 拉回 false，
+  ///   从而显示封面 + 错误文字 + 重试按钮。
   Future<void> _switchToPendingState() async {
-    // 1. 立即切 UI 到"未播放"状态
-    autoPlay.value = false;
+    // 清掉上一次的失败状态（含 autoPlay 之外的所有失败 UI）
+    _clearPlayFailure();
 
-    // 2. 暂停当前播放器（不停源，只是静音停帧）
+    // 暂停当前播放器（不停源，只是静音停帧）
     try {
       if (playerController.playerStatus.value.isPlaying) {
         await playerController.pause();
       }
     } catch (_) {}
 
-    // 3. 清掉 dataStatus，让"正在加载"的 UI 从干净状态开始
+    // 清掉 dataStatus，让"正在加载"的 UI 从干净状态开始
     try {
       playerController.dataStatus.value = DataStatus.none;
     } catch (_) {}
@@ -984,6 +1013,9 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     bool autoPlay = true,
     Duration? seekTo,
   }) async {
+    // 每次开始新的播放尝试 → 清掉上一次的失败状态
+    _clearPlayFailure();
+
     _danmakuLoaded = false;
     _currentEpisode = episode;
     _currentSourceIndex = sourceIndex;
@@ -1007,8 +1039,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     try {
       final source = introController.getSource(sourceIndex);
       if (source == null) {
-        SmartDialog.dismiss();
-        SmartDialog.showToast('获取播放地址失败');
+        _handlePlayFailure('获取播放地址失败');
         return;
       }
 
@@ -1025,21 +1056,18 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
             pwd: pwd,
           );
           if (realDetail == null || realDetail.playSources.isEmpty) {
-            SmartDialog.dismiss();
-            SmartDialog.showToast('无法获取播放信息');
+            _handlePlayFailure('无法获取播放信息');
             return;
           }
           final firstSource = realDetail.playSources.first;
           if (firstSource.episodes.isEmpty) {
-            SmartDialog.dismiss();
-            SmartDialog.showToast('无法获取播放信息');
+            _handlePlayFailure('无法获取播放信息');
             return;
           }
           realPlayParams = firstSource.episodes.first.url;
           realFlag = firstSource.name;
         } catch (e) {
-          SmartDialog.dismiss();
-          SmartDialog.showToast('获取详情失败: $e');
+          _handlePlayFailure('获取详情失败: $e');
           return;
         }
       }
@@ -1051,8 +1079,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
       );
 
       if (playUrl == null) {
-        SmartDialog.dismiss();
-        SmartDialog.showToast('获取播放地址失败');
+        _handlePlayFailure('获取播放地址失败');
         return;
       }
 
@@ -1108,11 +1135,10 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
         if (result != null) {
           await _startPlay(result, autoPlay, seekTo: seekTo);
         } else {
-          if (isManualParser.value && currentParser.value != null) {
-            SmartDialog.showToast('${currentParser.value!.name} 解析失败');
-          } else {
-            SmartDialog.showToast('所有解析源均失败，请切换线路');
-          }
+          final msg = (isManualParser.value && currentParser.value != null)
+              ? '${currentParser.value!.name} 解析失败'
+              : '所有解析源均失败，请切换线路';
+          _handlePlayFailure(msg);
         }
         return;
       }
@@ -1139,14 +1165,14 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
               final relativePath = sniffUrl.startsWith('/') ? sniffUrl.substring(1) : sniffUrl;
               sniffUrl = baseUrl + relativePath;
             } else {
-              SmartDialog.showToast('无法获取播放地址');
+              _handlePlayFailure('无法获取播放地址');
               return;
             }
           }
         }
 
         if (sniffUrl == null || sniffUrl.isEmpty) {
-          SmartDialog.showToast('嗅探URL无效');
+          _handlePlayFailure('嗅探URL无效');
           return;
         }
 
@@ -1191,16 +1217,14 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
           );
           await _startPlay(sniffedPlayUrl, autoPlay, seekTo: seekTo);
         } else {
-          SmartDialog.showToast('嗅探失败，请尝试其他方式');
+          _handlePlayFailure('嗅探失败，请尝试其他方式');
         }
         return;
       }
 
-      SmartDialog.dismiss();
-      SmartDialog.showToast('未知的播放类型');
+      _handlePlayFailure('未知的播放类型');
     } catch (e) {
-      SmartDialog.dismiss();
-      SmartDialog.showToast('获取播放地址失败');
+      _handlePlayFailure('获取播放地址失败');
     }
   }
 
@@ -1267,7 +1291,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
 
     final defaultUrl = playUrl.defaultUrl;
     if (defaultUrl == null) {
-      SmartDialog.showToast('获取播放地址失败');
+      _handlePlayFailure('获取播放地址失败');
       return;
     }
 
