@@ -951,6 +951,31 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     }
   }
 
+  /// 切集时的"立即反馈"：
+  /// 把 UI 切到"封面 + 播放按钮"状态，暂停旧播放器，让用户感觉点击即刻生效。
+  /// 
+  /// 关键点：
+  /// - autoPlay = false 会让 video_page.dart 里 plPlayer() 的 Obx 立即隐藏 PLVideoPlayer，
+  ///   显示 _buildManualPlayerUI（封面 + 播放按钮）
+  /// - 同时暂停旧播放器，避免旧音频继续出声
+  /// - 不 dispose 播放器，让 _playEpisode 里的 setDataSource 平滑换源
+  Future<void> _switchToPendingState() async {
+    // 1. 立即切 UI 到"未播放"状态
+    autoPlay.value = false;
+
+    // 2. 暂停当前播放器（不停源，只是静音停帧）
+    try {
+      if (playerController.playerStatus.value.isPlaying) {
+        await playerController.pause();
+      }
+    } catch (_) {}
+
+    // 3. 清掉 dataStatus，让"正在加载"的 UI 从干净状态开始
+    try {
+      playerController.dataStatus.value = DataStatus.none;
+    } catch (_) {}
+  }
+
   /// 播放核心逻辑
   Future<void> _playEpisode(
     Episode episode, {
@@ -1695,6 +1720,10 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     // 切换剧集时重置为自动模式
     isManualParser.value = false;
 
+    // ===== 立即视觉反馈：先切到"封面 + 播放按钮"状态 =====
+    // 让用户点击后立刻看到反应，而不是旧视频继续播几秒。
+    await _switchToPendingState();
+
     await playEpisode(
       episode,
       sourceIndex: displayIdx,
@@ -1716,6 +1745,9 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
 
     // 上一集时重置为自动模式
     isManualParser.value = false;
+
+    // ===== 立即视觉反馈 =====
+    await _switchToPendingState();
 
     await playEpisode(
       episode,
@@ -1739,6 +1771,9 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
 
     // 下一集时重置为自动模式
     isManualParser.value = false;
+
+    // ===== 立即视觉反馈 =====
+    await _switchToPendingState();
 
     await playEpisode(
       episode,
@@ -2271,15 +2306,21 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     }
 
     try {
+      // ===== 关键：提前关闭整页 loading 并切到播放态 =====
+      // 原因：setDataSource 是 await 的，会一直等到 dataStatus 变成 loaded 才返回。
+      // 若在此之后才关闭整页 loading，视频区启动时 dataStatus 已是 loaded，
+      // dataStatus=loading 阶段被整页 loading 遮住，视频区的 loading overlay 永远看不到。
+      // 因此必须在 setDataSource 之前就关闭整页 loading，让视频区先渲染，
+      // 从而能捕获 setDataSource 里 dataStatus: none → loading → loaded 的完整变化。
       autoPlay.value = true;
+      isLoadingDetail.value = false;
+
       await playerController.setDataSource(
         dataSource,
         autoplay: true,
         seekTo: null,
         vodId: '直链播放',
       );
-      // ===== 播放器初始化完成后，关闭加载状态 =====
-      isLoadingDetail.value = false;
       await playerController.play();
       isPlaying.value = true;
 

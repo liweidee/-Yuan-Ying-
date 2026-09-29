@@ -105,7 +105,14 @@ class PlPlayerController {
   // ============================================================
 
   /// 切换播放器内核（运行时生效）
-  Future<void> switchEngine(PlayerEngineType newType) async {
+  Future<void> switchEngine(
+    PlayerEngineType newType, {
+    /// 是否在新引擎上恢复旧数据源。
+    /// - true（默认）：用于设置页切换内核——那里不会主动 reload，必须在这里恢复。
+    /// - false：用于播放页切换内核——调用方会自行 reloadCurrentEpisode，
+    ///          这里恢复反而会导致 loading 显示两次。
+    bool restoreData = true,
+  }) async {
     // 如果当前引擎不存在，直接创建新引擎并更新配置
     if (_engine == null) {
       PlayerPref.playerEngine = newType;
@@ -142,8 +149,8 @@ class PlPlayerController {
     _engine = _createEngine(newType);
     await _engine!.init();
 
-    // 如果有数据源，恢复状态
-    if (dataSource != null && params != null) {
+    // 如果有数据源，且调用方要求恢复，则恢复状态
+    if (restoreData && dataSource != null && params != null) {
       // 恢复播放（不自动播放，之后手动控制）
       await _engine!.setDataSource(
         dataSource,
@@ -158,8 +165,8 @@ class PlPlayerController {
         onInit: null,
         autoFullScreenFlag: params.autoFullScreenFlag,
       );
-      // 恢复音量
-      await _engine!.setVolume(volume);
+      // 恢复音量（不显示音量指示器，避免切换内核时闪出"音量 100%"提示）
+      await _engine!.setVolume(volume, showIndicator: false);
       // 恢复循环模式（setPlayRepeat 是 void，直接调用）
       _engine!.setPlayRepeat(repeat);
 

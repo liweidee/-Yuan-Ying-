@@ -1,5 +1,3 @@
-// lib/t4/services/drpy3_api_service.dart
-//
 // drpy3 专用 Service
 // - 引擎：flutter_js（Android 上是 QuickJS，iOS 上是 JavaScriptCore）
 // - 引擎文件：assets/js/lib/ 下的 5 个 JS
@@ -8,13 +6,15 @@
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show gzip;
+import 'dart:io' show gzip, HttpServer;
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_js/flutter_js.dart';
 import 'package:get/get.dart';
+import 'package:shelf/shelf.dart' as shelf;
+import 'package:shelf/shelf_io.dart' as shelf_io;
 
 import 'package:yuanying/t4/models/play_url.dart';
 import 'package:yuanying/t4/models/video_detail.dart';
@@ -37,6 +37,11 @@ class Drpy3ApiService implements ISpiderService {
   String? _pendingApiUrl;
   String? _pendingSiteKey;
 
+  // 当前源的 URL 基址（用于 loadAsset 解析相对路径）
+  // 走 sourceUrl 加载源文件时记下该 URL（含 query，如 ?pwd=xxx）；
+  // 内联源（inlineCode）没有基址，置 null。
+  String? _currentSourceBase;
+
   // ===== 切换锁 =====
   int _siteVersion = 0;
   Completer<void>? _siteReady;
@@ -46,6 +51,12 @@ class Drpy3ApiService implements ISpiderService {
   final Map<int, Completer<Map<String, dynamic>>> _stagePending = {};
   int _nextLoadId = 0;
   final Map<int, Completer<bool>> _loadPending = {};
+
+  // ===== 代理服务器（drpy3 proxy 通道）=====
+  HttpServer? _proxyServer;
+  int _proxyPort = 0;
+  int _nextProxyId = 0;
+  final Map<int, Completer<List<dynamic>>> _proxyPending = {};
 
   // ===== Dio =====
   final Dio _dio = Dio(BaseOptions(
@@ -100,6 +111,9 @@ class Drpy3ApiService implements ISpiderService {
       _injectTimers();
       _injectHostEnv();
 
+      // 启动代理 server（必须在 Runtime 构造前，因为 getProxy 需要端口号）
+      await _startProxyServer();
+
       for (final name in _loadOrder) {
         final code = await rootBundle.loadString('$_assetDir$name');
         final t0 = DateTime.now();
@@ -109,6 +123,9 @@ class Drpy3ApiService implements ISpiderService {
             '${DateTime.now().difference(t0).inMilliseconds}ms)');
       }
 
+      // 注入全局 fetch，供随源 JS（如 emscripten 胶水）使用
+      _injectGlobalFetch();
+
       // 主泵：每 8ms 排空一次 job 队列，推进 drpy3 的 async 链
       _pumpTimer?.cancel();
       _pumpTimer = Timer.periodic(const Duration(milliseconds: 8), (_) {
@@ -117,8 +134,9 @@ class Drpy3ApiService implements ISpiderService {
         } catch (_) {}
       });
 
-      // 构造 Runtime
-      final initResult = _rt!.evaluate(r'''
+      // 构造 Runtime（用普通字符串拼接，把 _proxyPort 注入到 getProxy 里）
+      final proxyUrl = 'http://127.0.0.1:$_proxyPort/proxy?do=js';
+      final initJs = r'''
         (function () {
           try {
             if (typeof DRPY3 === 'undefined') {
@@ -139,6 +157,10 @@ class Drpy3ApiService implements ISpiderService {
                   sendMessage('drpy_log', a.join(' '));
                 } catch (_) {}
               },
+              getProxy: function (isPublic) {
+                return '__PROXY_URL__';
+              },
+              loadAsset: globalThis.__host_loadAsset,
               engine:  'flutter_js',
               version: '0.1.5',
             });
@@ -151,7 +173,9 @@ class Drpy3ApiService implements ISpiderService {
             return JSON.stringify({ ok: false, err: String(e && e.message || e) });
           }
         })()
-      ''');
+      '''.replaceAll('__PROXY_URL__', proxyUrl);
+
+      final initResult = _rt!.evaluate(initJs);
 
       final initMap = jsonDecode(initResult.stringResult) as Map;
       if (initMap['ok'] != true) {
@@ -297,6 +321,68 @@ class Drpy3ApiService implements ISpiderService {
       };
     ''');
 
+    // loadAsset 桥（drpy3 wasm.js / 模块加载器需要）
+    // JS 侧 wasm.load('path') -> sendMessage('drpy_loadasset') -> Dart 侧 Dio 拉字节
+    // -> 分块 base64 回传 -> JS 侧分块解码后拼接为 Uint8Array 交给 wasm.js
+    //
+    // 分块原因：随源 wasm 资产可达数 MB，一次性通过 evaluate 传入会让
+    // QuickJS 在解析巨型字符串 + for-of 解码 base64 上被钉住，
+    // 进而阻塞 _pumpTimer，整条 async 链卡死。分块后每次量级 64KB，
+    // QuickJS 可快速处理并让出主线程。
+    _rt!.evaluate(r'''
+      globalThis.__host_loadAsset_pending__ = {};
+      globalThis.__host_loadAsset_next_id__ = 0;
+
+      globalThis.__host_loadAsset = function (path) {
+        return new Promise(function (resolve, reject) {
+          var id = globalThis.__host_loadAsset_next_id__++;
+          globalThis.__host_loadAsset_pending__[id] = {
+            resolve: resolve,
+            reject: reject,
+            chunks: []
+          };
+          try {
+            sendMessage('drpy_loadasset', JSON.stringify({ id: id, path: path }));
+          } catch (e) {
+            delete globalThis.__host_loadAsset_pending__[id];
+            reject('sendMessage failed: ' + e);
+          }
+        });
+      };
+
+      globalThis.__host_loadAsset_chunk = function (id, b64, isLast) {
+        var p = globalThis.__host_loadAsset_pending__[id];
+        if (!p) return;
+        try {
+          if (b64 && b64.length > 0) {
+            p.chunks.push(Uint8Array.fromBase64(b64));
+          }
+          if (isLast) {
+            var total = 0;
+            for (var i = 0; i < p.chunks.length; i++) total += p.chunks[i].length;
+            var out = new Uint8Array(total);
+            var off = 0;
+            for (var i = 0; i < p.chunks.length; i++) {
+              out.set(p.chunks[i], off);
+              off += p.chunks[i].length;
+            }
+            delete globalThis.__host_loadAsset_pending__[id];
+            p.resolve(out);
+          }
+        } catch (e) {
+          delete globalThis.__host_loadAsset_pending__[id];
+          p.reject('chunk decode failed: ' + e);
+        }
+      };
+
+      globalThis.__host_loadAsset_reject = function (id, errMsg) {
+        var p = globalThis.__host_loadAsset_pending__[id];
+        if (!p) return;
+        delete globalThis.__host_loadAsset_pending__[id];
+        p.reject(errMsg);
+      };
+    ''');
+
     _rt!.onMessage('drpy_req', (dynamic msg) async {
       try {
         final p = _asMap(msg);
@@ -315,6 +401,82 @@ class Drpy3ApiService implements ISpiderService {
         }
       } catch (e) {
         debugPrint('[drpy3] req parse error: $e');
+      }
+    });
+
+    // loadAsset 请求处理
+    // 相对路径（./ 或 ../ 开头，或非 http(s)）用 _currentSourceBase 做 resolve，
+    // 并继承 base 的 query（如 ?pwd=xxx），否则鉴权服务器会拒绝。
+    _rt!.onMessage('drpy_loadasset', (dynamic msg) async {
+      try {
+        final p = _asMap(msg);
+        final id = p['id'] as int;
+        final rawPath = (p['path'] as String?) ?? '';
+
+        String url = rawPath;
+        if (!rawPath.startsWith('http://') && !rawPath.startsWith('https://')) {
+          final base = _currentSourceBase;
+          if (base != null && base.isNotEmpty) {
+            final baseUri = Uri.parse(base);
+            final resolved = baseUri.resolve(rawPath);
+            // Uri.resolve 会丢弃 base 的 query，需要手动补回（rawPath 自带 ? 时不覆盖）
+            if (baseUri.hasQuery && !rawPath.contains('?')) {
+              url = resolved.replace(query: baseUri.query).toString();
+            } else {
+              url = resolved.toString();
+            }
+          } else {
+            debugPrint('[drpy3] loadAsset 无 base URL，无法解析相对路径: $rawPath');
+            _rt?.evaluate(
+              'globalThis.__host_loadAsset_reject($id, '
+              '${jsonEncode("无 base URL，无法解析相对路径: $rawPath")})',
+            );
+            return;
+          }
+        }
+
+        debugPrint('[drpy3] loadAsset: $rawPath -> $url');
+
+        final resp = await _dio.get<List<int>>(
+          url,
+          options: Options(responseType: ResponseType.bytes),
+        );
+        final bytes = resp.data ?? <int>[];
+        debugPrint('[drpy3] loadAsset resolved: ${bytes.length} bytes');
+
+        // 分块回传给 JS，避免一次性 evaluate 巨型字符串
+        // 64KB 是此处甜点：既避免 QuickJS 处理巨型字符串卡顿，
+        // 也不至于因为 evaluate 次数过多而让主线程承担额外调用开销。
+        //
+        // 分块之间 await Future.delayed(Duration.zero)，让出 Dart 事件循环：
+        //   - 允许 _pumpTimer 推进 QuickJS job 队列
+        //   - 避免 Dart 主线程被连续多次 evaluate 长时间占用
+        const chunkSize = 64 * 1024;
+        final total = bytes.length;
+        if (total == 0) {
+          _rt?.evaluate('globalThis.__host_loadAsset_chunk($id, "", true)');
+          return;
+        }
+        for (var off = 0; off < total; off += chunkSize) {
+          final end = (off + chunkSize > total) ? total : off + chunkSize;
+          final chunk = bytes.sublist(off, end);
+          final b64 = base64Encode(chunk);
+          final isLast = end >= total;
+          _rt?.evaluate(
+            'globalThis.__host_loadAsset_chunk($id, ${jsonEncode(b64)}, '
+            '${isLast ? 'true' : 'false'})',
+          );
+          await Future.delayed(Duration.zero);
+        }
+      } catch (e) {
+        debugPrint('[drpy3] loadAsset error: $e');
+        try {
+          final p = _asMap(msg);
+          final id = p['id'] as int;
+          _rt?.evaluate(
+            'globalThis.__host_loadAsset_reject($id, ${jsonEncode(e.toString())})',
+          );
+        } catch (_) {}
       }
     });
 
@@ -357,6 +519,71 @@ class Drpy3ApiService implements ISpiderService {
         debugPrint('[drpy3] load parse error: $e');
       }
     });
+
+    // drpy3 proxy 回环：server 收到请求 -> 调 JS proxy -> 五元组回传
+    _rt!.onMessage('drpy_proxy', (dynamic msg) {
+      try {
+        final p = _asMap(msg);
+        final id = p['id'] as int;
+        final c = _proxyPending.remove(id);
+        if (c == null || c.isCompleted) return;
+        if (p['ok'] == true) {
+          final d = p['data'];
+          c.complete(d is List ? d : <dynamic>[]);
+        } else {
+          c.complete([500, 'text/plain', 'Proxy error: ${p['error']}']);
+        }
+      } catch (e) {
+        debugPrint('[drpy3][proxy] callback parse error: $e');
+      }
+    });
+  }
+
+  // ============================================================
+  // 全局 fetch 注入
+  //
+  // 目的：drpy3 源里随源的 emscripten 胶水（如 _lib.cctv.worker.new.js）
+  //      需要 fetch 能力去请求同目录的 .wasm；
+  //      QuickJS 里没有 fetch，drpy3.js 的 makeShim 又把 XMLHttpRequest
+  //      实现成了空函数。这里注入一个基于 __host_loadAsset 的 fetch，
+  //      让 emscripten 至少能走到 WebAssembly.instantiate 才失败，
+  //      而不是在 XHR 上死等。
+  //
+  // 说明：QuickJS 编译不带 BigInt，WebAssembly 在 Windows/Android 上
+  //      无法可用，因此依赖 wasm 的源（如央视频加密 TS）在这些平台
+  //      上无法工作。fetch 注入保留是为了让流程能失败得清晰、不卡死。
+  // ============================================================
+  void _injectGlobalFetch() {
+    _rt!.evaluate(r'''
+      if (typeof globalThis.fetch !== 'function') {
+        globalThis.fetch = function (url) {
+          var urlStr = typeof url === 'string'
+              ? url
+              : (url && url.url) ? url.url : String(url);
+          return globalThis.__host_loadAsset(urlStr).then(function (bytes) {
+            return {
+              ok: true,
+              status: 200,
+              statusText: 'OK',
+              url: urlStr,
+              headers: {
+                get: function (name) {
+                  return String(name).toLowerCase() === 'content-length'
+                      ? String(bytes.length) : null;
+                },
+              },
+              arrayBuffer: function () {
+                return Promise.resolve(
+                  bytes.buffer.slice(bytes.byteOffset,
+                      bytes.byteOffset + bytes.byteLength));
+              },
+              bytes: function () { return Promise.resolve(bytes); },
+              clone: function () { return this; },
+            };
+          });
+        };
+      }
+    ''');
   }
 
   // ============================================================
@@ -573,6 +800,181 @@ class Drpy3ApiService implements ISpiderService {
   }
 
   // ============================================================
+  // 代理服务器（drpy3 proxy 通道）
+  // ============================================================
+
+  /// 启动本地 HTTP 服务器，用于 drpy3 proxy 回环
+  ///
+  /// 流程：
+  ///   1. drpy3 源内部 `getProxyUrl()` -> 返回 `http://127.0.0.1:{port}/proxy?do=js`
+  ///   2. 播放器请求该地址
+  ///   3. 本 server 收到 -> 解析 params -> 调 `__src.proxy(params)`
+  ///   4. 拿到五元组 [status, contentType, content, headers?, toBytes?]
+  ///   5. 按 toBytes 语义回包
+  Future<void> _startProxyServer() async {
+    if (_proxyServer != null) return;
+
+    final handler = shelf.Pipeline().addHandler((shelf.Request request) async {
+      if (request.url.path != 'proxy') {
+        return shelf.Response.notFound('Not Found');
+      }
+
+      try {
+        final params = request.url.queryParameters;
+        debugPrint('[drpy3][proxy] ${request.url}');
+
+        final result = await _callJsProxy(params);
+        return await _handleProxyResult(result, request);
+      } catch (e, st) {
+        debugPrint('[drpy3][proxy] error: $e\n$st');
+        return shelf.Response.internalServerError(body: 'Proxy error: $e');
+      }
+    });
+
+    // 动态端口，避免与 Drpy2 WebView bridge / MediaProxy(5575) 冲突
+    _proxyServer = await shelf_io.serve(handler, '127.0.0.1', 0);
+    _proxyPort = _proxyServer!.port;
+    debugPrint('[drpy3][proxy] 已启动: http://127.0.0.1:$_proxyPort/proxy');
+  }
+
+  /// 调用 JS 侧 `__src.proxy(params)`，通过 sendMessage('drpy_proxy') 回填
+  Future<List<dynamic>> _callJsProxy(Map<String, String> params) async {
+    if (!_ready || _rt == null) {
+      return [500, 'text/plain', 'Runtime not ready'];
+    }
+
+    final id = _nextProxyId++;
+    final completer = Completer<List<dynamic>>();
+    _proxyPending[id] = completer;
+
+    final paramsJson = jsonEncode(params);
+
+    _rt!.evaluate('''
+      (async () => {
+        try {
+          if (!globalThis.__src) {
+            sendMessage('drpy_proxy', JSON.stringify({
+              id: $id, ok: false, error: '__src not loaded'
+            }));
+            return;
+          }
+          const params = $paramsJson;
+          const r = await globalThis.__src.proxy(params);
+          sendMessage('drpy_proxy', JSON.stringify({
+            id: $id, ok: true,
+            data: Array.isArray(r) ? r : [404, 'text/plain', 'Not Found']
+          }));
+        } catch (e) {
+          sendMessage('drpy_proxy', JSON.stringify({
+            id: $id, ok: false, error: String((e && e.message) || e)
+          }));
+        }
+      })()
+    ''');
+
+    return completer.future.timeout(
+      const Duration(seconds: 30),
+      onTimeout: () {
+        _proxyPending.remove(id);
+        debugPrint('[drpy3][proxy] timeout (id=$id)');
+        return [504, 'text/plain', 'Proxy timeout'];
+      },
+    );
+  }
+
+  /// 按五元组 [status, contentType, content, headers?, toBytes?] 回包
+  ///
+  /// toBytes 语义（drpy-node 契约）：
+  ///   缺省 -> 文本（m3u8 重写场景）
+  ///   1    -> content 为 base64，解码后作为字节（TS 分片解密场景）
+  ///   2    -> content 为 URL，302 重定向
+  ///   3    -> content 为 URL，服务端流式 pipe（大码率直播，支持 Range）
+  Future<shelf.Response> _handleProxyResult(
+    List<dynamic> result,
+    shelf.Request request,
+  ) async {
+    if (result.length < 3) {
+      return shelf.Response.internalServerError(body: 'Invalid proxy result');
+    }
+
+    final status = (result[0] as num?)?.toInt() ?? 404;
+    final contentType = result[1]?.toString() ?? 'application/octet-stream';
+    final content = result[2];
+    final extraHeaders = result.length > 3 && result[3] is Map
+        ? Map<String, String>.from((result[3] as Map).map(
+            (k, v) => MapEntry(k.toString(), v.toString()),
+          ))
+        : <String, String>{};
+    final toBytes = result.length > 4 ? result[4] : null;
+
+    final headers = <String, String>{
+      'content-type': contentType,
+      'access-control-allow-origin': '*',
+      ...extraHeaders,
+    };
+
+    // toBytes=1：base64 -> 字节回包（TS 分片解密）
+    if (toBytes == 1 && content is String) {
+      try {
+        final bytes = base64Decode(content);
+        return shelf.Response(status, body: bytes, headers: headers);
+      } catch (e) {
+        return shelf.Response.internalServerError(body: 'base64 decode failed');
+      }
+    }
+
+    // toBytes=2：URL -> 302 重定向
+    if (toBytes == 2 && content is String) {
+      headers['location'] = content;
+      return shelf.Response(302, headers: headers);
+    }
+
+    // toBytes=3：URL -> 流式 pipe（透传 Range）
+    if (toBytes == 3 && content is String) {
+      try {
+        final reqHeaders = <String, String>{};
+        final range = request.headers['range'];
+        if (range != null) reqHeaders['range'] = range;
+
+        final resp = await _dio.get(
+          content,
+          options: Options(
+            responseType: ResponseType.stream,
+            headers: reqHeaders,
+            validateStatus: (_) => true,
+          ),
+        );
+
+        final streamHeaders = <String, String>{
+          ...headers,
+          'content-type': resp.headers.value('content-type') ?? contentType,
+        };
+        final contentRange = resp.headers.value('content-range');
+        if (contentRange != null) streamHeaders['content-range'] = contentRange;
+        final acceptRanges = resp.headers.value('accept-ranges');
+        if (acceptRanges != null) streamHeaders['accept-ranges'] = acceptRanges;
+
+        final stream = (resp.data as ResponseBody).stream;
+        return shelf.Response(
+          resp.statusCode ?? 200,
+          body: stream,
+          headers: streamHeaders,
+        );
+      } catch (e) {
+        debugPrint('[drpy3][proxy] pipe failed: $e');
+        return shelf.Response.internalServerError(body: 'pipe failed: $e');
+      }
+    }
+
+    // 默认：文本回包（m3u8 重写）
+    return shelf.Response(
+      status,
+      body: content is String ? content : content.toString(),
+      headers: headers,
+    );
+  }
+
+  // ============================================================
   // ISpiderService 接口实现
   // ============================================================
   @override
@@ -594,9 +996,7 @@ class Drpy3ApiService implements ISpiderService {
   /// 调用方式：fire-and-forget，不 await；Promise 由 _pumpTimer 推进完成。
   /// 异常处理：JS 侧 + Dart 侧双层 try/catch，绝不影响主流程。
   void _triggerSweepIfReady() {
-    // ─────────────────────────────────────────────────────
     // 前置检查：引擎未就绪时直接返回
-    // ─────────────────────────────────────────────────────
     // _ready 为 false 说明 JS 环境还没建立，调用会报错；
     // _rt 为 null 说明 Runtime 还没创建，同理跳过。
     if (!_ready || _rt == null) {
@@ -604,9 +1004,7 @@ class Drpy3ApiService implements ISpiderService {
     }
 
     try {
-      // ─────────────────────────────────────────────────────
       // 通过 evaluate 触发 JS 侧的 sweep
-      // ─────────────────────────────────────────────────────
       // 注意：这里不是直接调 __rt.sweep()，而是包一层 IIFE：
       //   1. 用 typeof 检查 __rt 和 sweep 方法是否存在（防止版本不匹配）
       //   2. JS 侧再套一层 try/catch（防止 JS 异常冒泡到 Dart）
@@ -615,7 +1013,7 @@ class Drpy3ApiService implements ISpiderService {
         (function() {
           try {
             if (globalThis.__rt && typeof globalThis.__rt.sweep === 'function') {
-              // 注意：sweep 是 async 方法，这里不等它完成；
+              // sweep 是 async 方法，这里不等它完成；
               // Promise 会被 _pumpTimer 推进，最终完成清理
               globalThis.__rt.sweep();
             }
@@ -718,6 +1116,8 @@ class Drpy3ApiService implements ISpiderService {
       String code;
       if (inlineCode != null) {
         code = inlineCode;
+        // 内联源没有 URL 基址，清空（wasm.load 相对路径将失败并报清晰错误）
+        _currentSourceBase = null;
       } else {
         DebugLogService.instance.logRequest(
           method: 'GET',
@@ -729,10 +1129,14 @@ class Drpy3ApiService implements ISpiderService {
           options: Options(responseType: ResponseType.bytes),
         );
         code = utf8.decode((resp.data ?? []), allowMalformed: true);
+        // 记录当前源的 URL（含 query，如 ?pwd=xxx），
+        // 供 loadAsset 解析相对路径 + 继承鉴权参数
+        _currentSourceBase = sourceUrl;
       }
 
       debugPrint('[drpy3] source code length=${code.length} from '
           '${sourceUrl ?? "(inline)"}');
+      debugPrint('[drpy3] source base = ${_currentSourceBase ?? "(none)"}');
 
       // 兼容 base64+gzip 加密源（可选）
       final trimmed = code.trimLeft();
@@ -902,6 +1306,11 @@ class Drpy3ApiService implements ISpiderService {
   }
 
   void dispose() {
+    // 关闭代理 server
+    _proxyServer?.close(force: true);
+    _proxyServer = null;
+    _proxyPending.clear();
+
     _pumpTimer?.cancel();
     _pumpTimer = null;
     _rt?.dispose();
@@ -911,5 +1320,7 @@ class Drpy3ApiService implements ISpiderService {
     _stagePending.clear();
     _loadPending.clear();
     _siteReady = null;
+    // 清掉 base 缓存，避免下次切换源时误用旧值
+    _currentSourceBase = null;
   }
 }

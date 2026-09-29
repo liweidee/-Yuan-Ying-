@@ -628,7 +628,12 @@ class _HeaderControlState extends State<HeaderControl> {
       // 重置状态
       playerController.dataStatus.value = DataStatus.none;
       
-      await playerController.switchEngine(newType);
+      // 只切换引擎，不恢复数据源
+      // （避免内部 setDataSource 触发一次 loading，下面 reloadCurrentEpisode 会完整加载）
+      await playerController.switchEngine(newType, restoreData: false);
+      
+      // 引擎切换完成，立即关弹窗，让后续 reload 的 loading 露出来
+      SmartDialog.dismiss();
       
       // 重新加载当前剧集（重新请求播放地址）
       await controller.reloadCurrentEpisode();
@@ -637,7 +642,6 @@ class _HeaderControlState extends State<HeaderControl> {
       controller.engineSwitchNotifier.value++;
       
       if (mounted) setState(() {});
-      SmartDialog.dismiss();
       SmartDialog.showToast('已切换到 ${newType == PlayerEngineType.fvp ? 'MDK' : 'MPV'} 内核');
     } catch (e) {
       SmartDialog.dismiss();

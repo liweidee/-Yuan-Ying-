@@ -35,7 +35,7 @@ class PlayUrl {
       });
     }
 
-    final qualities = _parseQualities(json['url']);
+    final qualities = _parseQualities(json['url'] ?? json['urls']);
 
     return PlayUrl(
       parse: json['parse'] ?? 0,

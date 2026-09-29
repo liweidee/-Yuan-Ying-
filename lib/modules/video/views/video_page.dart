@@ -21,6 +21,8 @@ import 'package:yuanying/plugin/pl_player/utils/fullscreen.dart';
 import 'package:yuanying/common/widgets/sliver/sliver_pinned_dynamic_header.dart';
 import 'package:extended_nested_scroll_view/extended_nested_scroll_view.dart';
 import 'package:yuanying/common/widgets/flutter/pop_scope.dart';
+import 'package:yuanying/common/assets.dart';
+import 'package:yuanying/plugin/pl_player/player_pref.dart';
 
 class DetailPage extends CommonSlidePage {
   const DetailPage({super.key, super.enableSlide = true});
@@ -217,6 +219,44 @@ class _DetailPageState extends State<DetailPage>
     );
   }
 
+  /// FVP 引擎首帧加载中提示（完全仿 MPV 风格）
+  ///
+  /// 样式对齐 plugin/pl_player/view.dart 里 PLVideoPlayer 的 loading overlay：
+  /// 黑底 + 径向渐变圆形 + 缓冲图标 + "加载中..."文字
+  Widget _buildLoadingOverlay() {
+    return Container(
+      color: Colors.black,
+      alignment: Alignment.center,
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: const BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: RadialGradient(
+            colors: [Colors.black26, Colors.transparent],
+          ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Image.asset(
+              Assets.buffering,
+              height: 25,
+              semanticLabel: '加载中',
+              color: Colors.white,
+            ),
+            const Text(
+              '加载中...',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget plPlayer({
     required double width,
     required double height,
@@ -272,6 +312,27 @@ class _DetailPageState extends State<DetailPage>
             return _buildManualPlayerUI(width: width, height: height);
           }
           return const SizedBox.shrink();
+        }),
+        // ===== FVP 引擎专用：首帧加载中提示（仿 MPV 风格） =====
+        Obx(() {
+          // 永远订阅 dataStatus —— 无论当前是什么内核，
+          //    这样切到 FVP 后 dataStatus 一变就会重建
+          final status = controller.playerController.dataStatus.value;
+
+          // 订阅 autoPlay，与内部判断一致
+          final autoPlay = controller.autoPlay.value;
+
+          // 引擎判断放最后（只影响输出，不影响订阅）
+          if (PlayerPref.playerEngine != PlayerEngineType.fvp) {
+            return const SizedBox.shrink();
+          }
+          if (!autoPlay) {
+            return const SizedBox.shrink();
+          }
+          if (status != DataStatus.loading) {
+            return const SizedBox.shrink();
+          }
+          return _buildLoadingOverlay();
         }),
       ],
     );
