@@ -96,7 +96,7 @@ class AlistFileListController extends GetxController {
     final fn = FocusNode();
     await SmartDialog.show(
       clickMaskDismiss: false,
-      backDismiss: false,
+      backType: SmartBackType.block,
       builder: (ctx) => _buildPasswordDialog(fn, ctx),
     );
   }

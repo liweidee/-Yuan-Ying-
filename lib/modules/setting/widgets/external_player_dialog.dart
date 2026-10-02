@@ -52,16 +52,12 @@ class _ExternalPlayerDialogState extends State<ExternalPlayerDialog> {
   /// 通过文件选择器选择可执行文件
   Future<void> _pickFile() async {
     try {
-      final result = await FilePicker.pickFiles(
+      final file = await FilePicker.pickFile(
         type: FileType.custom,
         allowedExtensions: ['exe'],
-        dialogTitle: '选择 ${_type.label} 可执行文件',
       );
-      if (result != null && result.files.isNotEmpty) {
-        final picked = result.files.first.path;
-        if (picked != null && picked.isNotEmpty) {
-          setState(() => _path = picked);
-        }
+      if (file != null && file.path != null && file.path!.isNotEmpty) {
+        setState(() => _path = file.path!);
       }
     } catch (e) {
       if (!mounted) return;

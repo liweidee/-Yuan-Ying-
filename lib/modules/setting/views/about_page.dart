@@ -291,7 +291,7 @@ class _AboutPageState extends State<AboutPage> {
               height: 150,
               excludeFromSemantics: true,
               cacheWidth: 150.cacheSize(context),
-              Assets.logo,
+              theme.brightness == Brightness.dark ? Assets.logoDark : Assets.logoLight,
               errorBuilder: (context, error, stackTrace) {
                 return Icon(Icons.broken_image, size: 150, color: Colors.grey);
               },

@@ -97,10 +97,10 @@ class Drpy2ApiService implements ISpiderService {
   // ============================================================
   Future<void> _loadFilesToMemory() async {
     final files = {
-      'drpy-core.min.js': 'assets/js/lib/drpy-core.min.js',
-      'inject.js': 'assets/js/lib/inject.js',
-      'drpy2.min.js': 'assets/js/lib/drpy2.min.js',
-      'htmlParser.js': 'assets/js/lib/htmlParser.js',
+      'drpy-core.min.js': 'assets/js/lib/drpy2_mod/drpy-core.min.js',
+      'inject.js': 'assets/js/lib/drpy2_mod/inject.js',
+      'drpy2.min.js': 'assets/js/lib/drpy2_mod/drpy2.min.js',
+      'htmlParser.js': 'assets/js/lib/drpy2_mod/htmlParser.js',
     };
 
     for (final entry in files.entries) {

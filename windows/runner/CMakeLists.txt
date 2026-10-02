@@ -70,3 +70,20 @@ add_custom_command(TARGET ${BINARY_NAME} POST_BUILD
         "${NODEJS_DST_DIR}/project"
     COMMENT "[NodeJS] 拷贝 runtime 和 project 到 ${NODEJS_DST_DIR}"
 )
+
+# ============================================================
+# 拷贝 qjs_ultra 引擎 DLL 到可执行文件旁
+# 目的：让 Release 目录自带 QJS 引擎，运行时无需显式指定路径
+# ============================================================
+set(QJS_DLL_SRC "${CMAKE_CURRENT_SOURCE_DIR}/quickjs_bridge.dll")
+
+if(NOT EXISTS "${QJS_DLL_SRC}")
+    message(FATAL_ERROR "[qjs_ultra] 缺少 ${QJS_DLL_SRC}，请从 qjs_ultra Releases 下载 build-20260928-d5c0160 的 Windows DLL")
+endif()
+
+add_custom_command(TARGET ${BINARY_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${QJS_DLL_SRC}"
+        "$<TARGET_FILE_DIR:${BINARY_NAME}>/quickjs_bridge.dll"
+    COMMENT "[qjs_ultra] 拷贝 quickjs_bridge.dll 到输出目录"
+)

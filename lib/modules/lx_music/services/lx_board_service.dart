@@ -25,10 +25,10 @@ class LxBoardService {
 
   /// 源显示名
   static const Map<String, String> sourceNames = {
-    'kw': '酷我',
-    'kg': '酷狗',
-    'tx': 'QQ',
-    'wy': '网易',
+    'kw': '小蜗音乐',
+    'kg': '小枸音乐',
+    'tx': '小秋音乐',
+    'wy': '小芸音乐',
   };
 
   // ==================== 榜单分类常量 ====================

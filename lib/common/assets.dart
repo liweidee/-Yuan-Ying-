@@ -7,4 +7,6 @@ abstract final class Assets {
   static const String error = 'assets/images/error.svg';
 
   static const String logo = 'assets/images/logo/logo.png';
+  static const String logoLight = 'assets/images/logo/logo_light.png';
+  static const String logoDark = 'assets/images/logo/logo_dark.png';
 }

@@ -28,6 +28,7 @@ import 'package:yuanying/utils/utils.dart';
 import 'package:material_design_icons_flutter/material_design_icons_flutter.dart';
 import 'package:yuanying/plugin/pl_player/models/hwdec_type.dart';
 import 'package:media_kit/media_kit.dart' hide Subtitle;
+import 'package:yuanying/core/routes/app_pages.dart';
 
 // ===== 播放地址信息卡片数据模型 =====
 class _AddressInfoItem {
@@ -241,10 +242,22 @@ class _SettingSheetState extends State<SettingSheet> {
       // ===== 离线缓存 =====
       _buildSettingItem(
         icon: Icons.download_outlined,
-        title: '离线缓存',
-        subtitle: '缓存视频到本地',
+        title: '缓存当前视频',
+        subtitle: '缓存当前播放的视频到本地',
         onTap: () {
-          SmartDialog.showToast('离线缓存功能开发中');
+          Navigator.pop(context);
+          controller.cacheCurrentVideo();
+        },
+      ),
+
+      // ===== 缓存管理 =====
+      _buildSettingItem(
+        icon: Icons.folder_special_outlined,
+        title: '缓存管理',
+        subtitle: '查看和管理已缓存的视频',
+        onTap: () {
+          Navigator.pop(context);
+          Get.toNamed(AppPages.cacheManager);
         },
       ),
 

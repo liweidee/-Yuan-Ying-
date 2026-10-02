@@ -10,7 +10,10 @@ import 'package:yuanying/modules/home/controllers/home_controller.dart';
 import 'package:yuanying/utils/storage.dart';
 import 'package:collection/collection.dart';
 import 'package:yuanying/t4/services/drpy2_api_service.dart';
+import 'package:yuanying/t4/services/qjs_drpy2_service.dart';
 import 'package:yuanying/t4/services/drpy3_api_service.dart';
+import 'package:yuanying/t4/services/qjs_drpy3_service.dart';
+import 'package:yuanying/utils/qjs_platform_helper.dart';
 import 'package:yuanying/t4/services/i_spider_service.dart';
 import 'package:yuanying/t4/services/xbpq_service.dart';
 import 'package:yuanying/t4/services/xyq_service.dart';
@@ -29,8 +32,33 @@ import 'package:yuanying/services/catvod_log_service.dart';
 
 class SourceManager extends GetxController {
   final T4ApiService _apiService = Get.find<T4ApiService>();
-  final Drpy2ApiService _drpy2Service = Get.find<Drpy2ApiService>();
-  final Drpy3ApiService _drpy3Service = Get.find<Drpy3ApiService>();
+  // final Drpy2ApiService _drpy2Service = Get.find<Drpy2ApiService>();
+  // final Drpy3ApiService _drpy3Service = Get.find<Drpy3ApiService>();
+
+  final Drpy2ApiService _drpy2Legacy = Get.find<Drpy2ApiService>();
+  final QjsDrpy2Service _qjsDrpy2 = Get.find<QjsDrpy2Service>();
+
+  ISpiderService get _drpy2Service =>
+      QjsPlatformHelper.isSupported ? _qjsDrpy2 : _drpy2Legacy;
+
+  Future<bool> _ensureDrpy2Ready() async {
+    if (QjsPlatformHelper.isSupported) return _qjsDrpy2.ensureInitialized();
+    return _drpy2Legacy.ensureInitialized();
+  }
+
+  final Drpy3ApiService _drpy3Legacy = Get.find<Drpy3ApiService>();
+  final QjsDrpy3Service _qjsDrpy3 = Get.find<QjsDrpy3Service>();
+
+  ISpiderService get _drpy3Service =>
+      QjsPlatformHelper.isSupported ? _qjsDrpy3 : _drpy3Legacy;
+
+  /// 按平台分发 ensureInitialized 调用
+  Future<bool> _ensureDrpy3Ready() async {
+    if (QjsPlatformHelper.isSupported) {
+      return _qjsDrpy3.ensureInitialized();
+    }
+    return _drpy3Legacy.ensureInitialized();
+  }
 
   final RxList<Map<String, dynamic>> remoteSites = <Map<String, dynamic>>[].obs;
   final RxList<Map<String, dynamic>> remoteParses = <Map<String, dynamic>>[].obs;
@@ -986,8 +1014,34 @@ class SourceManager extends GetxController {
     }
   }
 
+  // Future<void> _switchToDrpy2Site(Map<String, dynamic> site) async {
+  //   final ok = await _drpy2Service.ensureInitialized();
+  //   if (!ok) {
+  //     print('[SourceManager] drpy2 init failed, cannot switch to drpy2 site');
+  //     return;
+  //   }
+  //   _drpy2Service.switchSite(
+  //     site['api']?.toString() ?? '',
+  //     site['key']?.toString() ?? '',
+  //     ext: site['ext'],
+  //   );
+  // }
+
+  // Future<void> _switchToDrpy3Site(Map<String, dynamic> site) async {
+  //   final ok = await _drpy3Service.ensureInitialized();
+  //   if (!ok) {
+  //     print('[SourceManager] drpy3 init failed, cannot switch to drpy3 site');
+  //     return;
+  //   }
+  //   _drpy3Service.switchSite(
+  //     site['api']?.toString() ?? '',
+  //     site['key']?.toString() ?? '',
+  //     ext: site['ext'],
+  //   );
+  // }
+
   Future<void> _switchToDrpy2Site(Map<String, dynamic> site) async {
-    final ok = await _drpy2Service.ensureInitialized();
+    final ok = await _ensureDrpy2Ready();
     if (!ok) {
       print('[SourceManager] drpy2 init failed, cannot switch to drpy2 site');
       return;
@@ -1000,7 +1054,7 @@ class SourceManager extends GetxController {
   }
 
   Future<void> _switchToDrpy3Site(Map<String, dynamic> site) async {
-    final ok = await _drpy3Service.ensureInitialized();
+    final ok = await _ensureDrpy3Ready();
     if (!ok) {
       print('[SourceManager] drpy3 init failed, cannot switch to drpy3 site');
       return;

@@ -10,7 +10,7 @@ import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:get/get.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
-import 'package:video_player/video_player.dart';
+import 'package:video_player/video_player.dart' hide VideoTrack, SubtitleTrack;
 import 'package:fvp/fvp.dart' as fvp;
 
 import '../models/data_source.dart';

@@ -79,6 +79,8 @@ import 'package:yuanying/modules/lx_music/views/lx_favorites_page.dart';
 import 'package:yuanying/modules/lx_music/views/lx_recent_page.dart';
 import 'package:yuanying/modules/lx_music/views/lx_playlist_page.dart';
 
+import 'package:yuanying/modules/download/views/cache_manager_page.dart';
+
 
 class AppPages {
   static const String initial = '/';
@@ -163,6 +165,8 @@ class AppPages {
   static const String lxFavorites = '/lx_favorites';
   static const String lxRecent = '/lx_recent';
   static const String lxPlaylist = '/lx_playlist';
+
+  static const String cacheManager = '/cache_manager';
 
   static final List<GetPage> routes = [
     GetPage(name: initial, page: () => const MainPage()),
@@ -326,5 +330,7 @@ class AppPages {
     GetPage(name: lxFavorites, page: () => const LxFavoritesPage()),
     GetPage(name: lxRecent, page: () => const LxRecentPage()),
     GetPage(name: lxPlaylist, page: () => const LxPlaylistPage()),
+
+    GetPage(name: cacheManager, page: () => const CacheManagerPage()),
   ];
 }

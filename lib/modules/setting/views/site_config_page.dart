@@ -404,13 +404,12 @@ class SiteConfigPage extends StatelessWidget {
   Future<void> _restoreFromFile(BuildContext context, SiteConfigController controller) async {
     if (!await _checkStoragePermission(context)) return;
     try {
-      final result = await FilePicker.pickFile(
+      final file = await FilePicker.pickFile(
         type: FileType.custom,
         allowedExtensions: ['json', 'txt'],
       );
-      if (result == null) return;
-      final file = result.xFile;
-      final content = await file.readAsString();
+      if (file == null) return;
+      final content = utf8.decode(await file.readAsBytes());
       final jsonData = jsonDecode(content);
       if (jsonData is! List) {
         SmartDialog.showToast('文件内容格式错误：期望数组格式');
@@ -699,14 +698,13 @@ class SiteConfigPage extends StatelessWidget {
   void _importFromLocalFile(BuildContext context, SiteConfigController controller) async {
     if (!await _checkStoragePermission(context)) return;
     try {
-      final result = await FilePicker.pickFile(
+      final file = await FilePicker.pickFile(
         type: FileType.custom,
         allowedExtensions: ['json', 'txt'],
       );
-      if (result == null) return;
+      if (file == null) return;
 
-      final file = result.xFile;
-      final content = await file.readAsString();
+      final content = utf8.decode(await file.readAsBytes());
       final jsonData = jsonDecode(content);
 
       if (jsonData is! Map<String, dynamic>) {
@@ -865,14 +863,13 @@ class SiteConfigPage extends StatelessWidget {
     if (!await _checkStoragePermission(context)) return;
 
     try {
-      final result = await FilePicker.pickFile(
+      final file = await FilePicker.pickFile(
         type: FileType.custom,
         allowedExtensions: ['json', 'txt'],
       );
-      if (result == null) return;
+      if (file == null) return;
 
-      final file = result.xFile;
-      final content = await file.readAsString();
+      final content = utf8.decode(await file.readAsBytes());
       final jsonData = jsonDecode(content);
 
       if (jsonData is! Map<String, dynamic>) {
@@ -890,7 +887,7 @@ class SiteConfigPage extends StatelessWidget {
 
       final baseName = file.name.split('.').first;
       nameController.text = baseName;
-      apiController.text = file.path;
+      apiController.text = file.path ?? '';
 
       SmartDialog.showToast('已加载本地配置文件');
     } catch (e) {
@@ -1070,22 +1067,18 @@ class SiteConfigPage extends StatelessWidget {
                               ? ['json', 'txt']
                               : ['zip'];
 
-                          final result = await FilePicker.pickFiles(
+                          final file = await FilePicker.pickFile(
                             type: FileType.custom,
                             allowedExtensions: extensions,
                           );
-                          if (result != null) {
-                            final file = result.files.first;
-                            if (file.path != null) {
-                              setState(() {
-                                apiController.text = file.path!;
-                                if (nameController.text.isEmpty) {
-                                  nameController.text = file.name
-                                      .replaceAll(RegExp(r'\.[^.]+$'), '');
-                                }
-                              });
-                              SmartDialog.showToast('已选择文件: ${file.name}');
-                            }
+                          if (file != null && file.path != null) {
+                            setState(() {
+                              apiController.text = file.path!;
+                              if (nameController.text.isEmpty) {
+                                nameController.text = file.name.replaceAll(RegExp(r'\.[^.]+$'), '');
+                              }
+                            });
+                            SmartDialog.showToast('已选择文件: ${file.name}');
                           }
                         },
                         child: Container(

@@ -28,9 +28,10 @@ class PlayerCard extends StatefulWidget {
   State<PlayerCard> createState() => PlayerCardState();
 }
 
-class PlayerCardState extends State<PlayerCard> with SingleTickerProviderStateMixin {
+class PlayerCardState extends State<PlayerCard>
+    with SingleTickerProviderStateMixin {
   late PageController _pageController;
-  int _currentPage = 0;
+  final RxInt _currentPage = 0.obs;
   final RxBool _isLike = false.obs;
 
   @override
@@ -39,7 +40,6 @@ class PlayerCardState extends State<PlayerCard> with SingleTickerProviderStateMi
     _pageController = PageController(initialPage: 0);
     _loadFavoriteStatus();
 
-    // 渠道 / 歌曲切换时刷新收藏状态
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final controller = Get.find<MusicPlayerController>();
@@ -83,7 +83,6 @@ class PlayerCardState extends State<PlayerCard> with SingleTickerProviderStateMi
       return;
     }
 
-    // 洛雪渠道：走洛雪收藏
     if (controller.isLxChannel) {
       await _toggleLxLike(vodId, controller);
       return;
@@ -120,11 +119,9 @@ class PlayerCardState extends State<PlayerCard> with SingleTickerProviderStateMi
       _isLike.value = true;
       ToastUtils.show('已收藏');
     }
-    // 通知其他界面刷新
     controller.notifyFavoriteChanged();
   }
 
-  /// 洛雪渠道收藏切换
   Future<void> _toggleLxLike(
       String vodId, MusicPlayerController controller) async {
     try {
@@ -157,7 +154,6 @@ class PlayerCardState extends State<PlayerCard> with SingleTickerProviderStateMi
     }
   }
 
-  /// 洛雪：添加到歌单
   void _lxAddToPlaylist() {
     final music = LxPlayerHelper.currentLxMusic;
     if (music == null) {
@@ -167,7 +163,6 @@ class PlayerCardState extends State<PlayerCard> with SingleTickerProviderStateMi
     LxPlaylistHelper.showAddToPlaylistSheet(context, music);
   }
 
-  /// 洛雪：下载
   Future<void> _lxDownload() async {
     final music = LxPlayerHelper.currentLxMusic;
     if (music == null) {
@@ -177,8 +172,7 @@ class PlayerCardState extends State<PlayerCard> with SingleTickerProviderStateMi
 
     try {
       SmartDialog.showToast('正在获取下载地址...');
-      final url =
-          await LxMusicUrlService.instance.getMusicUrl(music: music);
+      final url = await LxMusicUrlService.instance.getMusicUrl(music: music);
       if (url == null || url.isEmpty) {
         SmartDialog.showToast('无法获取下载地址');
         return;
@@ -195,9 +189,11 @@ class PlayerCardState extends State<PlayerCard> with SingleTickerProviderStateMi
     }
   }
 
-  void _goToLyrics() {
+  /// 切换封面页 / 歌词页
+  void _toggleLyricPage() {
+    final target = _currentPage.value == 0 ? 1 : 0;
     _pageController.animateToPage(
-      1,
+      target,
       duration: const Duration(milliseconds: 300),
       curve: Curves.easeInOut,
     );
@@ -217,14 +213,16 @@ class PlayerCardState extends State<PlayerCard> with SingleTickerProviderStateMi
           spacing: 8,
           runSpacing: 8,
           children: speeds.map((speed) {
-            final isSelected = (controller.speed.value - speed).abs() < 0.01;
+            final isSelected =
+                (controller.speed.value - speed).abs() < 0.01;
             return GestureDetector(
               onTap: () {
                 controller.setSpeed(speed);
                 Navigator.pop(context);
               },
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 decoration: BoxDecoration(
                   color: isSelected
                       ? colorScheme.primary
@@ -234,7 +232,9 @@ class PlayerCardState extends State<PlayerCard> with SingleTickerProviderStateMi
                 child: Text(
                   '${speed}x',
                   style: TextStyle(
-                    color: isSelected ? colorScheme.onPrimary : colorScheme.onSurface,
+                    color: isSelected
+                        ? colorScheme.onPrimary
+                        : colorScheme.onSurface,
                   ),
                 ),
               ),
@@ -270,42 +270,50 @@ class PlayerCardState extends State<PlayerCard> with SingleTickerProviderStateMi
         return Container(
           decoration: BoxDecoration(
             color: colorScheme.surface,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(16)), // 只保留顶部圆角
+            borderRadius:
+                const BorderRadius.vertical(top: Radius.circular(16)),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               const SizedBox(height: 8),
               const Center(
-                child: Text('定时关闭', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
+                child: Text('定时关闭',
+                    style: TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.w500)),
               ),
               const SizedBox(height: 4),
               ...presetOptions.map(
                 (option) => ListTile(
                   dense: true,
-                  leading: Icon(option['icon'] as IconData, size: 20, color: colorScheme.primary),
+                  leading: Icon(option['icon'] as IconData,
+                      size: 20, color: colorScheme.primary),
                   onTap: () {
                     Navigator.pop(context);
                     controller.setTimer(option['value'] as int);
                   },
-                  title: Text(option['label'] as String, style: const TextStyle(fontSize: 14)),
+                  title: Text(option['label'] as String,
+                      style: const TextStyle(fontSize: 14)),
                   trailing: Obx(() {
                     final current = controller.timerMinutes.value;
                     final selected = (current == option['value']);
                     return selected
-                        ? Icon(Icons.done, size: 20, color: colorScheme.primary)
+                        ? Icon(Icons.done,
+                            size: 20, color: colorScheme.primary)
                         : const SizedBox.shrink();
                   }),
                 ),
               ),
               ListTile(
                 dense: true,
-                leading: Icon(Icons.edit, size: 20, color: colorScheme.primary),
+                leading: Icon(Icons.edit,
+                    size: 20, color: colorScheme.primary),
                 onTap: () {
                   Navigator.pop(context);
                   _showCustomTimerPicker(context);
                 },
-                title: const Text('自定义', style: TextStyle(fontSize: 14)),
+                title:
+                    const Text('自定义', style: TextStyle(fontSize: 14)),
               ),
               const SizedBox(height: 4),
             ],
@@ -315,7 +323,6 @@ class PlayerCardState extends State<PlayerCard> with SingleTickerProviderStateMi
     );
   }
 
-  // ===== 自定义时间选择器 =====
   void _showCustomTimerPicker(BuildContext context) {
     final controller = Get.find<MusicPlayerController>();
     int currentMinutes = controller.timerMinutes.value;
@@ -329,7 +336,8 @@ class PlayerCardState extends State<PlayerCard> with SingleTickerProviderStateMi
       initialEntryMode: TimePickerEntryMode.inputOnly,
       initialTime: TimeOfDay(hour: hour, minute: minute),
       builder: (context, child) => MediaQuery(
-        data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: true),
+        data: MediaQuery.of(context)
+            .copyWith(alwaysUse24HourFormat: true),
         child: child!,
       ),
     ).then((time) {
@@ -344,7 +352,7 @@ class PlayerCardState extends State<PlayerCard> with SingleTickerProviderStateMi
     });
   }
 
-  // ===== 跳过片头片尾  =====
+  // ===== 跳过片头片尾 =====
   void _showSkipDialog(BuildContext context) {
     final controller = Get.find<MusicPlayerController>();
     final colorScheme = Theme.of(context).colorScheme;
@@ -361,12 +369,14 @@ class PlayerCardState extends State<PlayerCard> with SingleTickerProviderStateMi
             void updateStart(int value) {
               setState(() => localStart = value);
             }
+
             void updateEnd(int value) {
               setState(() => localEnd = value);
             }
 
             return Dialog(
-              insetPadding: const EdgeInsets.symmetric(horizontal: 20),
+              insetPadding:
+                  const EdgeInsets.symmetric(horizontal: 20),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
@@ -395,20 +405,23 @@ class PlayerCardState extends State<PlayerCard> with SingleTickerProviderStateMi
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 16),
-
-                    // 片头行
                     Row(
                       children: [
-                        const SizedBox(width: 44, child: Text('片头:', style: TextStyle(fontSize: 14))),
+                        const SizedBox(
+                            width: 44,
+                            child: Text('片头:',
+                                style: TextStyle(fontSize: 14))),
                         Expanded(
                           child: Slider(
                             min: 0,
                             max: 300,
                             divisions: 60,
                             value: localStart.toDouble(),
-                            onChanged: (val) => updateStart(val.round()),
+                            onChanged: (val) =>
+                                updateStart(val.round()),
                             activeColor: colorScheme.primary,
-                            inactiveColor: colorScheme.onSurface.withOpacity(0.1),
+                            inactiveColor: colorScheme.onSurface
+                                .withOpacity(0.1),
                           ),
                         ),
                         SizedBox(
@@ -422,11 +435,12 @@ class PlayerCardState extends State<PlayerCard> with SingleTickerProviderStateMi
                       ],
                     ),
                     const SizedBox(height: 12),
-
-                    // 片尾行
                     Row(
                       children: [
-                        const SizedBox(width: 44, child: Text('片尾:', style: TextStyle(fontSize: 14))),
+                        const SizedBox(
+                            width: 44,
+                            child: Text('片尾:',
+                                style: TextStyle(fontSize: 14))),
                         Expanded(
                           child: Slider(
                             min: 0,
@@ -435,7 +449,8 @@ class PlayerCardState extends State<PlayerCard> with SingleTickerProviderStateMi
                             value: localEnd.toDouble(),
                             onChanged: (val) => updateEnd(val.round()),
                             activeColor: colorScheme.primary,
-                            inactiveColor: colorScheme.onSurface.withOpacity(0.1),
+                            inactiveColor: colorScheme.onSurface
+                                .withOpacity(0.1),
                           ),
                         ),
                         SizedBox(
@@ -449,24 +464,26 @@ class PlayerCardState extends State<PlayerCard> with SingleTickerProviderStateMi
                       ],
                     ),
                     const SizedBox(height: 16),
-
-                    // 预设按钮网格（使用 Wrap 替代 GridView，彻底避免布局异常）
                     Wrap(
                       spacing: 12,
                       runSpacing: 12,
                       alignment: WrapAlignment.center,
                       children: [
-                        _buildPresetButton('片头30s', () => updateStart(30), colorScheme),
-                        _buildPresetButton('片头60s', () => updateStart(60), colorScheme),
-                        _buildPresetButton('片头90s', () => updateStart(90), colorScheme),
-                        _buildPresetButton('片尾30s', () => updateEnd(30), colorScheme),
-                        _buildPresetButton('片尾60s', () => updateEnd(60), colorScheme),
-                        _buildPresetButton('片尾90s', () => updateEnd(90), colorScheme),
+                        _buildPresetButton(
+                            '片头30s', () => updateStart(30), colorScheme),
+                        _buildPresetButton(
+                            '片头60s', () => updateStart(60), colorScheme),
+                        _buildPresetButton(
+                            '片头90s', () => updateStart(90), colorScheme),
+                        _buildPresetButton(
+                            '片尾30s', () => updateEnd(30), colorScheme),
+                        _buildPresetButton(
+                            '片尾60s', () => updateEnd(60), colorScheme),
+                        _buildPresetButton(
+                            '片尾90s', () => updateEnd(90), colorScheme),
                       ],
                     ),
                     const SizedBox(height: 16),
-
-                    // 底部操作栏
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceAround,
                       children: [
@@ -477,19 +494,28 @@ class PlayerCardState extends State<PlayerCard> with SingleTickerProviderStateMi
                               localEnd = 0;
                             });
                           },
-                          child: Text('清除', style: TextStyle(color: colorScheme.primary)),
+                          child: Text('清除',
+                              style: TextStyle(
+                                  color: colorScheme.primary)),
                         ),
                         TextButton(
-                          onPressed: () => Navigator.of(dialogContext).pop(),
-                          child: Text('取消', style: TextStyle(color: colorScheme.primary)),
+                          onPressed: () =>
+                              Navigator.of(dialogContext).pop(),
+                          child: Text('取消',
+                              style: TextStyle(
+                                  color: colorScheme.primary)),
                         ),
                         TextButton(
                           onPressed: () {
-                            controller.skipStartDuration.value = localStart;
-                            controller.skipEndDuration.value = localEnd;
+                            controller.skipStartDuration.value =
+                                localStart;
+                            controller.skipEndDuration.value =
+                                localEnd;
                             final pos = controller.position;
-                            if (localStart > 0 && pos.inSeconds < localStart) {
-                              controller.seek(Duration(seconds: localStart));
+                            if (localStart > 0 &&
+                                pos.inSeconds < localStart) {
+                              controller.seek(
+                                  Duration(seconds: localStart));
                             }
                             Navigator.of(dialogContext).pop();
                           },
@@ -513,13 +539,15 @@ class PlayerCardState extends State<PlayerCard> with SingleTickerProviderStateMi
     );
   }
 
-  Widget _buildPresetButton(String label, VoidCallback onTap, ColorScheme colorScheme) {
+  Widget _buildPresetButton(
+      String label, VoidCallback onTap, ColorScheme colorScheme) {
     return OutlinedButton(
       onPressed: onTap,
       style: OutlinedButton.styleFrom(
         padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
         side: BorderSide(color: colorScheme.outline.withOpacity(0.3)),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8)),
       ),
       child: Text(
         label,
@@ -528,7 +556,6 @@ class PlayerCardState extends State<PlayerCard> with SingleTickerProviderStateMi
     );
   }
 
-  // ===== 倍速按钮（图标） =====
   Widget _buildSpeedButton(BuildContext context) {
     final controller = Get.find<MusicPlayerController>();
     final colorScheme = Theme.of(context).colorScheme;
@@ -569,7 +596,8 @@ class PlayerCardState extends State<PlayerCard> with SingleTickerProviderStateMi
                   ),
                 );
               }
-              return Container(color: colorScheme.surfaceContainerHighest);
+              return Container(
+                  color: colorScheme.surfaceContainerHighest);
             },
           ),
           Positioned.fill(
@@ -584,7 +612,8 @@ class PlayerCardState extends State<PlayerCard> with SingleTickerProviderStateMi
                 Expanded(
                   child: PageView(
                     controller: _pageController,
-                    onPageChanged: (index) => setState(() => _currentPage = index),
+                    onPageChanged: (index) =>
+                        _currentPage.value = index,
                     children: const [
                       _VinylPage(),
                       LyricScroller(),
@@ -632,19 +661,21 @@ class PlayerCardState extends State<PlayerCard> with SingleTickerProviderStateMi
   Widget _buildPageIndicator(ColorScheme colorScheme) {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: List.generate(
-          2,
-          (index) => Container(
-            width: 8,
-            height: 8,
-            margin: const EdgeInsets.symmetric(horizontal: 4),
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: index == _currentPage
-                  ? colorScheme.primary
-                  : Colors.white.withOpacity(0.3),
+      child: Obx(
+        () => Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: List.generate(
+            2,
+            (index) => Container(
+              width: 8,
+              height: 8,
+              margin: const EdgeInsets.symmetric(horizontal: 4),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: index == _currentPage.value
+                    ? colorScheme.primary
+                    : Colors.white.withOpacity(0.3),
+              ),
             ),
           ),
         ),
@@ -652,109 +683,129 @@ class PlayerCardState extends State<PlayerCard> with SingleTickerProviderStateMi
     );
   }
 
+  // ============================================================
+  // 中间操作按钮区
+  //
+  // - 外层 SingleChildScrollView：窄屏时可横向滚动，避免溢出
+  // - 内层 ConstrainedBox：屏幕够宽时撑满并居中
+  // - 左右 padding 16：不完全贴边
+  // ============================================================
   Widget _buildTopActions(BuildContext context, ColorScheme colorScheme) {
     final controller = Get.find<MusicPlayerController>();
+    final screenWidth = MediaQuery.of(context).size.width;
 
-    return Container(
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      physics: const BouncingScrollPhysics(),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          // 歌词按钮 - 无歌词时置灰
-          Obx(() {
-            final hasLyric = controller.lyric.value.isNotEmpty;
-            return IconButton(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          minWidth: screenWidth - 32, // 减去左右 padding
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            // 歌词按钮（可反复切换）
+            Obx(() {
+              final hasLyric = controller.lyric.value.isNotEmpty;
+              final isOnLyric = _currentPage.value == 1;
+              return IconButton(
+                iconSize: 24,
+                tooltip: isOnLyric ? '返回封面' : '查看歌词',
+                onPressed: hasLyric ? _toggleLyricPage : null,
+                icon: Icon(
+                  Icons.lyrics,
+                  color: !hasLyric
+                      ? Colors.white.withOpacity(0.3)
+                      : (isOnLyric
+                          ? colorScheme.primary
+                          : Colors.white),
+                ),
+              );
+            }),
+            const SizedBox(width: 20),
+
+            // 倍速按钮
+            _buildSpeedButton(context),
+            const SizedBox(width: 20),
+
+            // 跳过片头片尾
+            IconButton(
               iconSize: 24,
-              onPressed: hasLyric ? _goToLyrics : null,
-              icon: Icon(
-                Icons.lyrics,
-                color: hasLyric ? Colors.white : Colors.white.withOpacity(0.3),
-              ),
-            );
-          }),
-          const SizedBox(width: 20),
+              onPressed: () => _showSkipDialog(context),
+              icon: const Icon(Icons.skip_next, color: Colors.white),
+            ),
+            const SizedBox(width: 20),
 
-          // 倍速按钮（图标）
-          _buildSpeedButton(context),
-          const SizedBox(width: 20),
+            // 定时
+            Obx(() {
+              final isActive = controller.timerMinutes.value != 0;
+              return IconButton(
+                iconSize: 24,
+                onPressed: () => _showTimerPicker(context),
+                icon: Icon(
+                  isActive ? Icons.timer : Icons.timer_outlined,
+                  color: isActive ? colorScheme.primary : Colors.white,
+                ),
+              );
+            }),
+            const SizedBox(width: 20),
 
-          // 跳过片头片尾
-          IconButton(
-            iconSize: 24,
-            onPressed: () => _showSkipDialog(context),
-            icon: const Icon(Icons.skip_next, color: Colors.white),
-          ),
-          const SizedBox(width: 20),
-
-          // 定时
-          Obx(() {
-            final isActive = controller.timerMinutes.value != 0;
-            return IconButton(
-              iconSize: 24,
-              onPressed: () => _showTimerPicker(context),
-              icon: Icon(
-                isActive ? Icons.timer : Icons.timer_outlined,
-                color: isActive ? colorScheme.primary : Colors.white,
-              ),
-            );
-          }),
-          const SizedBox(width: 20),
-
-          // 收藏
-          Obx(() {
-            final controller = Get.find<MusicPlayerController>();
-            final _ = controller.favoriteVersion.value;
-            final vodId = controller.currentVodId;
-            bool isFav = false;
-            if (vodId != null && vodId.isNotEmpty) {
-              if (controller.isLxChannel) {
-                // 洛雪渠道：读 _isLike 缓存（由 _loadLxFavoriteStatus 异步更新）
-                isFav = _isLike.value;
-              } else {
-                final favorites = GStorage.getFavorites();
-                isFav = favorites.any((item) => item['vod_id'] == vodId);
+            // 收藏
+            Obx(() {
+              final _ = controller.favoriteVersion.value;
+              final vodId = controller.currentVodId;
+              bool isFav = false;
+              if (vodId != null && vodId.isNotEmpty) {
+                if (controller.isLxChannel) {
+                  isFav = _isLike.value;
+                } else {
+                  final favorites = GStorage.getFavorites();
+                  isFav =
+                      favorites.any((item) => item['vod_id'] == vodId);
+                }
               }
-            }
-            return IconButton(
-              iconSize: 24,
-              onPressed: _toggleLike,
-              icon: Icon(
-                isFav ? Icons.favorite : Icons.favorite_border,
-                color: isFav
-                    ? colorScheme.primary
-                    : Colors.white,
-              ),
-            );
-          }),
-
-          // 洛雪渠道专属：添加到歌单 + 下载
-          Obx(() {
-            final controller = Get.find<MusicPlayerController>();
-            if (!controller.isLxChannel) return const SizedBox.shrink();
-
-            return Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const SizedBox(width: 20),
-                IconButton(
-                  iconSize: 24,
-                  tooltip: '添加到歌单',
-                  onPressed: () => _lxAddToPlaylist(),
-                  icon: const Icon(Icons.playlist_add_rounded,
-                      color: Colors.white),
+              return IconButton(
+                iconSize: 24,
+                onPressed: _toggleLike,
+                icon: Icon(
+                  isFav ? Icons.favorite : Icons.favorite_border,
+                  color:
+                      isFav ? colorScheme.primary : Colors.white,
                 ),
-                const SizedBox(width: 20),
-                IconButton(
-                  iconSize: 24,
-                  tooltip: '下载',
-                  onPressed: () => _lxDownload(),
-                  icon: const Icon(Icons.download_rounded,
-                      color: Colors.white),
-                ),
-              ],
-            );
-          }),
-        ],
+              );
+            }),
+
+            // 洛雪渠道专属：添加到歌单 + 下载
+            Obx(() {
+              if (!controller.isLxChannel) {
+                return const SizedBox.shrink();
+              }
+              return Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(width: 20),
+                  IconButton(
+                    iconSize: 24,
+                    tooltip: '添加到歌单',
+                    onPressed: () => _lxAddToPlaylist(),
+                    icon: const Icon(Icons.playlist_add_rounded,
+                        color: Colors.white),
+                  ),
+                  const SizedBox(width: 20),
+                  IconButton(
+                    iconSize: 24,
+                    tooltip: '下载',
+                    onPressed: () => _lxDownload(),
+                    icon: const Icon(Icons.download_rounded,
+                        color: Colors.white),
+                  ),
+                ],
+              );
+            }),
+          ],
+        ),
       ),
     );
   }
@@ -803,11 +854,13 @@ class PlayerCardState extends State<PlayerCard> with SingleTickerProviderStateMi
                 children: [
                   Text(
                     seconds2duration(position.inSeconds),
-                    style: const TextStyle(color: Colors.white70, fontSize: 11),
+                    style: const TextStyle(
+                        color: Colors.white70, fontSize: 11),
                   ),
                   Text(
                     seconds2duration(duration.inSeconds),
-                    style: const TextStyle(color: Colors.white70, fontSize: 11),
+                    style: const TextStyle(
+                        color: Colors.white70, fontSize: 11),
                   ),
                 ],
               ),
@@ -838,15 +891,15 @@ class PlayerCardState extends State<PlayerCard> with SingleTickerProviderStateMi
         ),
         const SizedBox(width: 20),
         Obx(() => IconButton(
-          iconSize: 56,
-          onPressed: controller.togglePlay,
-          icon: Icon(
-            controller.playing.value
-                ? Icons.pause_circle_filled
-                : Icons.play_circle_filled,
-            color: colorScheme.primary,
-          ),
-        )),
+              iconSize: 56,
+              onPressed: controller.togglePlay,
+              icon: Icon(
+                controller.playing.value
+                    ? Icons.pause_circle_filled
+                    : Icons.play_circle_filled,
+                color: colorScheme.primary,
+              ),
+            )),
         const SizedBox(width: 20),
         IconButton(
           iconSize: 36,
@@ -894,8 +947,9 @@ class _VinylPage extends StatelessWidget {
         final availableHeight = constraints.maxHeight;
         final availableWidth = constraints.maxWidth;
         final maxSize = (availableHeight < availableWidth
-            ? availableHeight * 0.5
-            : availableWidth * 0.5).clamp(100.0, 300.0);
+                ? availableHeight * 0.5
+                : availableWidth * 0.5)
+            .clamp(100.0, 300.0);
 
         final controller = Get.find<MusicPlayerController>();
 
@@ -904,19 +958,20 @@ class _VinylPage extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Obx(() => SizedBox(
-              height: maxSize,
-              child: VinylRecordWidget(
-                coverUrl: controller.coverUrl.value,
-                isPlaying: controller.playing.value,
-              ),
-            )),
+                  height: maxSize,
+                  child: VinylRecordWidget(
+                    coverUrl: controller.coverUrl.value,
+                    isPlaying: controller.playing.value,
+                  ),
+                )),
             const SizedBox(height: 12),
             Obx(() {
               final episodes = controller.playlist;
               final index = controller.currentIndex.value;
-              final name = episodes.isNotEmpty && index < episodes.length
-                  ? episodes[index].name
-                  : '未选择歌曲';
+              final name =
+                  episodes.isNotEmpty && index < episodes.length
+                      ? episodes[index].name
+                      : '未选择歌曲';
               return Text(
                 name,
                 style: const TextStyle(
@@ -931,16 +986,16 @@ class _VinylPage extends StatelessWidget {
             }),
             const SizedBox(height: 4),
             Obx(() => Text(
-              controller.author.value.isNotEmpty
-                  ? controller.author.value
-                  : controller.albumName.value,
-              style: const TextStyle(
-                fontSize: 11,
-                color: Colors.white70,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            )),
+                  controller.author.value.isNotEmpty
+                      ? controller.author.value
+                      : controller.albumName.value,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: Colors.white70,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                )),
           ],
         );
       },
@@ -956,12 +1011,12 @@ class _PlayModeButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final controller = Get.find<MusicPlayerController>();
     return Obx(() => IconButton(
-      iconSize: 28,
-      onPressed: controller.togglePlayMode,
-      icon: Icon(
-        controller.playMode.value.icon,
-        color: Colors.white,
-      ),
-    ));
+          iconSize: 28,
+          onPressed: controller.togglePlayMode,
+          icon: Icon(
+            controller.playMode.value.icon,
+            color: Colors.white,
+          ),
+        ));
   }
 }

@@ -98,6 +98,14 @@ class SettingPage extends StatelessWidget {
           const SizedBox(height: 8),
           _buildSettingItem(
             context: context,
+            icon: Icons.folder_special_outlined,
+            title: '缓存管理',
+            subtitle: '查看和管理已缓存的视频',
+            onTap: () => Get.toNamed(AppPages.cacheManager),
+          ),
+                    const SizedBox(height: 8),
+          _buildSettingItem(
+            context: context,
             icon: Icons.wifi,
             title: 'WiFi 互传',
             subtitle: '通过 WiFi 传输文件到本机',

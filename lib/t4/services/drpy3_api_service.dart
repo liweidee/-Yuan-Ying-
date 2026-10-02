@@ -67,12 +67,12 @@ class Drpy3ApiService implements ISpiderService {
   ));
 
   // ===== 引擎文件加载顺序（顺序敏感） =====
-  static const _assetDir = 'assets/js/lib/';
+  static const _assetDir = 'assets/js/lib/drpy3_mod/';
   static const _loadOrder = <String>[
     'drpy3-globals-capture.js',
-    'drpy-core_dr3.min.js',
+    'drpy-core.min.js',
     'drpy3-peer.js',
-    'htmlParser_dr3.js',
+    'htmlParser.js',
     'drpy3.esm.min.js',
   ];
 

@@ -314,3 +314,12 @@ abstract final class LxMusicStorageKeys {
   static const String downloadQueue = 'download_queue';
   static const String downloadedSongs = 'downloaded_songs';
 }
+
+/// 缓存下载相关
+abstract final class DownloadStorageKeys {
+  /// Hive Box 名称
+  static const String boxName = 'download_entries';
+
+  /// 下载目录名（位于 ApplicationSupport 下）
+  static const String downloadDirName = 'downloads';
+}

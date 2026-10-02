@@ -342,14 +342,19 @@ class _MainPageState extends State<MainPage> {
   }
 
   Widget _buildAppLogo() {
-    final colorScheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+
     return SizedBox(
       width: 56,
       height: 56,
       child: Image.asset(
-        'assets/images/logo/logo.png',
+        isDark ? Assets.logoDark : Assets.logoLight,
         width: 44,
         height: 44,
+        fit: BoxFit.contain,
+        excludeFromSemantics: true,
         errorBuilder: (_, __, ___) => Icon(
           Icons.tv,
           size: 32,

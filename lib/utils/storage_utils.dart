@@ -15,16 +15,16 @@ abstract final class StorageUtils {
     required Uint8List bytes,
   }) async {
     try {
-      final path = await FilePicker.saveFile(
+      final uri = await FilePicker.saveFile(
         fileName: name,
         bytes: PlatformUtils.isDesktop ? Uint8List(0) : bytes,
       );
-      if (path == null) {
+      if (uri == null) {
         SmartDialog.showToast("取消保存");
         return;
       }
       if (PlatformUtils.isDesktop) {
-        await File(path).writeAsBytes(bytes);
+        await File(uri.toFilePath()).writeAsBytes(bytes);
       }
       SmartDialog.showToast("已保存");
     } catch (e) {

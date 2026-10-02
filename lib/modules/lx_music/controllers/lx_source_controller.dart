@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
@@ -40,16 +41,12 @@ class LxSourceController extends GetxController {
 
   Future<LxScript?> importFromFile() async {
     try {
-      final result = await FilePicker.pickFiles(
+      final file = await FilePicker.pickFile(
         type: FileType.custom,
         allowedExtensions: ['js', 'txt'],
       );
-      if (result == null || result.files.isEmpty) return null;
-      final file = result.files.first;
-      if (file.path == null) return null;
-
-      isImporting.value = true;
-      final content = await File(file.path!).readAsString();
+      if (file == null || file.path == null) return null;
+      final content = utf8.decode(await file.readAsBytes());
       final script = await _engine.importScript(content);
       refreshScripts();
       return script;

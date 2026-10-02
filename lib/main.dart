@@ -24,7 +24,9 @@ import 'package:yuanying/modules/danmaku/controllers/danmaku_controller.dart';
 import 'package:yuanying/t4/services/source_manager.dart';
 import 'package:yuanying/t4/services/t4_api_service.dart';
 import 'package:yuanying/t4/services/drpy2_api_service.dart';
+import 'package:yuanying/t4/services/qjs_drpy2_service.dart';
 import 'package:yuanying/t4/services/drpy3_api_service.dart';
+import 'package:yuanying/t4/services/qjs_drpy3_service.dart';
 import 'package:yuanying/utils/platform_utils.dart';
 import 'package:yuanying/utils/storage.dart';
 import 'package:yuanying/utils/storage_manager.dart';
@@ -69,6 +71,8 @@ import 'package:yuanying/services/ad_block_proxy_service.dart';
 import 'package:yuanying/services/tmdb_match_cache_service.dart';
 
 import 'package:yuanying/services/media_proxy/media_proxy_server.dart';
+
+import 'package:yuanying/modules/download/services/cache_service.dart';
 
 // ============================================================================
 // 全局变量
@@ -126,6 +130,9 @@ void main() async {
   await Hive.openBox('player_settings');
   await Hive.openBox('app_settings');
   await Hive.openBox('video_settings');
+
+  // ===== 缓存下载 Box =====
+  await Hive.openBox(DownloadStorageKeys.boxName);
 
   // 洛雪音乐 Box
   await Hive.openBox('lx_music');
@@ -284,7 +291,9 @@ void main() async {
   // 2. 其他服务
   Get.put(T4ApiService(), permanent: true);
   Get.put(Drpy2ApiService(), permanent: true);
+  Get.put(QjsDrpy2Service(), permanent: true);
   Get.put(Drpy3ApiService(), permanent: true);
+  Get.put(QjsDrpy3Service(), permanent: true);
   Get.put(CatvodOpenService(), permanent: true);
   Get.put(NodeJSService(), permanent: true);
   Get.put(NodeJSSpiderService(), permanent: true);
@@ -296,6 +305,9 @@ void main() async {
   Get.put(DebugLogService());
   Get.put(NovelTtsService(), permanent: true);
   await NovelFontService.init();
+
+  // 缓存服务
+  Get.put(CacheService(), permanent: true);
   
   // Emby 控制器（懒加载）
   Get.lazyPut(() => EmbyServerController(), fenix: true);

@@ -47,6 +47,9 @@ import 'package:yuanying/plugin/pl_player/models/external_player_type.dart';
 import 'package:yuanying/modules/setting/views/play_setting_page.dart';
 import 'package:yuanying/services/ad_block_proxy_service.dart';
 
+import 'package:yuanying/modules/download/models/cache_entry.dart';
+import 'package:yuanying/modules/download/services/cache_service.dart';
+
 class DetailController extends GetxController with GetTickerProviderStateMixin {
   // ===== tag 用于隔离控制器 =====
   final String? _tag;
@@ -507,15 +510,12 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     // ============================================================
     VideoDetail detail;
     if (args['videoDetail'] is VideoDetail) {
-      // 直接使用传入的完整详情数据
       detail = args['videoDetail'] as VideoDetail;
 
-      // 设置来源名称
       if (args['sourceName'] != null) {
         introController.setSourceName(args['sourceName'].toString());
       }
 
-      // 安全兜底：如果外部数据没有 playSources，补充一个默认源
       if (detail.playSources.isEmpty) {
         detail = VideoDetail(
           vodId: detail.vodId,
@@ -525,7 +525,6 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
           vodYear: detail.vodYear,
           vodActor: detail.vodActor,
           vodDirector: detail.vodDirector,
-          // vodTag 已移除（VideoDetail 没有此字段）
           vodRemarks: detail.vodRemarks,
           typeName: detail.typeName,
           playSources: [
@@ -537,16 +536,15 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
         );
       }
     } else {
-      // ===== 原逻辑：构造简化版 VideoDetail（完全不变） =====
       detail = VideoDetail(
         vodId: 'direct_${Uri.encodeComponent(url)}',
         vodName: title,
         vodPic: args['vodPic'] ?? '',
-        vodContent: args['vodContent'] ?? (isParserMode ? '来自解析播放' : '来自推送播放'),
+        vodContent:
+            args['vodContent'] ?? (isParserMode ? '来自解析播放' : '来自推送播放'),
         vodYear: args['vodYear'] ?? '',
         vodActor: args['vodActor'] ?? '',
         vodDirector: args['vodDirector'] ?? '',
-        // vodTag 已移除（原逻辑中已无此字段）
         vodRemarks: args['vodRemarks'] ?? '',
         typeName: args['typeName'] ?? '',
         playSources: [
@@ -1974,6 +1972,118 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     } else {
       SmartDialog.showToast('已用 ${type.label} 打开');
     }
+  }
+
+  /// 缓存当前正在播放的视频
+  ///
+  /// 流程：
+  /// 1. 校验当前剧集 / 播放地址
+  /// 2. 弹出画质选择对话框（源影的 PlayUrl 通常带多个画质）
+  /// 3. 构造 CacheEntry，加入 CacheService 队列
+  /// 缓存当前正在播放的视频
+  Future<void> cacheCurrentVideo() async {
+    final detail = introController.videoDetail.value;
+    if (detail == null) {
+      SmartDialog.showToast('没有可缓存的视频');
+      return;
+    }
+
+    final episode = introController.currentPlayEpisode;
+    if (episode == null) {
+      SmartDialog.showToast('没有正在播放的集数');
+      return;
+    }
+
+    final qualities = currentQualities;
+    if (qualities.isEmpty) {
+      SmartDialog.showToast('没有可用的画质');
+      return;
+    }
+
+    // ===== 选择画质 =====
+    final selectedQuality = await showDialog<PlayQuality>(
+      context: Get.context!,
+      builder: (context) => AlertDialog(
+        title: const Text('选择画质'),
+        content: SizedBox(
+          width: 320,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: qualities.length,
+            itemBuilder: (context, index) {
+              final q = qualities[index];
+              final isCurrent = currentPlayUrl.value == q.url;
+              return ListTile(
+                dense: true,
+                title: Text(q.label),
+                trailing: isCurrent
+                    ? Text(
+                        '当前播放',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                      )
+                    : null,
+                onTap: () => Navigator.pop(context, q),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+    if (selectedQuality == null) return;
+
+    // ===== 请求头：直接复用播放器当前 headers =====
+    // 播放器能播放成功，说明它手里的 headers 是有效的，
+    // 下载时复用同一套即可避免 403 / 空响应。
+    final headers = <String, String>{};
+    final current = currentHeaders.value;
+    if (current.isNotEmpty) {
+      headers.addAll(current);
+    }
+
+    // 兜底：智能补充缺失的常见头
+    if (!_hasHeader(headers, 'User-Agent')) {
+      final domain = _extractDomain(selectedQuality.url);
+      headers['User-Agent'] =
+          _isCloudStorage(domain) ? BrowserUa.mob : BrowserUa.pc;
+    }
+    if (!_hasHeader(headers, 'Accept')) {
+      headers['Accept'] = '*/*';
+    }
+
+    // ===== M3U8 走代理（与播放一致） =====
+    final downloadUrl = _wrapUrlIfNeeded(
+      selectedQuality.url,
+      headers: headers.isEmpty ? null : headers,
+    );
+
+    final isM3u8 = selectedQuality.url.toLowerCase().contains('.m3u8');
+
+    final entry = CacheEntry(
+      id: '${DateTime.now().millisecondsSinceEpoch}_${downloadUrl.hashCode.abs()}',
+      vodId: vodId,
+      vodName: detail.vodName,
+      episodeName: episode.name,
+      vodPic: detail.vodPic,
+      qualityLabel: selectedQuality.label,
+      url: downloadUrl,
+      headers: headers.isEmpty ? null : headers,
+      isM3u8: isM3u8,
+      createdAt: DateTime.now().millisecondsSinceEpoch,
+      updatedAt: DateTime.now().millisecondsSinceEpoch,
+    );
+
+    final service = Get.find<CacheService>();
+    await service.addDownload(entry);
+    SmartDialog.showToast('已加入缓存队列');
+  }
+
+  /// 判断 headers 里是否存在某个 key（大小写不敏感）
+  bool _hasHeader(Map<String, String> headers, String name) {
+    final lower = name.toLowerCase();
+    return headers.keys.any((k) => k.toLowerCase() == lower);
   }
 
   Future<void> playerInit({bool showLoading = true}) async {

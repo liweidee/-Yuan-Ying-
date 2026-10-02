@@ -86,8 +86,8 @@ dependencies:
   extended_nested_scroll_view:
     git:
       url: https://github.com/bggRGjQaUbCoE/extended_nested_scroll_view.git
-      ref: mod
-  file_picker: ^8.1.2
+      ref: master
+  file_picker: 13.1.0
   fixnum: ^1.1.1
   fl_chart: ^1.0.0
   flex_seed_scheme: ^4.0.1
@@ -99,7 +99,7 @@ dependencies:
   shelf: ^1.4.0
   shelf_static: ^1.1.0
   video_player: ^2.13.0
-  fvp: ^0.37.3
+  fvp: ^0.39.0
   flutter_smart_dialog:
     git:
       url: https://github.com/bggRGjQaUbCoE/flutter_smart_dialog.git
@@ -182,9 +182,13 @@ dependencies:
   pure_ftp: ^0.7.5
   dartssh2: ^2.14.0
   smb_connect: ^0.0.9
+  qjs_ultra:
+    git:
+      url: https://github.com/hjdhnx/qjs_ultra
+      ref: build-20260930-b221bd5  # 钉死 tag，不要用分支名
 
 dependency_overrides:
-  file_picker: ^12.0.0-beta.7
+  # file_picker: ^12.0.0-beta.7
   flutter_inappwebview_android:
     git:
       url: https://github.com/bggRGjQaUbCoE/flutter_inappwebview.git
@@ -228,8 +232,8 @@ flutter_native_splash:
     color_dark: "#212121"
   color: "#ffffff"
   color_dark: "#212121"
-  image: assets/images/logo/logo_2.png
-  image_dark: assets/images/logo/logo_2.png
+  image: assets/images/logo/logo_light.png
+  image_dark: assets/images/logo/logo_dark.png
 
 flutter:
   uses-material-design: true
@@ -246,6 +250,10 @@ flutter:
     - path: assets/images/paycoins/
     - path: assets/shaders/
     - path: assets/js/lib/
+    - path: assets/js/lib/drpy2/
+    - path: assets/js/lib/drpy2_mod/
+    - path: assets/js/lib/drpy3/
+    - path: assets/js/lib/drpy3_mod/
     - path: assets/python/
       platforms: [windows]
     - path: assets/python/base/
