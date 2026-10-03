@@ -80,6 +80,7 @@ import 'package:yuanying/modules/lx_music/views/lx_recent_page.dart';
 import 'package:yuanying/modules/lx_music/views/lx_playlist_page.dart';
 
 import 'package:yuanying/modules/download/views/cache_manager_page.dart';
+import 'package:yuanying/modules/danmaku/views/danmaku_block_page.dart';
 
 
 class AppPages {
@@ -167,6 +168,7 @@ class AppPages {
   static const String lxPlaylist = '/lx_playlist';
 
   static const String cacheManager = '/cache_manager';
+  static const String danmakuBlock = '/danmakuBlock';
 
   static final List<GetPage> routes = [
     GetPage(name: initial, page: () => const MainPage()),
@@ -332,5 +334,6 @@ class AppPages {
     GetPage(name: lxPlaylist, page: () => const LxPlaylistPage()),
 
     GetPage(name: cacheManager, page: () => const CacheManagerPage()),
+    GetPage(name: danmakuBlock, page: () => const DanmakuBlockPage()),
   ];
 }

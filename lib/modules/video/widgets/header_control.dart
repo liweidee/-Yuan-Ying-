@@ -13,6 +13,7 @@ import 'package:yuanying/plugin/pl_player/player_pref.dart';
 import 'package:yuanying/plugin/pl_player/models/data_status.dart';
 import 'package:yuanying/plugin/pl_player/models/external_player_type.dart';
 import 'package:yuanying/services/external_player_service.dart';
+import 'package:yuanying/modules/video/widgets/danmaku_settings.dart';
 
 class HeaderControl extends StatefulWidget {
   final String controllerTag;
@@ -432,18 +433,21 @@ class _HeaderControlState extends State<HeaderControl> {
                 // 用第三方播放器打开（仅桌面端显示）
                 if (PlatformUtils.isDesktop)
                   _buildExternalPlayerEntry(controller),
-                // 弹幕开关
+                
+                // 弹幕设置入口（点击打开设置面板）
                 SizedBox(
                   width: 40,
                   height: 34,
                   child: Obx(() {
                     final enable = playerController.enableShowDanmaku.value;
                     return IconButton(
-                      tooltip: enable ? '关闭弹幕' : '开启弹幕',
-                      style: const ButtonStyle(padding: WidgetStatePropertyAll(EdgeInsets.zero)),
-                      onPressed: controller.toggleDanmaku,
+                      tooltip: '弹幕设置',
+                      style: const ButtonStyle(
+                        padding: WidgetStatePropertyAll(EdgeInsets.zero),
+                      ),
+                      onPressed: () => _showDanmakuSettings(context),
                       icon: Icon(
-                        enable ? CustomIcons.dm_on : CustomIcons.dm_off,
+                        CustomIcons.dm_settings,
                         size: 20,
                         color: Colors.white,
                       ),
@@ -545,6 +549,17 @@ class _HeaderControlState extends State<HeaderControl> {
         builder: (context) => SettingSheet(controller: controller, isWide: false),
       );
     }
+  }
+
+  /// 弹出弹幕设置面板（与视频设置里"弹幕设置"入口行为一致）
+  void _showDanmakuSettings(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => DanmakuSettings(controller: controller),
+    );
   }
 
   /// 构建第三方播放器入口

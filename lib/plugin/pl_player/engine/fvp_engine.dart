@@ -155,6 +155,8 @@ class FvpEngine implements IPlayerEngine {
   late final bool removeSafeArea = PlayerPref.removeSafeArea;
   late final bool autoEnterFullScreen = PlayerPref.autoEnterFullScreen;
   late final bool autoExitFullscreen = PlayerPref.autoExitFullscreen;
+  @override
+  bool get enableTapDm => PlayerPref.enableTapDm;
 
   final RxInt progressType = PlayerPref.btmProgressBehavior.obs;
   final RxInt skipStartDuration = 0.obs;

@@ -117,6 +117,22 @@ class _PlaySettingPageState extends State<PlaySettingPage> {
           ),
           const SizedBox(height: 8),
 
+          // ===== 1.5. 弹幕可点击（仅弹幕开启时显示） =====
+          if (PlayerPref.enableShowDanmaku) ...[
+            _buildSwitchItem(
+              icon: Icons.touch_app_outlined,
+              title: '弹幕可点击',
+              subtitle: '点击弹幕弹出复制菜单，关闭后点击仅切换控制栏',
+              value: PlayerPref.enableTapDm,
+              onChanged: (value) {
+                PlayerPref.enableTapDm = value;
+                _refresh();
+                SmartDialog.showToast('重新进入播放页后生效');
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+
           // ===== 智能广告过滤 =====
           _buildSwitchItem(
             icon: Icons.block_outlined,

@@ -219,7 +219,8 @@ class MediaKitEngine implements IPlayerEngine {
     return windowManager.setAlwaysOnTop(value);
   }
 
-  late final enableTapDm = false;
+  @override
+  bool get enableTapDm => PlayerPref.enableTapDm;
 
   // ===== 字幕 =====
   late double subtitleFontScale = PlayerPref.subtitleFontScale;
@@ -298,7 +299,8 @@ class MediaKitEngine implements IPlayerEngine {
   late final bool tempPlayerConf = PlayerPref.tempPlayerConf;
 
   late final bool enableHeart = false;
-  late final String? hwdec = PlayerPref.enableHA ? PlayerPref.hardwareDecoding : null;
+  // 改成 getter，每次读时重新计算，避免修改硬解设置后不生效
+  String get hwdec => PlayerPref.enableHA ? PlayerPref.hardwareDecoding : 'no';
 
   final RxInt progressType = PlayerPref.btmProgressBehavior.obs;
   late final bool enableQuickDouble = PlayerPref.enableQuickDouble;
@@ -406,9 +408,8 @@ class MediaKitEngine implements IPlayerEngine {
     return player;
   }
 
-  Map<String, String>? _buffer;
-  Map<String, String> get buffer => _buffer ??= _initBuffer();
-
+  // 说明：去掉 _buffer 缓存。每次开新视频时重新读取 PlayerPref，
+  //      让用户修改缓冲设置后能立即在下一个视频生效。
   Map<String, String> _initBuffer() {
     final bufSec = PlayerPref.bufferSec * _playbackSpeed.value;
     final bufSiz = (PlayerPref.bufferSize * 0x100000).toStringAsFixed(0);
@@ -452,7 +453,7 @@ class MediaKitEngine implements IPlayerEngine {
     if (dataSource is FileSource) {
       extras['cache'] = 'no';
     } else {
-      extras.addAll(buffer);
+      extras.addAll(_initBuffer());   // 直接调用，不复用缓存
     }
 
     extras['video-sync'] = PlayerPref.videoSync;
@@ -848,7 +849,7 @@ class MediaKitEngine implements IPlayerEngine {
       if (dataSource is FileSource) {
         extras['cache'] = 'no';
       } else {
-        extras.addAll(buffer);
+        extras.addAll(_initBuffer());
       }
       extras['video-sync'] = PlayerPref.videoSync;
       if (Platform.isAndroid) {
@@ -858,9 +859,7 @@ class MediaKitEngine implements IPlayerEngine {
       if (autosync != '0') {
         extras['autosync'] = autosync;
       }
-      if (hwdec != null) {
-        extras['hwdec'] = hwdec!;
-      }
+      extras['hwdec'] = hwdec;
 
       Map<String, String> httpHeaders;
       if (_cachedHeaders != null && _cachedHeaders!.isNotEmpty) {

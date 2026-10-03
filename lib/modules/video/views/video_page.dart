@@ -36,6 +36,9 @@ class _DetailPageState extends State<DetailPage>
   late final String _controllerTag;
   late final DetailController controller;
 
+  /// 记录进入子路由前视频是否在播放，用于返回时决定是否自动恢复
+  bool _wasPlayingBeforePush = false;
+
   final GlobalKey _videoPlayerKey = GlobalKey();
   final GlobalKey<ExtendedNestedScrollViewState> _scrollKey = GlobalKey();
 
@@ -68,6 +71,9 @@ class _DetailPageState extends State<DetailPage>
 
   @override
   void didPushNext() {
+    // 记录进入子路由前的播放状态（无论哪个子路由）
+    _wasPlayingBeforePush = controller.playerController.playerStatus.value.isPlaying;
+
     // 如果是图片查看器，只保存进度，不重置状态
     if (controller.isImageViewerOpen) {
       final ctr = controller.playerController;
@@ -95,25 +101,58 @@ class _DetailPageState extends State<DetailPage>
 
   @override
   void didPopNext() {
-    // 如果是图片查看器返回，清除标志，恢复播放状态
+    // 图片查看器返回：只清标志，然后尝试恢复
     if (controller.isImageViewerOpen) {
       controller.isImageViewerOpen = false;
-      // 恢复播放（如果之前是播放状态）
-      final ctr = controller.playerController;
-      // 如果之前是播放，则继续播放？但我们没有保存状态，可以简单调用 play 或保持暂停。
-      // 为了简单，这里不做自动播放，让用户通过播放按钮控制。
+      _tryAutoResume();
       return;
     }
-  
+
     final ctr = controller.playerController;
-    ctr.dataStatus.value = DataStatus.none;
-    ctr.isBuffering.value = false;
-    controller.autoPlay.value = false;
-    controller.isPlaying.value = false;
-    // 如果播放器存在且正在播放，暂停
-    if (ctr.playerStatus.value.isPlaying) {
-      ctr.pause();
+
+    // 兜底：返回时仍在 loading 的场景清掉，防止卡死
+    if (ctr.dataStatus.value == DataStatus.loading) {
+      ctr.dataStatus.value = DataStatus.none;
+      ctr.isBuffering.value = false;
+      controller.autoPlay.value = false;
+      _wasPlayingBeforePush = false;   // 清掉，不恢复
+      return;
     }
+
+    _tryAutoResume();
+  }
+
+  /// 若进入子路由前视频在播放，则自动恢复播放
+  void _tryAutoResume() {
+    if (!_wasPlayingBeforePush) {
+      _wasPlayingBeforePush = false;
+      return;
+    }
+    _wasPlayingBeforePush = false;
+
+    // 延后一帧，等路由过渡和播放器状态稳定
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      try {
+        // 前置条件检查：播放地址必须存在
+        if (controller.currentPlayUrl.value.isEmpty) {
+          debugPrint('[_tryAutoResume] currentPlayUrl empty, skip');
+          return;
+        }
+
+        // 标记为"自动播放"状态
+        controller.autoPlay.value = true;
+        controller.isPlaying.value = true;
+
+        // 用已存在的安全入口：playerInit 内部会 setDataSource + play
+        // showLoading = false：避免恢复时弹出"正在获取播放信息"的遮罩
+        await controller.playerInit(showLoading: false);
+
+        debugPrint('[_tryAutoResume] resumed');
+      } catch (e, s) {
+        debugPrint('[_tryAutoResume] failed: $e\n$s');
+      }
+    });
   }
 
   @override
@@ -488,6 +527,24 @@ class _DetailPageState extends State<DetailPage>
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
+                  // ===== 下载按钮 =====
+                  SizedBox(
+                    width: 38,
+                    height: 38,
+                    child: IconButton(
+                      tooltip: '缓存当前视频',
+                      onPressed: () => controller.cacheCurrentVideo(),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      icon: Icon(
+                        // Icons.download_outlined,
+                        Icons.download_outlined,
+                        size: 22,
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                  // ===== 弹幕开关 =====
                   SizedBox(
                     width: 38,
                     height: 38,
@@ -501,7 +558,9 @@ class _DetailPageState extends State<DetailPage>
                         icon: Icon(
                           enable ? CustomIcons.dm_on : CustomIcons.dm_off,
                           size: 22,
-                          color: enable ? colorScheme.secondary : colorScheme.outline,
+                          color: enable
+                              ? colorScheme.secondary
+                              : colorScheme.outline,
                         ),
                       );
                     }),

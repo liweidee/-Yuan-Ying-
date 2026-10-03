@@ -99,6 +99,7 @@ class _DanmakuViewState extends State<DanmakuView> {
             item.content,
             color: textColor,
             type: _toDanmakuItemType(item.mode),
+            extra: item,
           ),
         );
       }

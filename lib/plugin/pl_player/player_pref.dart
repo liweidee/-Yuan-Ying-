@@ -213,10 +213,10 @@ class PlayerPref {
   static set subtitleFontWeight(int value) => _box.put('subtitleFontWeight', value);
 
   // ===== 弹幕 =====
-
   static bool get enableShowDanmaku => _box.get('enableShowDanmaku', defaultValue: true);
   static set enableShowDanmaku(bool value) => _box.put('enableShowDanmaku', value);
 
+  /// 是否允许点击弹幕（关闭后点击弹幕只做播放/暂停/切换控制栏）
   static bool get enableTapDm => _box.get('enableTapDm', defaultValue: true);
   static set enableTapDm(bool value) => _box.put('enableTapDm', value);
 
@@ -448,4 +448,23 @@ class PlayerPref {
 
   /// 当前选中类型的播放器路径（快捷方式）
   static String get externalPlayerPath => getPathForType(externalPlayerType);
+
+  // ===== 弹幕屏蔽规则 =====
+  /// 关键词屏蔽列表
+  static List<String> get danmakuFilterKeywords {
+    final raw = _box.get('danmakuFilterKeywords', defaultValue: <String>[]);
+    if (raw is List) return raw.map((e) => e.toString()).toList();
+    return <String>[];
+  }
+  static set danmakuFilterKeywords(List<String> value) =>
+      _box.put('danmakuFilterKeywords', value);
+
+  /// 正则屏蔽列表（原始字符串，无 /.../ 包裹）
+  static List<String> get danmakuFilterRegexes {
+    final raw = _box.get('danmakuFilterRegexes', defaultValue: <String>[]);
+    if (raw is List) return raw.map((e) => e.toString()).toList();
+    return <String>[];
+  }
+  static set danmakuFilterRegexes(List<String> value) =>
+      _box.put('danmakuFilterRegexes', value);
 }

@@ -213,6 +213,27 @@ class _DanmakuSettingsState extends State<DanmakuSettings> {
                   ),
 
                   const SizedBox(height: 12),
+                  // ===== 弹幕屏蔽入口 =====
+                  Material(
+                    type: MaterialType.transparency,
+                    child: ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.block, size: 20),
+                      title: const Text('弹幕屏蔽', style: TextStyle(fontSize: 14)),
+                      subtitle: Text(
+                        '关键词 / 正则',
+                        style: TextStyle(fontSize: 12, color: colorScheme.outline),
+                      ),
+                      trailing: const Icon(Icons.chevron_right, size: 20),
+                      onTap: () {
+                        Navigator.pop(context);
+                        Get.toNamed('/danmakuBlock');
+                      },
+                    ),
+                  ),
+
+                  const SizedBox(height: 12),
                   // ===== 颜色模式选择 =====
                   _buildColorModeRow(colorScheme),
                   const SizedBox(height: 16),

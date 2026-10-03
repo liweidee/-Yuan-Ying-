@@ -10,6 +10,7 @@ import 'package:yuanying/modules/setting/views/extra_setting_page.dart';
 import 'package:yuanying/modules/setting/views/danmaku_config_page.dart';
 import 'package:yuanying/modules/setting/views/tmdb_config_page.dart';
 import 'package:yuanying/modules/setting/views/live_config_page.dart';
+import 'package:yuanying/modules/setting/views/av_setting_page.dart';
 import 'package:yuanying/core/routes/app_pages.dart';
 
 class SettingPage extends StatelessWidget {
@@ -53,6 +54,14 @@ class SettingPage extends StatelessWidget {
             title: '播放设置',
             subtitle: '播放请求头策略、播放器行为',
             onTap: () => Get.to(() => const PlaySettingPage()),
+          ),
+          const SizedBox(height: 8),
+          _buildSettingItem(
+            context: context,
+            icon: Icons.tune_outlined,
+            title: '音视频设置',
+            subtitle: '硬解、缓冲大小/时长、自动同步',
+            onTap: () => Get.to(() => const AvSettingPage()),
           ),
           const SizedBox(height: 8),
           _buildSettingItem(

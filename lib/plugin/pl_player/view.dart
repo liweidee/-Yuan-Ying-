@@ -296,7 +296,22 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
       });
     }
 
-    _tapGestureRecognizer = ImmediateTapGestureRecognizer(onTapUp: _onTapUp);
+    if (plPlayerController.enableTapDm) {
+      _tapGestureRecognizer = ImmediateTapGestureRecognizer(
+        onTapDown: plPlayerController.enableShowDanmaku.value
+            ? _onTapDown
+            : null,
+        onTapUp: _onTapUp,
+        onTapCancel: _removeDmAction,
+      );
+
+      _danmakuListener = plPlayerController.enableShowDanmaku.listen((value) {
+        if (!value) _removeDmAction();
+        _tapGestureRecognizer.onTapDown = value ? _onTapDown : null;
+      });
+    } else {
+      _tapGestureRecognizer = ImmediateTapGestureRecognizer(onTapUp: _onTapUp);
+    }
 
     _doubleTapGestureRecognizer = DoubleTapGestureRecognizer()
       ..onDoubleTapDown = _onDoubleTapDown;
@@ -359,6 +374,8 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
   void dispose() {
     print('🔴 PLVideoPlayer dispose');
     removeObserverMobile(this);
+    _danmakuListener?.cancel();
+    _removeDmAction();
     _tapGestureRecognizer.dispose();
     _longPressRecognizer?.dispose();
     _doubleTapGestureRecognizer.dispose();
@@ -872,6 +889,11 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
     if (plPlayerController.controlsLock.value) {
       return;
     }
+    // 如果这次 down 落在弹幕上，直接忽略双击，
+    // 避免"点弹幕时被双击识别器抢走 → 触发播放/暂停"
+    if (_suspendedDm != null) {
+      return;
+    }
     final double tapPosition = details.localPosition.dx;
     final double sectionWidth = maxWidth / 4;
     DoubleTapType type;
@@ -886,12 +908,122 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
   }
 
   void _onTapUp(TapUpDetails details) {
+    // 命中弹幕优先：桌面端也生效
+    if (_suspendedDm != null) {
+      _dmOffset.value = details.localPosition;
+      return;
+    }
+
+    // 未命中弹幕 → 原有行为
     switch (details.kind) {
       case PointerDeviceKind.mouse when PlatformUtils.isDesktop:
         plPlayerController.onDoubleTapCenter();
       default:
         plPlayerController.controls = !plPlayerController.showControls.value;
     }
+  }
+
+  /// 按下即命中判定并挂起
+  void _onTapDown(TapDownDetails details) {
+    final ctr = plPlayerController.danmakuController;
+    if (ctr != null) {
+      final pos = details.localPosition;
+      final res = ctr.findSingleDanmaku(pos);
+      debugPrint('[DM] res=$res, extra=${res?.$2?.content?.extra}');
+      if (res != null) {
+        final (dy, item) = res;
+        if (item != _suspendedDm) {
+          _suspendedDm?.suspend = false;
+          if (item.content.extra == null) {
+            _dmOffset.value = null;
+            return;
+          }
+          _suspendedDm = item..suspend = true;
+          _dmDy = dy;
+        }
+      } else {
+        _suspendedDm?.suspend = false;
+        _dmOffset.value = null;
+      }
+    }
+  }
+
+  void _removeDmAction() {
+    if (_suspendedDm != null) {
+      try {
+        _suspendedDm?.suspend = false;
+      } catch (_) {}
+      _suspendedDm = null;
+      _dmOffset.value = null;
+    }
+  }
+
+  Widget _dmActionItem(
+    Widget child, {
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {
+        onTap();
+        _removeDmAction();
+      },
+      child: SizedBox(
+        width: _actionItemWidth,
+        height: _actionItemHeight,
+        child: Center(child: child),
+      ),
+    );
+  }
+
+  Widget _buildDmAction(dynamic item, Offset offset) {
+    final dx = offset.dx;
+    if (dx > maxWidth) {
+      _removeDmAction();
+      return const SizedBox.shrink();
+    }
+
+    const double overlayWidth = _actionItemWidth;
+
+    final double top =
+        _dmDy + (item.height as num).toDouble() + _triangleHeight + 2;
+
+    final double realLeft = dx + overlayWidth / 2;
+    final double left = realLeft.clamp(
+      _overlaySpacing + overlayWidth,
+      maxWidth - _overlaySpacing,
+    );
+    final double right = maxWidth - left;
+    final double triangleOffset = realLeft - left;
+
+    if (right > (maxWidth - (item.xPosition as num).toDouble())) {
+      _removeDmAction();
+      return const SizedBox.shrink();
+    }
+
+    final String text = (item.content.text as String?) ?? '';
+    if (text.isEmpty) {
+      _removeDmAction();
+      return const SizedBox.shrink();
+    }
+
+    return Positioned(
+      right: right,
+      top: top,
+      child: _DanmakuTip(
+        offset: triangleOffset,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            _dmActionItem(
+              const Icon(size: 19, Icons.copy, color: Colors.white),
+              onTap: () => Utils.copyText(text),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   void _onDoubleTapDown(TapDownDetails details) {
@@ -915,6 +1047,16 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
   late final ImmediateTapGestureRecognizer _tapGestureRecognizer;
   late final DoubleTapGestureRecognizer _doubleTapGestureRecognizer;
   late final PlayerScaleGestureRecognizer _scaleGestureRecognizer;
+
+  // ===== 弹幕点击面板 =====
+  static const double _overlaySpacing = 5.0;
+  static const double _actionItemWidth = 40.0;
+  static const double _actionItemHeight = 35.0 - _triangleHeight;
+
+  dynamic _suspendedDm;
+  double _dmDy = 0;
+  final Rxn<Offset> _dmOffset = Rxn<Offset>();
+  StreamSubscription<bool>? _danmakuListener;
 
   static const _kOffsetThreshold = 25.0;
 
@@ -1068,6 +1210,16 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
         // ----- 弹幕层 -----
         if (widget.danmuWidget case final danmaku?)
           Positioned.fill(top: 4, child: danmaku),
+
+        // ----- 弹幕点击操作面板 -----
+        if (plPlayerController.enableTapDm)
+          Obx(() {
+            final dmOffset = _dmOffset.value;
+            if (dmOffset != null && _suspendedDm != null) {
+              return _buildDmAction(_suspendedDm, dmOffset);
+            }
+            return const SizedBox.shrink();
+          }),
 
         // ----- 字幕层 -----
         // if (!isFvpEngine && videoController != null)
@@ -1957,4 +2109,71 @@ class _RenderVideoTime extends RenderBox {
 
   @override
   bool get isRepaintBoundary => true;
+}
+
+// ============================================================
+// 弹幕点击面板气泡容器（三角 + 圆角 + 半透明描边）
+// ============================================================
+const double _triangleHeight = 5.6;
+
+class _DanmakuTip extends SingleChildRenderObjectWidget {
+  const _DanmakuTip({this.offset = 0, super.child});
+  final double offset;
+  @override
+  RenderObject createRenderObject(BuildContext context) =>
+      _RenderDanmakuTip(offset: offset);
+  @override
+  void updateRenderObject(BuildContext context, _RenderDanmakuTip renderObject) {
+    renderObject.offset = offset;
+  }
+}
+
+class _RenderDanmakuTip extends RenderProxyBox {
+  _RenderDanmakuTip({required this._offset});
+
+  double _offset;
+  double get offset => _offset;
+  set offset(double value) {
+    if (_offset == value) return;
+    _offset = value;
+    markNeedsPaint();
+  }
+
+  @override
+  void paint(PaintingContext context, Offset offset) {
+    final paint = Paint()
+      ..color = const Color(0xB3000000)
+      ..style = PaintingStyle.fill;
+    final radius = size.height / 2;
+    const triangleBase = _triangleHeight * 2 / 3;
+    final triangleCenterX = (size.width / 2 + _offset).clamp(
+      radius + triangleBase,
+      size.width - radius - triangleBase,
+    );
+    final path = Path()
+      ..moveTo(triangleCenterX - triangleBase, 0)
+      ..lineTo(triangleCenterX, -_triangleHeight)
+      ..lineTo(triangleCenterX + triangleBase, 0)
+      ..lineTo(size.width - radius, 0)
+      ..arcToPoint(
+        Offset(size.width - radius, size.height),
+        radius: Radius.circular(radius),
+      )
+      ..lineTo(radius, size.height)
+      ..arcToPoint(Offset(radius, 0), radius: Radius.circular(radius))
+      ..close();
+    context.canvas
+      ..save()
+      ..translate(offset.dx, offset.dy)
+      ..drawPath(path, paint)
+      ..drawPath(
+        path,
+        paint
+          ..color = const Color(0x7EFFFFFF)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.25,
+      )
+      ..restore();
+    super.paint(context, offset);
+  }
 }

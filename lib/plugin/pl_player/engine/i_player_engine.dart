@@ -302,6 +302,7 @@ abstract class IPlayerEngine {
   bool get supportsScreenshot;
   bool get supportsPictureInPicture;
   bool get supportsBufferProgress;
+  bool get enableTapDm;
 
   // ============================================================
   // 23. 切换画质 / 双击处理

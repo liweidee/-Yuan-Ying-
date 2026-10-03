@@ -488,6 +488,7 @@ class PlPlayerController {
   bool get enableShrinkVideoSize => _ensureEngine().enableShrinkVideoSize;
   bool get enableSlideVolumeBrightness => _ensureEngine().enableSlideVolumeBrightness;
   bool get enableSlideFS => _ensureEngine().enableSlideFS;
+  bool get enableTapDm => _ensureEngine().enableTapDm;
 
   Timer? get longPressTimer => _ensureEngine().longPressTimer;
   set longPressTimer(Timer? timer) => _ensureEngine().longPressTimer = timer;
