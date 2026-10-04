@@ -107,7 +107,28 @@ class _MusicDetailPageState extends State<MusicDetailPage> {
         });
 
         final episodes = detail.playSources.first.episodes;
-        _controller.setPlaylist(episodes, initialIndex: 0, vodId: _vodId);
+
+        // 用局部变量捕获，避免闭包持有 this 导致内存泄漏
+        final site = _site;
+        final playSourceName = _playSourceName;
+        final pwd = _pwd;
+
+        _controller.setPlaylist(
+          episodes,
+          initialIndex: 0,
+          vodId: _vodId,
+          urlFetcher: (episode) async {
+            final api = site != null
+                ? Get.find<SourceManager>().createIndependentService(site)
+                : Get.find<SourceManager>().currentApiService;
+            return await api.getPlayUrl(
+              playParams: episode.url,
+              flag: playSourceName,
+              pwd: pwd,
+            );
+          },
+        );
+
         _controller.updateSongInfo(
           cover: detail.vodPic,
           author: detail.vodActor ?? '',

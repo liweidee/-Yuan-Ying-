@@ -40,7 +40,41 @@ class LxPlayerHelper {
 
     final episodes = LxEpisodeConverter.toEpisodeList(musics);
     final vodId = 'lx_${musics.first.id}';
-    controller.setPlaylist(episodes, initialIndex: index, vodId: vodId);
+
+    // ID → LxMusic 映射，用于 urlFetcher 按 ID 反查
+    final musicMap = <String, LxMusic>{
+      for (final m in musics) m.id: m,
+    };
+
+    controller.setPlaylist(
+      episodes,
+      initialIndex: index,
+      vodId: vodId,
+      urlFetcher: (episode) async {
+        // episode.url 存的是 LxMusic.id（见 LxEpisodeConverter.toEpisode）
+        final music = musicMap[episode.url];
+        if (music == null) return null;
+
+        // 同步元数据（封面/歌手/专辑），让锁屏切歌时更新封面
+        controller.updateSongInfo(
+          cover: music.imgUrl,
+          author: music.singer,
+          album: music.album,
+        );
+
+        final quality = await LxSettingsStorage.instance.getQuality();
+        final url = await LxMusicUrlService.instance.getMusicUrl(
+          music: music,
+          quality: quality,
+        );
+        if (url == null || url.isEmpty) return null;
+
+        return PlayUrl(
+          parse: 0,
+          qualities: [PlayQuality(label: '洛雪', url: url)],
+        );
+      },
+    );
 
     final url = await _fetchUrl(music);
     if (url == null || url.isEmpty) {

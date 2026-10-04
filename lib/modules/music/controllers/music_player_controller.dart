@@ -105,6 +105,12 @@ class MusicPlayerController extends GetxController {
 
   VoidCallback? onPlayCompleted;
 
+  /// URL 提供者——由 setPlaylist 的调用方注入
+  ///
+  /// 作用：让切歌（含锁屏/通知栏切歌）不再依赖 UI 层回调。
+  /// 即使详情页被销毁，只要队列还在，就能拉取新歌 URL。
+  Future<PlayUrl?> Function(Episode episode)? _urlFetcher;
+
   /// 防抖锁——防止 onPlayCompleted 被短时间内重复触发
   bool _handlingCompleted = false;
 
@@ -114,6 +120,10 @@ class MusicPlayerController extends GetxController {
     _loadPlayMode();
 
     _handler.player.onPlayCompleted = _handlePlayCompleted;
+
+    // 接管系统控制栏的上一首/下一首
+    _handler.onSkipToPrevious = () => playPrev();
+    _handler.onSkipToNext = () => playNext();
 
     _handler.player.playingStream.listen((isPlaying) {
       playing.value = isPlaying;
@@ -138,13 +148,21 @@ class MusicPlayerController extends GetxController {
   }
 
   // ===== 播放列表 =====
-  void setPlaylist(List<Episode> episodes, {int initialIndex = 0, String? vodId}) {
+  void setPlaylist(
+    List<Episode> episodes, {
+    int initialIndex = 0,
+    String? vodId,
+    Future<PlayUrl?> Function(Episode episode)? urlFetcher,
+  }) {
     if (episodes.isEmpty) return;
+
+    // 注入 URL 提供者（用于脱离 UI 生命周期的切歌）
+    _urlFetcher = urlFetcher;
 
     // ===== 重置跳过片头片尾（新播放列表生命周期） =====
     skipStartDuration.value = 0;
     skipEndDuration.value = 0;
-  
+
     playlist.value = episodes;
     _currentVodId = vodId;
 
@@ -162,6 +180,13 @@ class MusicPlayerController extends GetxController {
     if (cover != null) coverUrl.value = cover;
     if (author != null) this.author.value = author;
     if (album != null) albumName.value = album;
+
+    // 同步到 AudioPlayerHandler，让锁屏/通知栏能显示封面、歌手、专辑
+    _handler.updateMetadata(
+      cover: cover,
+      artist: author,
+      album: album,
+    );
   }
 
   void setLyric(String lrcText) {
@@ -559,11 +584,7 @@ class MusicPlayerController extends GetxController {
       ToastUtils.show('已是最后一首');
       return;
     }
-    currentIndex.value = nextIndex;
-    if (_currentVodId != null && _currentVodId!.isNotEmpty) {
-      _saveCurrentIndex(_currentVodId!, nextIndex);
-    }
-    onPlayCompleted?.call();
+    await _playIndexWithFetcher(nextIndex);
   }
 
   Future<void> playPrev() async {
@@ -572,10 +593,35 @@ class MusicPlayerController extends GetxController {
       ToastUtils.show('已是第一首');
       return;
     }
-    currentIndex.value = prevIndex;
+    await _playIndexWithFetcher(prevIndex);
+  }
+
+  /// 内部切歌——不依赖 UI 回调，优先走 URL 提供者
+  ///
+  /// - 更新索引 + 保存进度
+  /// - 用注入的 urlFetcher 拉 URL（脱离 UI 生命周期）
+  /// - 失败时兜底走 onPlayCompleted（详情页还在栈中时可用）
+  Future<void> _playIndexWithFetcher(int index) async {
+    if (index < 0 || index >= playlist.length) return;
+
+    currentIndex.value = index;
     if (_currentVodId != null && _currentVodId!.isNotEmpty) {
-      _saveCurrentIndex(_currentVodId!, prevIndex);
+      _saveCurrentIndex(_currentVodId!, index);
     }
+
+    final fetcher = _urlFetcher;
+    if (fetcher != null) {
+      try {
+        final episode = playlist[index];
+        final playUrl = await fetcher(episode);
+        if (playUrl != null) {
+          await playWithUrl(playUrl, index: index);
+          return;
+        }
+      } catch (_) {}
+    }
+
+    // 兜底：走 UI 层回调（详情页还在栈中时可用）
     onPlayCompleted?.call();
   }
 

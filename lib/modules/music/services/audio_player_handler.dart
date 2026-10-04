@@ -10,6 +10,15 @@ class AudioPlayerHandler extends BaseAudioHandler {
   late PlaybackEvent _audioEvent;
   final List<StreamSubscription?> _subscriptions = [];
 
+  /// 系统控制栏切歌回调（由 MusicPlayerController 注入）
+  Future<void> Function()? onSkipToNext;
+  Future<void> Function()? onSkipToPrevious;
+
+  /// 缓存的元数据（封面、歌手、专辑）——用于 MediaItem 展示
+  String? _coverUrl;
+  String? _artist;
+  String? _album;
+
   double get _speed => player.audio.speed;
   Episode? get current => player.current;
 
@@ -23,7 +32,6 @@ class AudioPlayerHandler extends BaseAudioHandler {
       _audioEvent = event;
     }));
     _subscriptions.add(player.audio.playerStateStream.listen((state) {
-      _updateMediaItem();
       _broadcastState();
     }));
     _updateMediaItem();
@@ -31,7 +39,7 @@ class AudioPlayerHandler extends BaseAudioHandler {
       _updatePosition();
     }));
     _subscriptions.add(player.audio.durationStream.listen((duration) {
-      if (mediaItem.value != null) {
+      if (mediaItem.value != null && duration != null) {
         mediaItem.add(mediaItem.value!.copyWith(duration: duration));
       }
     }));
@@ -44,7 +52,26 @@ class AudioPlayerHandler extends BaseAudioHandler {
     player.dispose();
   }
 
-  // ===== play 方法保留 url 和 headers 参数 =====
+  /// 更新元数据（封面、歌手、专辑）——由 MusicPlayerController 调用
+  void updateMetadata({String? cover, String? artist, String? album}) {
+    bool changed = false;
+    if (cover != null && cover != _coverUrl) {
+      _coverUrl = cover;
+      changed = true;
+    }
+    if (artist != null && artist != _artist) {
+      _artist = artist;
+      changed = true;
+    }
+    if (album != null && album != _album) {
+      _album = album;
+      changed = true;
+    }
+    if (changed) {
+      _updateMediaItem();
+    }
+  }
+
   @override
   Future<void> play({Episode? music, String? url, Map<String, String>? headers}) async {
     if (music != null) {
@@ -65,21 +92,36 @@ class AudioPlayerHandler extends BaseAudioHandler {
   @override
   Future<void> seek(Duration position) => player.audio.seek(position);
 
+  /// 系统控制栏的上一首
   @override
   Future<void> skipToPrevious() async {
+    if (onSkipToPrevious != null) {
+      await onSkipToPrevious!();
+      return;
+    }
     await player.prev();
     _updateMediaItem();
   }
 
+  /// 系统控制栏的下一首
   @override
   Future<void> skipToNext() async {
+    if (onSkipToNext != null) {
+      await onSkipToNext!();
+      return;
+    }
     await player.next();
     _updateMediaItem();
   }
 
   void _updateMediaItem() {
     if (player.current != null) {
-      final newItem = episode2MediaItem(player.current!);
+      final newItem = episode2MediaItem(
+        player.current!,
+        coverUrl: _coverUrl,
+        artist: _artist,
+        album: _album,
+      );
       mediaItem.add(newItem.copyWith(
         duration: player.audio.duration ?? newItem.duration,
       ));
@@ -137,11 +179,22 @@ class AudioPlayerHandler extends BaseAudioHandler {
   }
 }
 
-MediaItem episode2MediaItem(Episode episode) {
+/// 从 Episode + 元数据构造 MediaItem
+MediaItem episode2MediaItem(
+  Episode episode, {
+  String? coverUrl,
+  String? artist,
+  String? album,
+}) {
+  Uri? artUri;
+  if (coverUrl != null && coverUrl.isNotEmpty) {
+    artUri = Uri.tryParse(coverUrl);
+  }
   return MediaItem(
     id: episode.url,
     title: episode.name,
-    artist: '',
-    album: '',
+    artist: (artist != null && artist.isNotEmpty) ? artist : '未知歌手',
+    album: (album != null && album.isNotEmpty) ? album : '',
+    artUri: artUri,
   );
 }
