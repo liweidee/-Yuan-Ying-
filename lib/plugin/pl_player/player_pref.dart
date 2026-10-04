@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:hive_ce/hive.dart';
+import 'package:yuanying/core/constants/storage_keys.dart';
 import 'package:yuanying/utils/storage.dart';
 import 'package:yuanying/plugin/pl_player/models/external_player_type.dart';
 
@@ -467,4 +468,59 @@ class PlayerPref {
   }
   static set danmakuFilterRegexes(List<String> value) =>
       _box.put('danmakuFilterRegexes', value);
+
+  // ===== 字幕翻译 =====
+  /// 字幕翻译总开关（默认关闭）
+  static bool get subtitleTranslationEnabled =>
+      _box.get(SettingBoxKey.subTransEnabled, defaultValue: false);
+  static set subtitleTranslationEnabled(bool value) =>
+      _box.put(SettingBoxKey.subTransEnabled, value);
+
+  /// 翻译目标语言（默认简体中文）
+  static String get subtitleTranslationTargetLang =>
+      _box.get(SettingBoxKey.subTransTargetLang, defaultValue: 'zh-Hans');
+  static set subtitleTranslationTargetLang(String value) =>
+      _box.put(SettingBoxKey.subTransTargetLang, value);
+
+  /// 翻译服务提供商（baidu / azure）
+  static String get subtitleTranslationProvider =>
+      _box.get(SettingBoxKey.subTransProvider, defaultValue: 'baidu');
+  static set subtitleTranslationProvider(String value) =>
+      _box.put(SettingBoxKey.subTransProvider, value);
+
+  /// 百度翻译 APP ID
+  static String get subtitleTranslationBaiduAppId =>
+      _box.get(SettingBoxKey.subTransBaiduAppId, defaultValue: '');
+  static set subtitleTranslationBaiduAppId(String value) =>
+      _box.put(SettingBoxKey.subTransBaiduAppId, value);
+
+  /// 百度翻译密钥
+  static String get subtitleTranslationBaiduSecret =>
+      _box.get(SettingBoxKey.subTransBaiduSecret, defaultValue: '');
+  static set subtitleTranslationBaiduSecret(String value) =>
+      _box.put(SettingBoxKey.subTransBaiduSecret, value);
+
+  /// 百度翻译模式（llm 大模型 / nmt 通用）
+  static String get subtitleTranslationBaiduModel =>
+      _box.get(SettingBoxKey.subTransBaiduModel, defaultValue: 'llm');
+  static set subtitleTranslationBaiduModel(String value) =>
+      _box.put(SettingBoxKey.subTransBaiduModel, value);
+
+  /// Azure 翻译 Key
+  static String get subtitleTranslationAzureKey =>
+      _box.get(SettingBoxKey.subTransAzureKey, defaultValue: '');
+  static set subtitleTranslationAzureKey(String value) =>
+      _box.put(SettingBoxKey.subTransAzureKey, value);
+
+  /// Azure 翻译区域
+  static String get subtitleTranslationAzureRegion =>
+      _box.get(SettingBoxKey.subTransAzureRegion, defaultValue: 'eastasia');
+  static set subtitleTranslationAzureRegion(String value) =>
+      _box.put(SettingBoxKey.subTransAzureRegion, value);
+
+  /// 翻译完成后自动切换为译文
+  static bool get subtitleTranslationAutoApply =>
+      _box.get(SettingBoxKey.subTransAutoApply, defaultValue: true);
+  static set subtitleTranslationAutoApply(bool value) =>
+      _box.put(SettingBoxKey.subTransAutoApply, value);
 }

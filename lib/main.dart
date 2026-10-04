@@ -12,6 +12,8 @@ import 'package:fvp/fvp.dart' as fvp;
 import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:window_manager/window_manager.dart';
+import 'package:permission_handler_platform_interface/permission_handler_platform_interface.dart';
+import 'package:audio_session/audio_session.dart';
 
 import 'package:yuanying/common/widgets/back_detector.dart';
 import 'package:yuanying/common/widgets/custom_toast.dart';
@@ -144,6 +146,10 @@ void main() async {
   ScaledWidgetsFlutterBinding.ensureInitialized(
     scaleFactor: StorageManager.getSetting<double>(SettingBoxKey.uiScale) ?? 1.0,
   );
+
+  // 配置 iOS 音频会话（Android 上也有益，但 iOS 上是必须的）
+  final session = await AudioSession.instance;
+  await session.configure(const AudioSessionConfiguration.music());
 
   // ==========================================================================
   // 第四步：媒体播放器初始化
@@ -335,20 +341,17 @@ void main() async {
     enabled: SettingPref.enableAdBlock,
   );        
 
-  // 初始化 AudioService（桌面端或全平台）
-  if (PlatformUtils.isDesktop) {
-    // 桌面端需要初始化 AudioService
-    // 注意：AudioService.init 必须在 runApp 之前调用
-    // 但需要在 Controller 初始化之后
-    await AudioService.init(
-      builder: () => musicController.handler,
-      config: AudioServiceConfig(
-        androidNotificationChannelId: 'com.yuanying.music.channel',
-        androidNotificationChannelName: '音乐播放',
-        androidNotificationOngoing: true,
-      ),
-    );
-  }
+  // 初始化 AudioService（全平台：移动端锁屏/通知栏 + 桌面端媒体控制）
+  await AudioService.init(
+    builder: () => musicController.handler,
+    config: const AudioServiceConfig(
+      androidNotificationChannelId: 'com.yuanying.music.channel',
+      androidNotificationChannelName: '音乐播放',
+      androidNotificationOngoing: true,
+      androidStopForegroundOnPause: true,
+      androidNotificationIcon: 'mipmap/ic_launcher',
+    ),
+  );
 
   // 初始化 TMDB 匹配缓存
   await Get.putAsync<TmdbMatchCacheService>(() async {
@@ -377,6 +380,19 @@ void main() async {
   } catch (e) {
     debugPrint('[MediaProxy] 启动失败: $e');
     mediaProxyServer = null;
+  }
+
+  // Android 13+ 需要运行时请求通知权限
+  if (Platform.isAndroid) {
+    try {
+      // 用 platform_interface 直接检查（避免引入 permission_handler 的额外依赖）
+      // 如果已引入 permission_handler，可直接用 Permission.notification.request()
+      await PermissionHandlerPlatform.instance.requestPermissions(
+        [Permission.notification],
+      );
+    } catch (e) {
+      debugPrint('请求通知权限失败: $e');
+    }
   }
 
   // ==========================================================================

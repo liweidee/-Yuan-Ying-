@@ -30,11 +30,22 @@ class MusicPlayer {
   Stream<Duration> get positionStream => _audio.positionStream;
 
   MusicPlayer() {
+    // 记录上一次的 processingState——用于过滤重复的 completed 事件
+    // just_audio 在歌曲播完后 playerStateStream 会持续发出相同的
+    // completed 状态，如果不加过滤，onPlayCompleted 会被触发多次，
+    // 导致"播放完当前曲目"定时被消耗掉多次。
+    ProcessingState _lastProcessingState = ProcessingState.idle;
+
     _audio.playerStateStream.listen((state) {
       _playingController.add(_audio.playing);
-      if (state.processingState == ProcessingState.completed) {
+
+      // 只在「从非 completed 变成 completed」时触发一次
+      final isCompleted = state.processingState == ProcessingState.completed;
+      final wasCompleted = _lastProcessingState == ProcessingState.completed;
+      if (isCompleted && !wasCompleted) {
         onPlayCompleted?.call();
       }
+      _lastProcessingState = state.processingState;
     });
   }
 

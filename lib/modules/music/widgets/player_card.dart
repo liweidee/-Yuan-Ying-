@@ -267,12 +267,11 @@ class PlayerCardState extends State<PlayerCard>
       useSafeArea: true,
       backgroundColor: Colors.transparent,
       builder: (context) {
-        return Container(
-          decoration: BoxDecoration(
-            color: colorScheme.surface,
-            borderRadius:
-                const BorderRadius.vertical(top: Radius.circular(16)),
-          ),
+        return Material(
+          color: colorScheme.surface,
+          borderRadius:
+              const BorderRadius.vertical(top: Radius.circular(16)),
+          clipBehavior: Clip.antiAlias,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -686,128 +685,268 @@ class PlayerCardState extends State<PlayerCard>
   // ============================================================
   // 中间操作按钮区
   //
-  // - 外层 SingleChildScrollView：窄屏时可横向滚动，避免溢出
-  // - 内层 ConstrainedBox：屏幕够宽时撑满并居中
-  // - 左右 padding 16：不完全贴边
+  // - 固定显示前 4 个按钮
+  // - 超过 4 个时，第 5 个位置显示「更多」按钮
+  // - 点击「更多」弹出底部弹窗，展示剩余的全部按钮
   // ============================================================
   Widget _buildTopActions(BuildContext context, ColorScheme colorScheme) {
-    final controller = Get.find<MusicPlayerController>();
-    final screenWidth = MediaQuery.of(context).size.width;
+    return Obx(() {
+      final controller = Get.find<MusicPlayerController>();
 
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      physics: const BouncingScrollPhysics(),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      child: ConstrainedBox(
-        constraints: BoxConstraints(
-          minWidth: screenWidth - 32, // 减去左右 padding
-        ),
+      // 收集所有按钮（按使用频率排序）
+      final allActions = _collectAllActions(context, controller);
+
+      // 固定显示前 4 个
+      const visibleCount = 4;
+      final visibleActions = allActions.take(visibleCount).toList();
+      final hiddenActions = allActions.skip(visibleCount).toList();
+      final showMore = hiddenActions.isNotEmpty;
+      final hasHiddenActive = hiddenActions.any((a) => a.active);
+
+      // 按钮间距（加上 IconButton 自身 44dp 宽度，
+      // 两个按钮之间视觉间距约 20dp，比之前宽松）
+      const spacing = 20.0;
+
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
         child: Row(
-          mainAxisSize: MainAxisSize.min,
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // 歌词按钮（可反复切换）
-            Obx(() {
-              final hasLyric = controller.lyric.value.isNotEmpty;
-              final isOnLyric = _currentPage.value == 1;
-              return IconButton(
-                iconSize: 24,
-                tooltip: isOnLyric ? '返回封面' : '查看歌词',
-                onPressed: hasLyric ? _toggleLyricPage : null,
-                icon: Icon(
-                  Icons.lyrics,
-                  color: !hasLyric
-                      ? Colors.white.withOpacity(0.3)
-                      : (isOnLyric
-                          ? colorScheme.primary
-                          : Colors.white),
-                ),
-              );
-            }),
-            const SizedBox(width: 20),
-
-            // 倍速按钮
-            _buildSpeedButton(context),
-            const SizedBox(width: 20),
-
-            // 跳过片头片尾
-            IconButton(
-              iconSize: 24,
-              onPressed: () => _showSkipDialog(context),
-              icon: const Icon(Icons.skip_next, color: Colors.white),
-            ),
-            const SizedBox(width: 20),
-
-            // 定时
-            Obx(() {
-              final isActive = controller.timerMinutes.value != 0;
-              return IconButton(
-                iconSize: 24,
-                onPressed: () => _showTimerPicker(context),
-                icon: Icon(
-                  isActive ? Icons.timer : Icons.timer_outlined,
-                  color: isActive ? colorScheme.primary : Colors.white,
-                ),
-              );
-            }),
-            const SizedBox(width: 20),
-
-            // 收藏
-            Obx(() {
-              final _ = controller.favoriteVersion.value;
-              final vodId = controller.currentVodId;
-              bool isFav = false;
-              if (vodId != null && vodId.isNotEmpty) {
-                if (controller.isLxChannel) {
-                  isFav = _isLike.value;
-                } else {
-                  final favorites = GStorage.getFavorites();
-                  isFav =
-                      favorites.any((item) => item['vod_id'] == vodId);
-                }
-              }
-              return IconButton(
-                iconSize: 24,
-                onPressed: _toggleLike,
-                icon: Icon(
-                  isFav ? Icons.favorite : Icons.favorite_border,
-                  color:
-                      isFav ? colorScheme.primary : Colors.white,
-                ),
-              );
-            }),
-
-            // 洛雪渠道专属：添加到歌单 + 下载
-            Obx(() {
-              if (!controller.isLxChannel) {
-                return const SizedBox.shrink();
-              }
-              return Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const SizedBox(width: 20),
-                  IconButton(
-                    iconSize: 24,
-                    tooltip: '添加到歌单',
-                    onPressed: () => _lxAddToPlaylist(),
-                    icon: const Icon(Icons.playlist_add_rounded,
-                        color: Colors.white),
+            for (int i = 0; i < visibleActions.length; i++) ...[
+              if (i > 0) const SizedBox(width: spacing),
+              _buildIconButton(visibleActions[i], colorScheme),
+            ],
+            if (showMore) ...[
+              const SizedBox(width: spacing),
+              _buildIconButton(
+                _TopAction(
+                  id: 'more',
+                  icon: Icons.more_vert,
+                  label: '更多操作',
+                  active: hasHiddenActive,
+                  onTap: () => _showMoreActionsSheet(
+                    context,
+                    hiddenActions,
+                    colorScheme,
                   ),
-                  const SizedBox(width: 20),
-                  IconButton(
-                    iconSize: 24,
-                    tooltip: '下载',
-                    onPressed: () => _lxDownload(),
-                    icon: const Icon(Icons.download_rounded,
-                        color: Colors.white),
+                ),
+                colorScheme,
+              ),
+            ],
+          ],
+        ),
+      );
+    });
+  }
+
+  /// 收集所有操作按钮（按使用频率排序）
+  List<_TopAction> _collectAllActions(
+    BuildContext context,
+    MusicPlayerController controller,
+  ) {
+    final actions = <_TopAction>[];
+
+    // 1. 歌词
+    final hasLyric = controller.lyric.value.isNotEmpty;
+    final isOnLyric = _currentPage.value == 1;
+    actions.add(_TopAction(
+      id: 'lyric',
+      icon: Icons.lyrics,
+      label: isOnLyric ? '返回封面' : '查看歌词',
+      active: hasLyric && isOnLyric,
+      onTap: hasLyric ? _toggleLyricPage : null,
+    ));
+
+    // 2. 倍速
+    actions.add(_TopAction(
+      id: 'speed',
+      icon: Icons.speed,
+      label: '倍速（${_formatSpeed(controller.speed.value)}）',
+      active: controller.speed.value != 1.0,
+      onTap: () => _showSpeedDialog(context),
+    ));
+
+    // 3. 收藏
+    final vodId = controller.currentVodId;
+    bool isFav = false;
+    if (vodId != null && vodId.isNotEmpty) {
+      if (controller.isLxChannel) {
+        isFav = _isLike.value;
+      } else {
+        final favorites = GStorage.getFavorites();
+        isFav = favorites.any((item) => item['vod_id'] == vodId);
+      }
+    }
+    actions.add(_TopAction(
+      id: 'fav',
+      icon: isFav ? Icons.favorite : Icons.favorite_border,
+      label: isFav ? '取消收藏' : '收藏',
+      active: isFav,
+      onTap: _toggleLike,
+    ));
+
+    // 4. 定时
+    final isTimerActive = controller.timerMinutes.value != 0;
+    actions.add(_TopAction(
+      id: 'timer',
+      icon: isTimerActive ? Icons.timer : Icons.timer_outlined,
+      label: isTimerActive
+          ? '定时关闭（${_formatTimer(controller.timerMinutes.value)}）'
+          : '定时关闭',
+      active: isTimerActive,
+      onTap: () => _showTimerPicker(context),
+    ));
+
+    // 5. 跳过片头片尾（进「更多」）
+    final isSkipActive = controller.skipStartDuration.value > 0 ||
+        controller.skipEndDuration.value > 0;
+    actions.add(_TopAction(
+      id: 'skip',
+      icon: Icons.skip_next,
+      label: isSkipActive ? '跳过片头片尾（已启用）' : '跳过片头片尾',
+      active: isSkipActive,
+      onTap: () => _showSkipDialog(context),
+    ));
+
+    // 6-7. 洛雪渠道专属（进「更多」）
+    if (controller.isLxChannel) {
+      actions.add(_TopAction(
+        id: 'addToPlaylist',
+        icon: Icons.playlist_add_rounded,
+        label: '添加到歌单',
+        active: false,
+        onTap: _lxAddToPlaylist,
+      ));
+      actions.add(_TopAction(
+        id: 'download',
+        icon: Icons.download_rounded,
+        label: '下载',
+        active: false,
+        onTap: _lxDownload,
+      ));
+    }
+
+    return actions;
+  }
+
+  /// 构建单个图标按钮
+  ///
+  /// - 缩小点击区域为 44dp（仍满足 Material 最小点击尺寸建议）
+  /// - 图标保持 24dp，视觉大小不变
+  Widget _buildIconButton(_TopAction action, ColorScheme colorScheme) {
+    final isEnabled = action.onTap != null;
+    final color = !isEnabled
+        ? Colors.white.withOpacity(0.3)
+        : (action.active ? colorScheme.primary : Colors.white);
+
+    return IconButton(
+      iconSize: 24,
+      tooltip: action.label,
+      onPressed: action.onTap,
+      icon: Icon(action.icon, color: color),
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+    );
+  }
+
+  /// 弹出「更多操作」底部弹窗
+  void _showMoreActionsSheet(
+    BuildContext context,
+    List<_TopAction> actions,
+    ColorScheme colorScheme,
+  ) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: colorScheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            // 拖拽条
+            Container(
+              width: 32,
+              height: 4,
+              decoration: BoxDecoration(
+                color: colorScheme.outlineVariant,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 12),
+            // 标题
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Row(
+                children: [
+                  Text(
+                    '更多操作',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: colorScheme.onSurface,
+                    ),
                   ),
                 ],
-              );
-            }),
+              ),
+            ),
+            const SizedBox(height: 4),
+            // 按钮列表
+            ...actions.map(
+              (action) => ListTile(
+                leading: Icon(
+                  action.icon,
+                  color: action.active
+                      ? colorScheme.primary
+                      : colorScheme.onSurfaceVariant,
+                ),
+                title: Text(
+                  action.label,
+                  style: TextStyle(
+                    color: action.active
+                        ? colorScheme.primary
+                        : colorScheme.onSurface,
+                    fontWeight:
+                        action.active ? FontWeight.w600 : FontWeight.normal,
+                  ),
+                ),
+                trailing: action.active
+                    ? Icon(Icons.check_circle,
+                        color: colorScheme.primary, size: 20)
+                    : null,
+                onTap: action.onTap == null
+                    ? null
+                    : () {
+                        Navigator.pop(sheetContext);
+                        action.onTap!();
+                      },
+              ),
+            ),
+            const SizedBox(height: 8),
           ],
         ),
       ),
     );
+  }
+
+  /// 格式化倍速显示
+  String _formatSpeed(double speed) {
+    // 去掉浮点误差，例如 1.2000000000000002 → 1.2
+    final s = speed.toStringAsFixed(2);
+    // 去掉末尾的 0 和小数点
+    return '${s.replaceAll(RegExp(r'0+$'), '').replaceAll(RegExp(r'\.$'), '')}x';
+  }
+
+  /// 格式化定时显示
+  String _formatTimer(int minutes) {
+    if (minutes <= 0) return '关闭';
+    if (minutes == -1) return '播放完当前曲目';
+    if (minutes < 60) return '$minutes 分钟';
+    final h = minutes ~/ 60;
+    final m = minutes % 60;
+    return m > 0 ? '$h 小时 $m 分钟' : '$h 小时';
   }
 
   Widget _buildProgressBar(ColorScheme colorScheme) {
@@ -1019,4 +1158,21 @@ class _PlayModeButton extends StatelessWidget {
           ),
         ));
   }
+}
+
+// ===== 顶部操作按钮数据类 =====
+class _TopAction {
+  final String id;
+  final IconData icon;
+  final String label;
+  final bool active;
+  final VoidCallback? onTap;
+
+  const _TopAction({
+    required this.id,
+    required this.icon,
+    required this.label,
+    required this.active,
+    required this.onTap,
+  });
 }

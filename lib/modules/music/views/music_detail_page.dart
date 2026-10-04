@@ -155,6 +155,14 @@ class _MusicDetailPageState extends State<MusicDetailPage> {
         ToastUtils.show('获取播放地址失败');
         return;
       }
+
+      // 显式标记为通用渠道
+      // 之前在洛雪渠道播放过时 channel 会残留 'lx'，导致：
+      // 1. 通用音乐播放被误标记为洛雪渠道
+      // 2. 洛雪页面的底部播放条错误显示通用歌曲
+      // 显式设置 't4' 让渠道状态正确切换。
+      _controller.setChannel('t4');
+
       await _controller.playWithUrl(playUrl, index: index);
     } catch (e) {
       ToastUtils.show('播放失败: $e');

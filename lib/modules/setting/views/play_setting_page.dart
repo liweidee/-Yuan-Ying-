@@ -77,6 +77,18 @@ class _PlaySettingPageState extends State<PlaySettingPage> {
             ),
             const SizedBox(height: 8),
           ],
+          // ===== 字幕翻译（仅 media_kit 内核显示）=====
+          if (PlayerPref.playerEngine == PlayerEngineType.mediaKit) ...[
+            _buildNavigateItem(
+              icon: Icons.translate,
+              title: '字幕翻译',
+              subtitle: PlayerPref.subtitleTranslationEnabled
+                  ? '已开启'
+                  : '在线翻译外挂字幕',
+              onTap: () => Get.toNamed('/subtitleTranslation'),
+            ),
+            const SizedBox(height: 8),
+          ],
           // ===== 请求头策略 =====
           _buildSettingItem(
             icon: Icons.http_outlined,

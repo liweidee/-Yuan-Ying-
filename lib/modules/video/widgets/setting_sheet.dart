@@ -232,6 +232,36 @@ class _SettingSheetState extends State<SettingSheet> {
           onTap: _showSubtitleSettings,
         ),
 
+      // ===== 翻译当前字幕（仅 media_kit 内核）=====
+      // if (!isFvpEngine)
+      //   _buildSettingItem(
+      //     icon: Icons.translate,
+      //     title: '翻译当前字幕',
+      //     subtitle: controller.isTranslating
+      //         ? '翻译中 ${controller.translationProgress.value?.done ?? 0}'
+      //             '/${controller.translationProgress.value?.total ?? 0}'
+      //         : '使用在线翻译服务翻译当前字幕',
+      //     onTap: () {
+      //       Navigator.pop(context);
+      //       controller.translateCurrentSubtitle();
+      //     },
+      //   ),
+      if (!isFvpEngine)
+        Obx(() {
+          final p = controller.translationProgress.value;
+          return _buildSettingItem(
+            icon: Icons.translate,
+            title: '翻译当前字幕',
+            subtitle: p != null
+                ? '翻译中 ${p.done}/${p.total}'
+                : '使用在线翻译服务翻译当前字幕',
+            onTap: () {
+              Navigator.pop(context);
+              controller.translateCurrentSubtitle();
+            },
+          );
+        }),
+
       const SizedBox(height: 4),
 
       // ===== 水平操作区 =====

@@ -8,6 +8,7 @@ import 'package:media_kit_video/media_kit_video.dart' show NoVideoControls, Vide
 import 'package:yuanying/modules/live/controllers/live_controller.dart';
 import 'package:yuanying/utils/platform_utils.dart';
 import 'package:yuanying/plugin/pl_player/models/video_fit_type.dart';
+import 'package:yuanying/plugin/pl_player/widgets/common_btn.dart';
 
 /// 手势类型
 enum _GestureType {
@@ -206,6 +207,124 @@ class _LivePlayerViewState extends State<LivePlayerView> {
               ),
             );
           }),
+
+          // ===== 锁屏按钮（仅全屏时显示，锁屏状态下常显） =====
+          //
+          // 交互设计：
+          //   - 非锁屏 + 控制栏可见：显示"锁定"图标（左侧居中）
+          //   - 锁屏：显示"解锁"图标且常显（不受控制栏显隐影响）
+          //   - 非全屏：不显示
+          Obx(() {
+            if (!ctrl.isFullScreen.value) return const SizedBox.shrink();
+            final isLocked = ctrl.controlsLock.value;
+            final visible = isLocked || ctrl.controlsVisible.value;
+            if (!visible) return const SizedBox.shrink();
+
+            return Positioned(
+              left: 16,
+              top: 0,
+              bottom: 0,
+              child: Center(
+                child: DecoratedBox(
+                  decoration: const BoxDecoration(
+                    color: Color(0x45000000),
+                    borderRadius: BorderRadius.all(Radius.circular(8)),
+                  ),
+                  child: ComBtn(
+                    tooltip: isLocked ? '解锁' : '锁定',
+                    icon: Icon(
+                      isLocked ? Icons.lock : Icons.lock_open,
+                      size: 20,
+                      color: Colors.white,
+                    ),
+                    onTap: ctrl.toggleControlsLock,
+                  ),
+                ),
+              ),
+            );
+          }),
+
+          // ===== 截图 / 旋转屏幕按钮（右侧垂直居中） =====
+          //
+          // 交互设计：
+          //   - 非全屏：不显示
+          //   - 锁屏：只显示"截图"（截图无副作用，锁屏时也应可随手截）
+          //   - 非锁屏 + 控制栏可见：截图 + 旋转屏幕（移动端）
+          //   - 非锁屏 + 控制栏隐藏：不显示
+          //
+          // 位置：
+          //   Positioned(right: 16, top: 0, bottom: 0) + Center
+          //   始终保持在右侧垂直居中。
+          //   两个按钮时，Column 有两个 child，中间 8px 间距；
+          //   只有一个按钮时（锁屏下只剩截图），Column 只有一个 child，
+          //   依然垂直居中，不会出现"贴顶"或"贴底"。
+          Obx(() {
+            if (!ctrl.isFullScreen.value) return const SizedBox.shrink();
+
+            final bool isLocked = ctrl.controlsLock.value;
+
+            // 截图：锁屏时常显；非锁屏时跟随控制栏
+            final bool showScreenshot = isLocked || ctrl.controlsVisible.value;
+
+            // 旋转：仅非锁屏 + 控制栏可见 + 移动端
+            final bool showRotate = !isLocked &&
+                ctrl.controlsVisible.value &&
+                PlatformUtils.isMobile;
+
+            if (!showScreenshot && !showRotate) {
+              return const SizedBox.shrink();
+            }
+
+            return Positioned(
+              right: 16,
+              top: 0,
+              bottom: 0,
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // 旋转屏幕（仅移动端，非锁屏时显示）
+                    if (showRotate) ...[
+                      DecoratedBox(
+                        decoration: const BoxDecoration(
+                          color: Color(0x45000000),
+                          borderRadius: BorderRadius.all(Radius.circular(8)),
+                        ),
+                        child: ComBtn(
+                          tooltip: '旋转屏幕',
+                          icon: const Icon(
+                            Icons.screen_rotation,
+                            size: 20,
+                            color: Colors.white,
+                          ),
+                          onTap: () => ctrl.toggleOrientation(Get.context!),
+                        ),
+                      ),
+                      // 两按钮之间的垂直间距
+                      const SizedBox(height: 8),
+                    ],
+                    // 截图（锁屏时常显；非锁屏时跟随控制栏）
+                    if (showScreenshot)
+                      DecoratedBox(
+                        decoration: const BoxDecoration(
+                          color: Color(0x45000000),
+                          borderRadius: BorderRadius.all(Radius.circular(8)),
+                        ),
+                        child: ComBtn(
+                          tooltip: '截图',
+                          icon: const Icon(
+                            Icons.photo_camera,
+                            size: 20,
+                            color: Colors.white,
+                          ),
+                          onTap: ctrl.takeScreenshot,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            );
+          }),
         ],
       ),
     );
@@ -249,6 +368,10 @@ class _LivePlayerViewState extends State<LivePlayerView> {
 
   Widget _buildControls() {
     return Obx(() {
+      // 锁屏状态下隐藏整个底部控制栏
+      if (ctrl.controlsLock.value) {
+        return const SizedBox.shrink();
+      }
       return AnimatedOpacity(
         opacity: ctrl.controlsVisible.value ? 1.0 : 0.0,
         duration: const Duration(milliseconds: 300),
@@ -405,6 +528,9 @@ class _LivePlayerViewState extends State<LivePlayerView> {
 
   /// 单击：控制栏隐藏时显示；控制栏显示时切换播放/暂停
   void _onTap() {
+    // 锁屏状态：点击屏幕不做任何事（解锁按钮常显，用户直接点它）
+    if (ctrl.controlsLock.value) return;
+
     if (ctrl.controlsVisible.value) {
       // 控制栏已显示：切换播放/暂停
       ctrl.togglePlayPause();
@@ -416,21 +542,28 @@ class _LivePlayerViewState extends State<LivePlayerView> {
 
   /// 移动端双击：播放/暂停
   void _onDoubleTapMobile() {
+    if (ctrl.controlsLock.value) return;
     ctrl.togglePlayPause();
     ctrl.showControls();
   }
 
   /// 桌面端双击：全屏切换
   void _onDoubleTapDesktop() {
+    if (ctrl.controlsLock.value) return;
     ctrl.toggleFullScreen(Get.context!);
   }
 
   void _onPanStart(DragStartDetails details) {
+    // 锁屏状态下禁用手势
+    if (ctrl.controlsLock.value) return;
     _gestureType = _GestureType.none;
     _initialFocalPoint = details.localPosition;
   }
 
   void _onPanUpdate(DragUpdateDetails details) {
+    // 锁屏状态下禁用手势
+    if (ctrl.controlsLock.value) return;
+
     final size = MediaQuery.sizeOf(Get.context!);
     final maxHeight = size.height;
 
@@ -484,6 +617,9 @@ class _LivePlayerViewState extends State<LivePlayerView> {
 
   // 桌面端滚轮调节音量
   void _onPointerSignal(PointerSignalEvent event) {
+    // 锁屏状态下禁用滚轮调音
+    if (ctrl.controlsLock.value) return;
+
     if (event is PointerScrollEvent) {
       final offset = -event.scrollDelta.dy / 4000;
       final newVolume = (ctrl.volume.value + offset).clamp(0.0, 2.0);

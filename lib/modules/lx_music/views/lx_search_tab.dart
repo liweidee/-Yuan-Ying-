@@ -277,9 +277,10 @@ class _LxSearchTabState extends State<LxSearchTab> {
 
   Widget _buildPlaylistSourceSelector(ColorScheme colorScheme) {
     const options = [
-      ('tx', '源三'),
-      ('kw', '源一'),
-      ('wy', '源四'),
+      ('tx', '小秋音乐'),
+      ('kw', '小蜗音乐'),
+      ('wy', '小芸音乐'),
+      ('mg', '小咪音乐'),
       ('all', '聚合'),
     ];
 

@@ -23,6 +23,7 @@ import 'package:yuanying/modules/live/widgets/live_player_view.dart';
 import 'package:yuanying/plugin/pl_player/player_pref.dart';
 import 'package:yuanying/utils/storage_manager.dart';
 import 'package:yuanying/utils/platform_utils.dart';
+import 'package:yuanying/utils/image_utils.dart';
 
 import 'package:yuanying/plugin/pl_player/models/video_fit_type.dart';
 import 'package:yuanying/plugin/pl_player/utils/fullscreen.dart';
@@ -62,6 +63,9 @@ class LiveController extends GetxController {
   final RxBool controlsVisible = false.obs;
   Timer? _hideControlsTimer;
 
+  // ===== 锁屏状态 =====
+  final RxBool controlsLock = false.obs;
+
   // ===== 用户主动暂停标志 =====
   final RxBool userPaused = false.obs;
 
@@ -71,6 +75,9 @@ class LiveController extends GetxController {
 
   // ===== 全屏 Overlay =====
   OverlayEntry? _fullScreenOverlay;
+
+  // ===== 截图预览 Overlay（不走 showDialog，避免被 _fullScreenOverlay 遮挡） =====
+  OverlayEntry? _screenshotOverlay;
 
   // ===== 内部标志 =====
   bool _isFirstLoad = true;
@@ -230,6 +237,9 @@ class LiveController extends GetxController {
     _cancelEpgBoundaryTimer();
     _fullScreenOverlay?.remove();
     _fullScreenOverlay = null;
+    // 清理截图预览 Overlay，避免悬浮残留
+    _screenshotOverlay?.remove();
+    _screenshotOverlay = null;
     if (PlatformUtils.isMobile) {
       portraitUpMode();
     }
@@ -256,6 +266,140 @@ class LiveController extends GetxController {
       _hideControlsTimer = Timer(const Duration(seconds: 3), () {
         hideControls();
       });
+    }
+  }
+
+  // ============================================================
+  // 锁屏
+  // ============================================================
+
+  /// 切换锁屏状态
+  /// 进入锁屏：隐藏底部控制栏，仅保留左侧解锁按钮
+  /// 退出锁屏：恢复控制栏显示
+  void toggleControlsLock() {
+    final newValue = !controlsLock.value;
+    controlsLock.value = newValue;
+    if (newValue) {
+      hideControls();
+    } else {
+      showControls();
+    }
+  }
+
+  // ============================================================
+  // 截图
+  // ============================================================
+
+  /// 截图并显示预览浮层
+  ///
+  /// 说明：
+  ///   不用 showDialog —— 因为全屏用的是 OverlayEntry，
+  ///   而 showDialog 走的 Navigator route 在 z 序上可能被
+  ///   _fullScreenOverlay 盖住（全屏下不显示）。
+  ///   这里改为直接 Overlay.insert() 一个新的 OverlayEntry，
+  ///   后插入的一定在 _fullScreenOverlay 之上，全屏/非全屏都能看到。
+  Future<void> takeScreenshot() async {
+    if (_player == null) {
+      SmartDialog.showToast('播放器未初始化');
+      return;
+    }
+    SmartDialog.showToast('截图中');
+    try {
+      final imageBytes = await _player!.screenshot();
+      if (imageBytes == null) {
+        SmartDialog.showToast('截图失败');
+        return;
+      }
+      SmartDialog.showToast('点击弹窗保存截图');
+      final context = Get.context;
+      if (context == null) return;
+
+      // 如果已有旧的预览浮层，先移除
+      _screenshotOverlay?.remove();
+      _screenshotOverlay = null;
+
+      // 用 rootOverlay 保证与 _fullScreenOverlay 处于同一个 Overlay，
+      // 后插入 → 一定在最上层
+      final overlay = Overlay.of(context, rootOverlay: true);
+
+      late OverlayEntry entry;
+      entry = OverlayEntry(
+        builder: (overlayContext) {
+          return GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () async {
+              // 点击预览图 → 保存并移除浮层
+              try {
+                await ImageUtils.saveByteImg(
+                  bytes: imageBytes,
+                  fileName: 'screenshot_${ImageUtils.time}',
+                );
+              } catch (e) {
+                debugPrint('saveByteImg failed: $e');
+              }
+              // 移除当前预览浮层（用 id 匹配，避免误删新浮层）
+              if (identical(_screenshotOverlay, entry)) {
+                _screenshotOverlay?.remove();
+                _screenshotOverlay = null;
+              } else {
+                entry.remove();
+              }
+            },
+            child: Material(
+              color: Colors.black54,
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: Padding(
+                  padding: const EdgeInsets.only(right: 12),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxWidth: (MediaQuery.of(overlayContext).size.width / 3)
+                          .clamp(120.0, 350.0),
+                    ),
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        border: Border.all(
+                          width: 5,
+                          color: Theme.of(overlayContext).colorScheme.surface,
+                        ),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(5),
+                        child: Image.memory(imageBytes),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      );
+
+      _screenshotOverlay = entry;
+      overlay.insert(entry);
+    } catch (e) {
+      SmartDialog.showToast('截图失败: $e');
+    }
+  }
+
+  // ============================================================
+  // 旋转屏幕（仅移动端）
+  // ============================================================
+
+  Future<void> toggleOrientation(BuildContext context) async {
+    if (!PlatformUtils.isMobile) return;
+    final orientation = MediaQuery.of(context).orientation;
+    if (orientation == Orientation.portrait) {
+      await SystemChrome.setPreferredOrientations([
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]);
+    } else {
+      await SystemChrome.setPreferredOrientations([
+        DeviceOrientation.portraitUp,
+        DeviceOrientation.portraitDown,
+      ]);
     }
   }
 
@@ -824,6 +968,11 @@ class LiveController extends GetxController {
 
   Future<void> exitFullScreen() async {
     if (!isFullScreen.value) return;
+
+    // 退出全屏时同时解锁（避免解锁按钮残留在窗口模式）
+    if (controlsLock.value) {
+      controlsLock.value = false;
+    }
 
     _fullScreenOverlay?.remove();
     _fullScreenOverlay = null;

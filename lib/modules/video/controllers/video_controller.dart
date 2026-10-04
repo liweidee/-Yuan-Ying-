@@ -50,6 +50,11 @@ import 'package:yuanying/services/ad_block_proxy_service.dart';
 import 'package:yuanying/modules/download/models/cache_entry.dart';
 import 'package:yuanying/modules/download/services/cache_service.dart';
 
+import 'package:yuanying/modules/subtitle_translation/models/subtitle_entry.dart';
+import 'package:yuanying/modules/subtitle_translation/services/subtitle_srt_parser.dart';
+import 'package:yuanying/modules/subtitle_translation/services/subtitle_translation_service.dart';
+import 'package:yuanying/modules/subtitle_translation/services/translation_engine.dart';
+
 class DetailController extends GetxController with GetTickerProviderStateMixin {
   // ===== tag 用于隔离控制器 =====
   final String? _tag;
@@ -201,6 +206,15 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
   /// VTT 字幕缓存（key: 索引, value: {是否内联数据, 数据内容/路径}）
   final Map<int, ({bool isData, String id})> vttSubtitles = {};
 
+  /// 字幕翻译进度（null 表示没有进行中的翻译）。
+  ///
+  /// 用 Rxn 独立暴露，进度更新只刷新监听它的小 widget，不触发整个页面重建。
+  final Rxn<SubtitleTranslationProgress> translationProgress =
+      Rxn<SubtitleTranslationProgress>(null);
+
+  /// 是否正在翻译。
+  bool get isTranslating => translationProgress.value != null;
+
   /// 临时字幕文件列表（用于 FVP 引擎的内存字幕缓存）
   final List<String> _tempSubtitleFiles = [];
 
@@ -292,6 +306,181 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
       }
     } catch (e) {
       SmartDialog.showToast('加载字幕异常: $e');
+    }
+  }
+
+  /// 解析指定索引的字幕为 [SubtitleEntry] 列表（1-based，与 setSubtitle 一致）。
+  ///
+  /// 支持来源：
+  ///  - 内存中的 JSON / VTT / SRT 内容（isData: true）
+  ///  - 本地文件路径（含 file:// URI）
+  ///  - 网络字幕 URL（会下载）
+  Future<List<SubtitleEntry>> _resolveSubtitleEntries(int index) async {
+    if (index <= 0 || index > subtitles.length) return const [];
+    final entry = vttSubtitles[index - 1];
+    if (entry == null) return const [];
+
+    String content;
+    if (entry.isData) {
+      content = entry.id;
+    } else {
+      final id = entry.id;
+      if (id.startsWith('http://') || id.startsWith('https://')) {
+        try {
+          final response = await Dio().get(
+            id,
+            options: Options(responseType: ResponseType.plain),
+          );
+          content = (response.data ?? '').toString();
+        } catch (e) {
+          throw TranslationException('下载网络字幕失败：$e');
+        }
+      } else {
+        var path = id;
+        if (path.startsWith('file://')) {
+          try {
+            path = Uri.parse(path).toFilePath();
+          } catch (_) {
+            path = path.substring('file://'.length);
+          }
+        }
+        final file = File(path);
+        if (!await file.exists()) {
+          throw const TranslationException('字幕文件不存在');
+        }
+        content = await file.readAsString();
+      }
+    }
+
+    // 检测 ASS / SSA：ASS 承载特效样式，交给播放器原生渲染是最优解，
+    // 翻译会丢样式、且常有 GBK/BIG5 编码问题，暂不支持。
+    final head = content.length > 4096 ? content.substring(0, 4096) : content;
+    final headTrimmed = head.trimLeft();
+    if (headTrimmed.startsWith('[Script Info]') ||
+        headTrimmed.contains('[Events]') ||
+        headTrimmed.contains('[V4+ Styles]') ||
+        headTrimmed.contains('[V4 Styles]')) {
+      throw const TranslationException(
+        'ASS / SSA 字幕包含特效样式，暂不支持翻译。'
+        '可先用字幕编辑器导出为 SRT 后再加载',
+      );
+    }
+
+    return SubtitleSrtParser.parse(content);
+  }
+
+  /// 翻译当前选中的字幕。
+  ///
+  /// 流程：解析 → 网络翻译（带缓存）→ 写临时 SRT → 注册到字幕列表 → 可选自动切换。
+  /// 全部在独立 Future 中执行，不阻塞播放。
+  Future<void> translateCurrentSubtitle() async {
+    if (isTranslating) {
+      SmartDialog.showToast('已有翻译任务在进行');
+      return;
+    }
+
+    if (!PlayerPref.subtitleTranslationEnabled) {
+      SmartDialog.showToast('请先在「设置 → 播放设置 → 字幕翻译」中启用');
+      return;
+    }
+
+    final idx = vttSubtitlesIndex.value;
+    if (idx <= 0 || idx > subtitles.length) {
+      SmartDialog.showToast('请先加载字幕');
+      return;
+    }
+
+    final engine = SubtitleTranslationService.instance.getActiveEngine();
+    if (!engine.isConfigured) {
+      SmartDialog.showToast(engine.configurationError ?? '翻译服务未配置');
+      return;
+    }
+
+    final targetLang = PlayerPref.subtitleTranslationTargetLang;
+
+    // 解析字幕源
+    List<SubtitleEntry> entries;
+    try {
+      entries = await _resolveSubtitleEntries(idx);
+    } catch (e) {
+      SmartDialog.showToast('$e');
+      return;
+    }
+    if (entries.isEmpty) {
+      SmartDialog.showToast('字幕内容为空或格式不支持');
+      return;
+    }
+
+    // 中文字幕检测：避免用户对已是中文的字幕重复翻译，
+    // 白白消耗翻译服务的免费额度。
+    if (SubtitleTranslationService.looksLikeAlreadyTargetLang(
+      entries,
+      targetLang,
+    )) {
+      final langName = TranslationLanguage.findByCode(targetLang).name;
+      SmartDialog.showToast(
+        '检测到字幕已是$langName，已跳过翻译。'
+        '如需翻译请手动修改目标语言',
+      );
+      return;
+    }
+
+    // 用视频名做语境（百度大模型会用到）
+    final contextTitle = introController.videoDetail.value?.vodName;
+
+    translationProgress.value =
+        SubtitleTranslationProgress(done: 0, total: entries.length);
+
+    try {
+      final translated = await SubtitleTranslationService.instance.translate(
+        videoId: vodId,
+        subtitleIndex: idx,
+        entries: entries,
+        targetLang: targetLang,
+        contextTitle: contextTitle,
+        onProgress: (done, total) {
+          translationProgress.value =
+              SubtitleTranslationProgress(done: done, total: total);
+        },
+      );
+
+      if (isClosed) return;
+
+      // 序列化为 SRT
+      final srtContent = SubtitleSrtParser.serialize(translated);
+      final srtPath = await _writeSubtitleToTempFile(srtContent, 'srt');
+
+      if (isClosed) return;
+
+      // 注册为一条新字幕
+      final newIndex = subtitles.length + 1;
+      final langName = TranslationLanguage.findByCode(targetLang).name;
+      subtitles.add(Subtitle(
+        lan: targetLang,
+        lanDoc: 'AI 翻译（$langName）',
+      ));
+      vttSubtitles[subtitles.length - 1] = (
+        isData: false,
+        id: Uri.file(srtPath).toString(),
+      );
+
+      // 自动切换
+      if (PlayerPref.subtitleTranslationAutoApply) {
+        await setSubtitle(newIndex);
+        SmartDialog.showToast(
+          '翻译完成（共 ${translated.length} 条），已切换为译文。'
+          '原字幕仍保留在字幕列表里，可随时切回',
+        );
+      } else {
+        SmartDialog.showToast(
+          '翻译完成（共 ${translated.length} 条）。'
+          '可在字幕菜单切换到「AI 翻译」',
+        );
+      }
+    } catch (e) {
+      SmartDialog.showToast('翻译失败：$e');
+    } finally {
+      translationProgress.value = null;
     }
   }
 
@@ -2353,6 +2542,9 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
       playerController.removeStatusLister(_playCompletedListener!);
       _playCompletedListener = null;
     }
+
+    // 清理字幕翻译进度
+    translationProgress.value = null;
 
     super.onClose();
   }

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:get/get.dart';
+import 'package:flutter/services.dart';
 
 import 'package:yuanying/modules/lx_music/controllers/lx_source_controller.dart';
 import 'package:yuanying/modules/lx_music/models/lx_script_model.dart';
@@ -338,6 +339,16 @@ class _LxSourceManagePageState extends State<LxSourceManagePage> {
                             ],
                           ),
                         ),
+                        const PopupMenuItem(
+                          value: 'copy',
+                          child: Row(
+                            children: [
+                              Icon(Icons.copy_rounded, size: 18),
+                              SizedBox(width: 8),
+                              Text('复制脚本'),
+                            ],
+                          ),
+                        ),
                         if (!isActive)
                           const PopupMenuItem(
                             value: 'activate',
@@ -403,6 +414,9 @@ class _LxSourceManagePageState extends State<LxSourceManagePage> {
       case 'detail':
         _showScriptDetail(script);
         break;
+      case 'copy':
+        _copyScript(script);
+        break;
       case 'activate':
         _activate(script.id);
         break;
@@ -413,6 +427,15 @@ class _LxSourceManagePageState extends State<LxSourceManagePage> {
         _delete(script);
         break;
     }
+  }
+
+  Future<void> _copyScript(LxScript script) async {
+    if (script.content.trim().isEmpty) {
+      SmartDialog.showToast('脚本内容为空，无法复制');
+      return;
+    }
+    await Clipboard.setData(ClipboardData(text: script.content));
+    SmartDialog.showToast('脚本内容已复制');
   }
 
   Future<void> _activate(String id) async {

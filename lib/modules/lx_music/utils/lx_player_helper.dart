@@ -19,13 +19,6 @@ class LxPlayerHelper {
   static LxMusic? currentLxMusic;
 
   /// 本次会话是否在洛雪渠道播放过歌曲
-  ///
-  /// - 冷启动时为 false
-  /// - 首次调用 playList() 后置为 true
-  /// - App 退出/重启后重置
-  ///
-  /// 用于控制洛雪主页底部播放条的显隐：
-  /// 未播放过时不显示（避免显示上次会话残留）
   static final RxBool hasPlayedInSession = false.obs;
 
   static Future<void> playList(List<LxMusic> musics, int index) async {
@@ -36,55 +29,42 @@ class LxPlayerHelper {
     if (index < 0 || index >= musics.length) index = 0;
 
     final music = musics[index];
-    currentLxMusic = music; // 记录当前
-    // hasPlayedInSession.value = true; // 标记本次会话已播放
+    currentLxMusic = music;
     LxLogger.info('洛雪播放: ${music.name} - ${music.singer}');
 
-    // 1. 找/创建 MusicPlayerController
     final controller = Get.isRegistered<MusicPlayerController>()
         ? Get.find<MusicPlayerController>()
         : Get.put(MusicPlayerController(), permanent: true);
 
-    // 2. 标记洛雪渠道
     controller.setChannel('lx');
 
-    // 3. LxMusic → Episode
     final episodes = LxEpisodeConverter.toEpisodeList(musics);
-
-    // 4. 设置播放列表
     final vodId = 'lx_${musics.first.id}';
     controller.setPlaylist(episodes, initialIndex: index, vodId: vodId);
 
-    // 5. 取 URL
     final url = await _fetchUrl(music);
     if (url == null || url.isEmpty) {
       SmartDialog.showToast('无法获取播放地址');
       return;
     }
 
-    // 6. 构造 PlayUrl
     final playUrl = PlayUrl(
       parse: 0,
       qualities: [PlayQuality(label: '洛雪', url: url)],
     );
 
-    // 7. 更新歌曲信息
     controller.updateSongInfo(
       cover: music.imgUrl,
       author: music.singer,
       album: music.album,
     );
 
-    // 8. 拉歌词
     _fetchLyric(music, controller);
 
-    // 9. 播放
     await controller.playWithUrl(playUrl, index: index);
 
-    // 10. 写洛雪历史
     await _saveToLxHistory(music);
 
-    // 11. 跳洛雪详情页
     _navigateToDetail(musics, index);
   }
 

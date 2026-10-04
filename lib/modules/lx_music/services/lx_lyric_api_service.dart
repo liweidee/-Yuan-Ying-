@@ -3,6 +3,7 @@ import 'dart:convert';
 import '../models/lx_music_model.dart';
 import '../utils/lx_logger.dart';
 import 'lx_http.dart';
+import 'lx_mg_source.dart';
 
 /// 内置歌词获取服务
 class LxLyricApiService {
@@ -25,6 +26,9 @@ class LxLyricApiService {
         break;
       case 'kg':
         result = await _getKgLyric(music);
+        break;
+      case 'mg':
+        result = await LxMgSource.getLyric(music);
         break;
       default:
         result = await _getKwLyric(music);

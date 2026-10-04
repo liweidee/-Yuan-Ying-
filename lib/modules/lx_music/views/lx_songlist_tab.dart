@@ -83,6 +83,7 @@ class _LxSonglistTabState extends State<LxSonglistTab> {
       ('tx', '小秋音乐'),
       ('kw', '小蜗音乐'),
       ('wy', '小芸音乐'),
+      ('mg', '小咪音乐'),
       ('all', '聚合'),
     ];
     return SizedBox(

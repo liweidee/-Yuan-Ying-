@@ -2,6 +2,7 @@ import '../models/lx_music_model.dart';
 import '../models/lx_script_model.dart';
 import '../utils/lx_logger.dart';
 import 'lx_js_engine.dart';
+import 'lx_mg_source.dart';
 
 /// 洛雪音乐取播放地址服务
 class LxMusicUrlService {
@@ -27,6 +28,16 @@ class LxMusicUrlService {
     String quality = '320k',
   }) async {
     final source = music.source ?? 'kw';
+
+    // 内置解析器优先：咪咕音乐
+    if (source == 'mg') {
+      final url = await LxMgSource.getMusicUrl(music);
+      if (url != null && url.isNotEmpty) {
+        lastUsedQuality = quality;
+        return url;
+      }
+      LxLogger.warn('咪咕内置解析失败，尝试回退 JS 引擎');
+    }
 
     if (!_engine.isActive) {
       LxLogger.warn('未激活用户 API 源，无法获取播放地址');

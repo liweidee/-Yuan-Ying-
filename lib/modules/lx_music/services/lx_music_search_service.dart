@@ -4,6 +4,7 @@ import '../models/lx_music_model.dart';
 import '../utils/lx_logger.dart';
 import '../utils/lx_sign_utils.dart';
 import 'lx_http.dart';
+import 'lx_mg_source.dart';
 
 /// 洛雪音乐搜索服务（4 源）
 class LxMusicSearchService {
@@ -15,20 +16,22 @@ class LxMusicSearchService {
     'kg': _KgSearchSource(),
     'tx': _TxSearchSource(),
     'wy': _WySearchSource(),
+    'mg': _MgSearchSource(),
   };
 
   final Map<String, LxSearchResult> _resultCache = {};
   final Map<String, DateTime> _resultCacheTime = {};
   static const _resultCacheTtl = Duration(minutes: 2);
 
-  static const List<String> availableSources = ['kw', 'kg', 'tx', 'wy', 'all'];
+  static const List<String> availableSources = ['kw', 'kg', 'tx', 'wy', 'mg', 'all'];
 
   static const Map<String, String> sourceNames = {
     'kw': '小蜗音乐',
     'kg': '小枸音乐',
     'tx': '小秋音乐',
     'wy': '小芸音乐',
-    'all': '全部',
+    'mg': '小咪音乐',
+    'all': '全网',
   };
 
   Future<LxSearchResult> search({
@@ -630,4 +633,41 @@ class LxSearchResult {
   });
 
   bool get hasMore => hasMoreOverride ?? (list.length < total);
+}
+
+// ==================== 咪咕 ====================
+
+class _MgSearchSource extends _LxSearchSource {
+  @override
+  Future<LxSearchResult> search({
+    required String keyword,
+    int page = 1,
+    int pageSize = 30,
+  }) async {
+    try {
+      final list = await LxMgSource.search(
+        keyword,
+        page: page,
+        limit: pageSize,
+      );
+
+      return LxSearchResult(
+        list: list,
+        total: list.length * 10, // 咪咕不返回精确 total，用估算
+        page: page,
+        pageSize: pageSize,
+        source: 'mg',
+        hasMoreOverride: list.length >= pageSize,
+      );
+    } catch (e) {
+      LxLogger.error('咪咕搜索失败: $e');
+      return LxSearchResult(
+        list: [],
+        total: 0,
+        page: page,
+        pageSize: pageSize,
+        source: 'mg',
+      );
+    }
+  }
 }

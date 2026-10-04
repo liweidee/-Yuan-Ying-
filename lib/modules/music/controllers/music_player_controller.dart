@@ -105,6 +105,9 @@ class MusicPlayerController extends GetxController {
 
   VoidCallback? onPlayCompleted;
 
+  /// 防抖锁——防止 onPlayCompleted 被短时间内重复触发
+  bool _handlingCompleted = false;
+
   @override
   void onInit() {
     super.onInit();
@@ -668,25 +671,50 @@ class MusicPlayerController extends GetxController {
   }
 
   // ===== 内部方法 =====
-  void _handlePlayCompleted() {
-    if (stopAfterCurrent.value) {
-      stopAfterCurrent.value = false;
-      timerMinutes.value = 0;
-      pause();
-      ToastUtils.show('当前曲目已播放完毕，已暂停');
-      return;
-    }
-    final nextIndex = _getNextIndex();
-    if (nextIndex >= 0) {
-      currentIndex.value = nextIndex;
-      if (_currentVodId != null && _currentVodId!.isNotEmpty) {
-        _saveCurrentIndex(_currentVodId!, nextIndex);
+  Future<void> _handlePlayCompleted() async {
+    // 防抖保护：如果上一次还没处理完，直接忽略
+    if (_handlingCompleted) return;
+    _handlingCompleted = true;
+
+    try {
+      // ===== 场景 1：定时"播放完当前曲目" =====
+      if (stopAfterCurrent.value) {
+        stopAfterCurrent.value = false;
+        timerMinutes.value = 0;
+
+        // 用 await 确保 stop 执行完成
+        try {
+          await _handler.player.stop();
+        } catch (_) {}
+
+        playing.value = false;
+        ToastUtils.show('当前曲目已播放完毕，已暂停');
+
+        // 500ms 后释放锁，防止异步事件重复触发
+        await Future.delayed(const Duration(milliseconds: 500));
+        return;
       }
-      onPlayCompleted?.call();
-    } else {
-      _handler.pause();
-      playing.value = false;
-      ToastUtils.show('播放列表已结束');
+
+      // ===== 场景 2：正常切歌 =====
+      final nextIndex = _getNextIndex();
+      if (nextIndex >= 0) {
+        currentIndex.value = nextIndex;
+        if (_currentVodId != null && _currentVodId!.isNotEmpty) {
+          _saveCurrentIndex(_currentVodId!, nextIndex);
+        }
+        onPlayCompleted?.call();
+
+        // 300ms 后释放
+        await Future.delayed(const Duration(milliseconds: 300));
+      } else {
+        await _handler.pause();
+        playing.value = false;
+        ToastUtils.show('播放列表已结束');
+
+        await Future.delayed(const Duration(milliseconds: 500));
+      }
+    } finally {
+      _handlingCompleted = false;
     }
   }
 

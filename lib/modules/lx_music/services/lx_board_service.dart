@@ -6,6 +6,7 @@ import 'package:yuanying/modules/lx_music/services/lx_http.dart';
 import 'package:yuanying/modules/lx_music/utils/lx_logger.dart';
 import 'package:yuanying/modules/lx_music/utils/lx_sign_utils.dart';
 import 'package:yuanying/modules/lx_music/utils/lx_wbd_crypto.dart';
+import 'package:yuanying/modules/lx_music/services/lx_mg_source.dart';
 
 /// 洛雪音乐榜单服务（4 源完整版）
 ///
@@ -21,7 +22,7 @@ class LxBoardService {
   static final LxBoardService instance = LxBoardService._();
 
   /// 支持的源（对齐洛雪 index.js）
-  static const List<String> supportedSources = ['kw', 'kg', 'tx', 'wy'];
+  static const List<String> supportedSources = ['kw', 'kg', 'tx', 'wy', 'mg'];
 
   /// 源显示名
   static const Map<String, String> sourceNames = {
@@ -29,6 +30,7 @@ class LxBoardService {
     'kg': '小枸音乐',
     'tx': '小秋音乐',
     'wy': '小芸音乐',
+    'mg': '小咪音乐',
   };
 
   // ==================== 榜单分类常量 ====================
@@ -146,11 +148,25 @@ class LxBoardService {
     LxBoardInfo(id: 'wy__7785091694', name: '黑胶VIP爱搜榜', bangid: '7785091694', source: 'wy'),
   ];
 
+  static const List<LxBoardInfo> _mgBoards = [
+    LxBoardInfo(id: 'mg__27553319', name: '新歌榜', bangid: '27553319', source: 'mg'),
+    LxBoardInfo(id: 'mg__27186466', name: '热歌榜', bangid: '27186466', source: 'mg'),
+    LxBoardInfo(id: 'mg__27553408', name: '原创榜', bangid: '27553408', source: 'mg'),
+    LxBoardInfo(id: 'mg__75959118', name: '音乐风向榜', bangid: '75959118', source: 'mg'),
+    LxBoardInfo(id: 'mg__76557036', name: '彩铃分贝榜', bangid: '76557036', source: 'mg'),
+    LxBoardInfo(id: 'mg__76557745', name: '会员臻爱榜', bangid: '76557745', source: 'mg'),
+    LxBoardInfo(id: 'mg__23189800', name: '港台榜', bangid: '23189800', source: 'mg'),
+    LxBoardInfo(id: 'mg__23189399', name: '内地榜', bangid: '23189399', source: 'mg'),
+    LxBoardInfo(id: 'mg__19190036', name: '欧美榜', bangid: '19190036', source: 'mg'),
+    LxBoardInfo(id: 'mg__83176390', name: '国风金曲榜', bangid: '83176390', source: 'mg'),
+  ];
+
   static const Map<String, List<LxBoardInfo>> _boardsBySource = {
     'kw': _kwBoards,
     'kg': _kgBoards,
     'tx': _txBoards,
     'wy': _wyBoards,
+    'mg': _mgBoards,
   };
 
   /// 获取某源的榜单分类列表
@@ -176,6 +192,8 @@ class LxBoardService {
           return await _getTxBoard(bangid, page);
         case 'wy':
           return await _getWyBoard(bangid, page);
+        case 'mg':
+          return await _getMgBoard(bangid, page);
         default:
           LxLogger.warn('不支持的榜单源: $source');
           return LxBoardDetail.empty(source, page);
@@ -627,6 +645,19 @@ class LxBoardService {
       LxLogger.error('WY榜单失败: $e');
       return LxBoardDetail.empty('wy', page);
     }
+  }
+
+  // ============ 咪咕 ============
+
+  Future<LxBoardDetail> _getMgBoard(String bangid, int page) async {
+    final list = await LxMgSource.getBoardSongs(bangid);
+    return LxBoardDetail(
+      list: list,
+      total: list.length,
+      page: 1,
+      limit: 100,
+      source: 'mg',
+    );
   }
 
   List<LxMusic> _parseWySongs(List songs, List privileges) {
