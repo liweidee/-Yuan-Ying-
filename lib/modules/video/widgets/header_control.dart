@@ -36,208 +36,6 @@ class _HeaderControlState extends State<HeaderControl> {
     playerController = controller.playerController;
   }
 
-  // @override
-  // Widget build(BuildContext context) {
-  //   final title = controller.introController.videoDetail.value?.vodName ?? '';
-
-  //   return Container(
-  //     height: 56,
-  //     padding: const EdgeInsets.symmetric(horizontal: 8),
-  //     decoration: const BoxDecoration(
-  //       gradient: LinearGradient(
-  //         begin: Alignment.topCenter,
-  //         end: Alignment.bottomCenter,
-  //         colors: [Colors.black54, Colors.transparent],
-  //       ),
-  //     ),
-  //     child: Row(
-  //       children: [
-  //         // 返回按钮
-  //         SizedBox(
-  //           width: 40,
-  //           height: 34,
-  //           child: IconButton(
-  //             tooltip: '返回',
-  //             style: const ButtonStyle(padding: WidgetStatePropertyAll(EdgeInsets.zero)),
-  //             icon: const Icon(
-  //               FontAwesomeIcons.arrowLeft,
-  //               size: 15,
-  //               color: Colors.white,
-  //             ),
-  //             onPressed: () => playerController.onPopInvokedWithResult(false, null),
-  //           ),
-  //         ),
-  //         // 返回主页按钮
-  //         SizedBox(
-  //           width: 40,
-  //           height: 34,
-  //           child: IconButton(
-  //             tooltip: '返回主页',
-  //             style: const ButtonStyle(padding: WidgetStatePropertyAll(EdgeInsets.zero)),
-  //             icon: const Icon(
-  //               FontAwesomeIcons.house,
-  //               size: 15,
-  //               color: Colors.white,
-  //             ),
-  //             onPressed: playerController.onCloseAll,
-  //           ),
-  //         ),
-  //         // 标题（Marquee滚动）
-  //         Expanded(
-  //           child: Padding(
-  //             key: _titleKey,
-  //             padding: const EdgeInsets.only(right: 10),
-  //             child: MarqueeText(
-  //               title,
-  //               spacing: 30,
-  //               velocity: 30,
-  //               style: const TextStyle(
-  //                 color: Colors.white,
-  //                 fontSize: 16,
-  //                 fontWeight: FontWeight.w500,
-  //               ),
-  //               provider: ContextSingleTicker(context, autoStart: () => true),
-  //             ),
-  //           ),
-  //         ),
-  //         // 内核切换按钮（桌面端显示）
-  //         PopupMenuButton<PlayerEngineType>(
-  //           tooltip: '切换播放内核',
-  //           offset: const Offset(0, 40),
-  //           color: Colors.black.withOpacity(0.8),
-  //           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-  //           initialValue: PlayerPref.playerEngine,
-  //           itemBuilder: (context) => [
-  //             PopupMenuItem<PlayerEngineType>(
-  //               value: PlayerEngineType.mediaKit,
-  //               child: Row(
-  //                 children: [
-  //                   Text('MPV', style: const TextStyle(color: Colors.white, fontSize: 13)),
-  //                   if (PlayerPref.playerEngine == PlayerEngineType.mediaKit)
-  //                     const Spacer(),
-  //                   if (PlayerPref.playerEngine == PlayerEngineType.mediaKit)
-  //                     Icon(Icons.check, color: Colors.white, size: 16),
-  //                 ],
-  //               ),
-  //             ),
-  //             PopupMenuItem<PlayerEngineType>(
-  //               value: PlayerEngineType.fvp,
-  //               child: Row(
-  //                 children: [
-  //                   Text('MDK', style: const TextStyle(color: Colors.white, fontSize: 13)),
-  //                   if (PlayerPref.playerEngine == PlayerEngineType.fvp)
-  //                     const Spacer(),
-  //                   if (PlayerPref.playerEngine == PlayerEngineType.fvp)
-  //                     Icon(Icons.check, color: Colors.white, size: 16),
-  //                 ],
-  //               ),
-  //             ),
-  //           ],
-  //           onSelected: (newType) => _switchEngine(newType),
-  //           child: SizedBox(
-  //             width: 60,
-  //             child: Row(
-  //               mainAxisSize: MainAxisSize.min,
-  //               mainAxisAlignment: MainAxisAlignment.center,
-  //               children: [
-  //                 Icon(
-  //                   Icons.play_arrow,
-  //                   size: 14,
-  //                   color: Colors.white,
-  //                 ),
-  //                 const SizedBox(width: 4),
-  //                 Text(
-  //                   PlayerPref.playerEngine == PlayerEngineType.fvp ? 'MDK' : 'MPV',
-  //                   style: const TextStyle(
-  //                     color: Colors.white,
-  //                     fontSize: 11,
-  //                     fontWeight: FontWeight.w500,
-  //                   ),
-  //                 ),
-  //               ],
-  //             ),
-  //           ),
-  //         ),
-          
-  //         // 画中画按钮（仅在桌面端且非 FVP 引擎时显示）
-  //         if (PlatformUtils.isDesktop && PlayerPref.playerEngine != PlayerEngineType.fvp)
-  //           SizedBox(
-  //             width: 40,
-  //             height: 34,
-  //             child: Obx(() {
-  //               return IconButton(
-  //                 tooltip: playerController.isDesktopPip ? '退出画中画' : '画中画',
-  //                 style: const ButtonStyle(padding: WidgetStatePropertyAll(EdgeInsets.zero)),
-  //                 onPressed: () {
-  //                   if (playerController.isDesktopPip) {
-  //                     playerController.exitDesktopPip();
-  //                   } else {
-  //                     playerController.enterDesktopPip();
-  //                   }
-  //                 },
-  //                 icon: Icon(
-  //                   playerController.isDesktopPip
-  //                       ? Icons.picture_in_picture_alt
-  //                       : Icons.picture_in_picture_outlined,
-  //                   size: 19,
-  //                   color: Colors.white,
-  //                 ),
-  //               );
-  //             }),
-  //           ),
-  //         // 投屏按钮
-  //         SizedBox(
-  //           width: 40,
-  //           height: 34,
-  //           child: IconButton(
-  //             tooltip: '投屏',
-  //             style: const ButtonStyle(padding: WidgetStatePropertyAll(EdgeInsets.zero)),
-  //             onPressed: controller.onCast,
-  //             icon: const Icon(
-  //               Icons.cast,
-  //               size: 19,
-  //               color: Colors.white,
-  //             ),
-  //           ),
-  //         ),
-  //         // 弹幕开关
-  //         SizedBox(
-  //           width: 40,
-  //           height: 34,
-  //           child: Obx(() {
-  //             final enable = playerController.enableShowDanmaku.value;
-  //             return IconButton(
-  //               tooltip: enable ? '关闭弹幕' : '开启弹幕',
-  //               style: const ButtonStyle(padding: WidgetStatePropertyAll(EdgeInsets.zero)),
-  //               onPressed: controller.toggleDanmaku,
-  //               icon: Icon(
-  //                 enable ? CustomIcons.dm_on : CustomIcons.dm_off,
-  //                 size: 20,
-  //                 color: Colors.white,
-  //               ),
-  //             );
-  //           }),
-  //         ),
-  //         // 更多设置按钮
-  //         SizedBox(
-  //           width: 40,
-  //           height: 34,
-  //           child: IconButton(
-  //             tooltip: '更多设置',
-  //             style: const ButtonStyle(padding: WidgetStatePropertyAll(EdgeInsets.zero)),
-  //             onPressed: () => _showSettingSheet(context),
-  //             icon: const Icon(
-  //               Icons.more_vert_outlined,
-  //               size: 19,
-  //               color: Colors.white,
-  //             ),
-  //           ),
-  //         ),
-  //       ],
-  //     ),
-  //   );
-  // }
-
   @override
   Widget build(BuildContext context) {
     final controller = Get.find<DetailController>(tag: widget.controllerTag);
@@ -430,6 +228,9 @@ class _HeaderControlState extends State<HeaderControl> {
                     icon: const Icon(Icons.cast, size: 19, color: Colors.white),
                   ),
                 ),
+                // 录制（仅 FVP 内核）
+                if (PlayerPref.playerEngine == PlayerEngineType.fvp)
+                  _buildRecordButton(controller),
                 // 用第三方播放器打开（仅桌面端显示）
                 if (PlatformUtils.isDesktop)
                   _buildExternalPlayerEntry(controller),
@@ -560,6 +361,57 @@ class _HeaderControlState extends State<HeaderControl> {
       backgroundColor: Colors.transparent,
       builder: (context) => DanmakuSettings(controller: controller),
     );
+  }
+
+  /// 录制按钮（仅 FVP 内核）
+  Widget _buildRecordButton(DetailController controller) {
+    return SizedBox(
+      width: 40,
+      height: 34,
+      child: Obx(() {
+        final isRecording = controller.playerController.isRecording.value;
+        final secs = controller.playerController.recordingSeconds.value;
+        final tooltip = isRecording
+            ? '录制中 ${_formatRecTime(secs)}，点击停止'
+            : '开始录制';
+        return IconButton(
+          tooltip: tooltip,
+          style: const ButtonStyle(
+            padding: WidgetStatePropertyAll(EdgeInsets.zero),
+          ),
+          onPressed: () => _toggleRecording(controller),
+          icon: Icon(
+            isRecording ? Icons.videocam : Icons.videocam_outlined,
+            size: 24,
+            color: isRecording ? Colors.red : Colors.white,
+          ),
+        );
+      }),
+    );
+  }
+
+  /// 切换录制状态
+  Future<void> _toggleRecording(DetailController controller) async {
+    if (controller.playerController.isRecording.value) {
+      // 停止
+      controller.stopRecording();
+      SmartDialog.showToast('录制已停止，文件保存在「源影录制」目录');
+    } else {
+      // 开始
+      final ok = await controller.startRecording();
+      if (ok) {
+        SmartDialog.showToast('录制已开始');
+      } else {
+        SmartDialog.showToast('录制启动失败，当前设备可能不支持');
+      }
+    }
+  }
+
+  /// 格式化录制时长 mm:ss
+  String _formatRecTime(int secs) {
+    final m = (secs ~/ 60).toString().padLeft(2, '0');
+    final s = (secs % 60).toString().padLeft(2, '0');
+    return '$m:$s';
   }
 
   /// 构建第三方播放器入口

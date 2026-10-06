@@ -9,6 +9,7 @@ import 'package:yuanying/modules/live/controllers/live_controller.dart';
 import 'package:yuanying/utils/platform_utils.dart';
 import 'package:yuanying/plugin/pl_player/models/video_fit_type.dart';
 import 'package:yuanying/plugin/pl_player/widgets/common_btn.dart';
+import 'package:yuanying/common/widgets/view_safe_area.dart';
 
 /// 手势类型
 enum _GestureType {
@@ -214,30 +215,37 @@ class _LivePlayerViewState extends State<LivePlayerView> {
           //   - 非锁屏 + 控制栏可见：显示"锁定"图标（左侧居中）
           //   - 锁屏：显示"解锁"图标且常显（不受控制栏显隐影响）
           //   - 非全屏：不显示
+          //
+          // 安全区适配（参考视频播放页 view.dart）：
+          //   使用 ViewSafeArea 包裹，left: true 让按钮根据 viewPadding.left
+          //   自动避开 iOS 横屏刘海；额外再叠加 16px 视觉边距。
           Obx(() {
             if (!ctrl.isFullScreen.value) return const SizedBox.shrink();
             final isLocked = ctrl.controlsLock.value;
             final visible = isLocked || ctrl.controlsVisible.value;
             if (!visible) return const SizedBox.shrink();
 
-            return Positioned(
-              left: 16,
-              top: 0,
-              bottom: 0,
-              child: Center(
-                child: DecoratedBox(
-                  decoration: const BoxDecoration(
-                    color: Color(0x45000000),
-                    borderRadius: BorderRadius.all(Radius.circular(8)),
-                  ),
-                  child: ComBtn(
-                    tooltip: isLocked ? '解锁' : '锁定',
-                    icon: Icon(
-                      isLocked ? Icons.lock : Icons.lock_open,
-                      size: 20,
-                      color: Colors.white,
+            return ViewSafeArea(
+              left: true,
+              right: false,
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 16),
+                  child: DecoratedBox(
+                    decoration: const BoxDecoration(
+                      color: Color(0x45000000),
+                      borderRadius: BorderRadius.all(Radius.circular(8)),
                     ),
-                    onTap: ctrl.toggleControlsLock,
+                    child: ComBtn(
+                      tooltip: isLocked ? '解锁' : '锁定',
+                      icon: Icon(
+                        isLocked ? Icons.lock : Icons.lock_open,
+                        size: 20,
+                        color: Colors.white,
+                      ),
+                      onTap: ctrl.toggleControlsLock,
+                    ),
                   ),
                 ),
               ),
@@ -253,11 +261,14 @@ class _LivePlayerViewState extends State<LivePlayerView> {
           //   - 非锁屏 + 控制栏隐藏：不显示
           //
           // 位置：
-          //   Positioned(right: 16, top: 0, bottom: 0) + Center
-          //   始终保持在右侧垂直居中。
-          //   两个按钮时，Column 有两个 child，中间 8px 间距；
-          //   只有一个按钮时（锁屏下只剩截图），Column 只有一个 child，
-          //   依然垂直居中，不会出现"贴顶"或"贴底"。
+          //   ViewSafeArea(right: true) + Align.centerRight
+          //   始终保持在右侧垂直居中，并根据 viewPadding.right
+          //   自动避开 iOS 横屏刘海；额外叠加 16px 视觉边距。
+          //
+          // 间距：
+          //   两按钮时（旋转在上 + 8px 间距 + 截图在下）
+          //   一按钮时（锁屏下只剩截图）
+          //   1 个 child 时 Column 依然垂直居中，不会贴顶/贴底。
           Obx(() {
             if (!ctrl.isFullScreen.value) return const SizedBox.shrink();
 
@@ -275,52 +286,55 @@ class _LivePlayerViewState extends State<LivePlayerView> {
               return const SizedBox.shrink();
             }
 
-            return Positioned(
-              right: 16,
-              top: 0,
-              bottom: 0,
-              child: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // 旋转屏幕（仅移动端，非锁屏时显示）
-                    if (showRotate) ...[
-                      DecoratedBox(
-                        decoration: const BoxDecoration(
-                          color: Color(0x45000000),
-                          borderRadius: BorderRadius.all(Radius.circular(8)),
-                        ),
-                        child: ComBtn(
-                          tooltip: '旋转屏幕',
-                          icon: const Icon(
-                            Icons.screen_rotation,
-                            size: 20,
-                            color: Colors.white,
+            return ViewSafeArea(
+              left: false,
+              right: true,
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: Padding(
+                  padding: const EdgeInsets.only(right: 16),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // 旋转屏幕（仅移动端，非锁屏时显示）
+                      if (showRotate) ...[
+                        DecoratedBox(
+                          decoration: const BoxDecoration(
+                            color: Color(0x45000000),
+                            borderRadius: BorderRadius.all(Radius.circular(8)),
                           ),
-                          onTap: () => ctrl.toggleOrientation(Get.context!),
+                          child: ComBtn(
+                            tooltip: '旋转屏幕',
+                            icon: const Icon(
+                              Icons.screen_rotation,
+                              size: 20,
+                              color: Colors.white,
+                            ),
+                            onTap: () => ctrl.toggleOrientation(Get.context!),
+                          ),
                         ),
-                      ),
-                      // 两按钮之间的垂直间距
-                      const SizedBox(height: 8),
+                        // 两按钮之间的垂直间距
+                        const SizedBox(height: 8),
+                      ],
+                      // 截图（锁屏时常显；非锁屏时跟随控制栏）
+                      if (showScreenshot)
+                        DecoratedBox(
+                          decoration: const BoxDecoration(
+                            color: Color(0x45000000),
+                            borderRadius: BorderRadius.all(Radius.circular(8)),
+                          ),
+                          child: ComBtn(
+                            tooltip: '截图',
+                            icon: const Icon(
+                              Icons.photo_camera,
+                              size: 20,
+                              color: Colors.white,
+                            ),
+                            onTap: ctrl.takeScreenshot,
+                          ),
+                        ),
                     ],
-                    // 截图（锁屏时常显；非锁屏时跟随控制栏）
-                    if (showScreenshot)
-                      DecoratedBox(
-                        decoration: const BoxDecoration(
-                          color: Color(0x45000000),
-                          borderRadius: BorderRadius.all(Radius.circular(8)),
-                        ),
-                        child: ComBtn(
-                          tooltip: '截图',
-                          icon: const Icon(
-                            Icons.photo_camera,
-                            size: 20,
-                            color: Colors.white,
-                          ),
-                          onTap: ctrl.takeScreenshot,
-                        ),
-                      ),
-                  ],
+                  ),
                 ),
               ),
             );

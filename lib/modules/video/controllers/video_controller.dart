@@ -39,6 +39,7 @@ import 'package:yuanying/t4/services/drpy2_api_service.dart';
 import 'package:yuanying/modules/video/widgets/introduction/intro_detail_panel.dart';
 import 'package:yuanying/plugin/pl_player/models/play_repeat.dart';
 import 'playback_event_listener.dart';
+import 'package:yuanying/utils/platform_utils.dart';
 
 import 'package:yuanying/utils/storage_manager.dart';
 import 'package:yuanying/core/constants/storage_keys.dart';
@@ -115,9 +116,10 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
   int get currentAudioIndex {
     final current = playerController.currentAudioTrack.value;
     if (current == null) return -1;
-    // 检查是否为 AudioTrack.auto() 或 AudioTrack.no()
-    if (current.id == 'auto') return -2;
-    if (current.id == 'no') return -3;
+    final id = current.id;
+    if (id == 'auto') return -2;
+    if (id == 'no') return -3;
+    if (id.isEmpty) return -1;
     return playerController.availableAudioTracks.indexOf(current);
   }
 
@@ -139,7 +141,12 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
 
   String get currentAudioName {
     final current = playerController.currentAudioTrack.value;
-    return current?.title ?? '默认';
+    if (current == null) return '默认';
+    final id = current.id;
+    if (id == 'auto') return '自动选择';
+    if (id == 'no') return '关闭音轨';
+    if (id.isEmpty) return '默认';
+    return current.title ?? '未知';
   }
 
   String get currentVideoName {
@@ -149,7 +156,12 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
 
   String get currentSubtitleName {
     final current = playerController.currentSubtitleTrack.value;
-    return current?.title ?? '关闭';
+    if (current == null) return '关闭';
+    final id = current.id;
+    if (id == 'auto') return '自动选择';
+    if (id == 'no') return '强制无字幕';
+    if (id.isEmpty) return '关闭';
+    return current.title ?? '未知';
   }
 
   // ===== 推送相关 =====
@@ -386,7 +398,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
 
     final idx = vttSubtitlesIndex.value;
     if (idx <= 0 || idx > subtitles.length) {
-      SmartDialog.showToast('请先加载字幕');
+      SmartDialog.showToast('请先通过「加载字幕」载入外部字幕文件（内嵌/硬字幕无法翻译）');
       return;
     }
 
@@ -502,6 +514,80 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
       } catch (_) {}
     }
     _tempSubtitleFiles.clear();
+  }
+
+  // ============================================================
+  // 录制功能
+  // ============================================================
+
+  /// 获取录制保存目录（按平台）
+  Future<Directory?> _getRecordingDir() async {
+    try {
+      String basePath;
+      if (PlatformUtils.isDesktop) {
+        final home = Platform.environment['USERPROFILE'] ??
+            Platform.environment['HOME'];
+        if (home == null) return null;
+        basePath = '$home${Platform.pathSeparator}Downloads'
+            '${Platform.pathSeparator}源影录制';
+      } else {
+        final docs = await getApplicationDocumentsDirectory();
+        basePath = '${docs.path}${Platform.pathSeparator}源影录制';
+      }
+      final dir = Directory(basePath);
+      if (!await dir.exists()) {
+        await dir.create(recursive: true);
+      }
+      return dir;
+    } catch (e) {
+      debugPrint('[DetailController] 获取录制目录失败: $e');
+      return null;
+    }
+  }
+
+  /// 启动录制
+  /// 返回 true 表示成功
+  Future<bool> startRecording() async {
+    if (playerController.isRecording.value) return false;
+
+    final dir = await _getRecordingDir();
+    if (dir == null) {
+      SmartDialog.showToast('无法创建录制目录');
+      return false;
+    }
+
+    final videoName = introController.videoDetail.value?.vodName ?? '未知视频';
+    // 过滤文件名非法字符
+    final safeName = videoName.replaceAll(RegExp(r'[\\/:*?"<>|\s]'), '_');
+
+    final now = DateTime.now();
+    final ts = '${now.year}'
+        '${now.month.toString().padLeft(2, '0')}'
+        '${now.day.toString().padLeft(2, '0')}_'
+        '${now.hour.toString().padLeft(2, '0')}'
+        '${now.minute.toString().padLeft(2, '0')}'
+        '${now.second.toString().padLeft(2, '0')}';
+
+    final path = '${dir.path}${Platform.pathSeparator}源影_${safeName}_$ts.mp4';
+
+    final ok = playerController.startRecording(path);
+    if (ok) {
+      debugPrint('[DetailController] 录制文件: $path');
+    }
+    return ok;
+  }
+
+  /// 停止录制
+  void stopRecording() {
+    playerController.stopRecording();
+  }
+
+  /// 在 `_playEpisode` 顶部调用（切集前）
+  void _stopRecordingIfActive() {
+    if (playerController.isRecording.value) {
+      playerController.stopRecording();
+      SmartDialog.showToast('已切换剧集，录制自动停止');
+    }
   }
 
   /// 切换字幕轨道（内置轨道）
@@ -1200,6 +1286,9 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     bool autoPlay = true,
     Duration? seekTo,
   }) async {
+    // 切集前停止录制
+    _stopRecordingIfActive();
+
     // 每次开始新的播放尝试 → 清掉上一次的失败状态
     _clearPlayFailure();
 
@@ -1469,7 +1558,10 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     bool autoPlay, {
     Duration? seekTo,
   }) async {
-    _isHandlingCompletion = false;
+    // 注意：这里不能重置 _isHandlingCompletion。
+    // 因为 _startPlay 可能由 _handlePlayCompleted → switchEpisode → _playEpisode
+    // 调用，此时锁必须保持到 _handlePlayCompleted 的 finally 才释放。
+    // 用户手动切集时，锁本来就已经是 false（上一次处理已完成），无需重置。
 
     // 确保所有残留弹窗被关闭
     SmartDialog.dismiss(force: true);
@@ -1623,7 +1715,10 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
           if (!success) {
             final episodes = introController.displayEpisodes;
             if (episodes.isNotEmpty) {
-              switchEpisode(0);
+              // 关键：必须 await，让 _handlePlayCompleted 的锁覆盖整个切集流程。
+              // 否则 switchEpisode 内部异步执行时会提前释放锁，
+              // 残留的 completed 事件会再次进入本方法，导致跳到第二集。
+              await switchEpisode(0);
             } else {
               await playerController.pause();
             }
@@ -2171,6 +2266,19 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
   /// 3. 构造 CacheEntry，加入 CacheService 队列
   /// 缓存当前正在播放的视频
   Future<void> cacheCurrentVideo() async {
+    // 拦截本地文件
+    final currentUrl = currentPlayUrl.value;
+    if (currentUrl.isNotEmpty) {
+      final isLocalFile = currentUrl.startsWith('file://') ||
+          (Uri.tryParse(currentUrl)?.scheme == 'file') ||
+          (File(currentUrl).existsSync());
+
+      if (isLocalFile) {
+        SmartDialog.showToast('本地文件不需要重复下载');
+        return; // 直接返回，不执行后续的下载逻辑
+      }
+    }
+
     final detail = introController.videoDetail.value;
     if (detail == null) {
       SmartDialog.showToast('没有可缓存的视频');
@@ -2513,6 +2621,11 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
 
   @override
   void onClose() {
+    // 停止录制
+    if (playerController.isRecording.value) {
+      playerController.stopRecording();
+    }
+
     _updateHistoryProgress();
     _stopProgressUpdater();
 

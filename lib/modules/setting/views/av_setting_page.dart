@@ -51,80 +51,114 @@ class _AvSettingPageState extends State<AvSettingPage> {
           bottom: MediaQuery.viewPaddingOf(context).bottom + 100,
         ),
         children: [
+          // ===== 顶部内核横幅 =====
           _buildEngineBanner(),
-          // ===== 开启硬解 =====
-          _buildSwitchItem(
-            icon: Icons.flash_on_outlined,
-            title: '开启硬解',
-            subtitle: '以较低功耗播放视频，若异常卡死请关闭',
-            value: PlayerPref.enableHA,
-            onChanged: (v) {
-              PlayerPref.enableHA = v;
-              _refresh();
-              SmartDialog.showToast('下次播放生效');
-            },
-          ),
-          const SizedBox(height: 8),
 
-          // ===== 硬解模式 =====
-          _buildNavigateItem(
-            icon: Icons.memory_outlined,
-            title: '硬解模式',
-            subtitle: '当前：${PlayerPref.hardwareDecoding.replaceAll(',', ' → ')}',
-            onTap: _showHwDecDialog,
-          ),
-          const SizedBox(height: 8),
+          // ===== 按内核分块显示 =====
+          if (PlayerPref.playerEngine == PlayerEngineType.mediaKit) ...[
+            // ========== MPV 内核设置 ==========
+            _buildSectionTitle('MPV 内核设置', Icons.play_circle_outline),
+            const SizedBox(height: 8),
 
-          // ===== 缓冲大小 =====
-          _buildNavigateItem(
-            icon: Icons.storage_outlined,
-            title: '缓冲大小',
-            subtitle:
-                '当前：${PlayerPref.bufferSize}MB（前向和后向缓冲区大小，对应 mpv 的 --demuxer-max-bytes）',
-            onTap: () => _showDecimalDialog(
+            _buildSwitchItem(
+              icon: Icons.flash_on_outlined,
+              title: '开启硬解',
+              subtitle: '以较低功耗播放视频，若异常卡死请关闭',
+              value: PlayerPref.enableHA,
+              onChanged: (v) {
+                PlayerPref.enableHA = v;
+                _refresh();
+                SmartDialog.showToast('下次播放生效');
+              },
+            ),
+            const SizedBox(height: 8),
+
+            _buildNavigateItem(
+              icon: Icons.memory_outlined,
+              title: '硬解模式',
+              subtitle: '当前：${PlayerPref.hardwareDecoding.replaceAll(',', ' → ')}',
+              onTap: _showHwDecDialog,
+            ),
+            const SizedBox(height: 8),
+
+            _buildNavigateItem(
+              icon: Icons.storage_outlined,
               title: '缓冲大小',
-              currentValue: PlayerPref.bufferSize,
-              suffix: 'MB',
-              min: 1,
-              max: 1024,
-              onConfirm: (v) => PlayerPref.bufferSize = v,
+              subtitle: '当前：${PlayerPref.bufferSize}MB（对应 mpv 的 --demuxer-max-bytes）',
+              onTap: () => _showDecimalDialog(
+                title: '缓冲大小',
+                currentValue: PlayerPref.bufferSize,
+                suffix: 'MB',
+                min: 1,
+                max: 1024,
+                onConfirm: (v) => PlayerPref.bufferSize = v,
+              ),
             ),
-          ),
-          const SizedBox(height: 8),
+            const SizedBox(height: 8),
 
-          // ===== 缓冲时长 =====
-          _buildNavigateItem(
-            icon: Icons.av_timer,
-            title: '缓冲时长',
-            subtitle:
-                '当前：${PlayerPref.bufferSec}s（实际缓冲为大小/时长二者最小值，对应 mpv 的 --cache-secs）',
-            onTap: () => _showDecimalDialog(
+            _buildNavigateItem(
+              icon: Icons.av_timer,
               title: '缓冲时长',
-              currentValue: PlayerPref.bufferSec,
-              suffix: 's',
-              min: 1,
-              max: 300,
-              onConfirm: (v) => PlayerPref.bufferSec = v,
+              subtitle: '当前：${PlayerPref.bufferSec}s（对应 mpv 的 --cache-secs）',
+              onTap: () => _showDecimalDialog(
+                title: '缓冲时长',
+                currentValue: PlayerPref.bufferSec,
+                suffix: 's',
+                min: 1,
+                max: 300,
+                onConfirm: (v) => PlayerPref.bufferSec = v,
+              ),
             ),
-          ),
-          const SizedBox(height: 8),
+            const SizedBox(height: 8),
 
-          // ===== 自动同步 =====
-          _buildNavigateItem(
-            icon: Icons.sync_rounded,
-            title: '自动同步',
-            subtitle:
-                '当前：${PlayerPref.autosync}（0 表示关闭，对应 mpv 的 --autosync）',
-            onTap: _showAutoSyncDialog,
-          ),
-          const SizedBox(height: 8),
+            _buildNavigateItem(
+              icon: Icons.sync_rounded,
+              title: '自动同步',
+              subtitle: '当前：${PlayerPref.autosync}（0 表示关闭）',
+              onTap: _showAutoSyncDialog,
+            ),
+          ] else ...[
+            // ========== MDK 内核设置 ==========
+            _buildSectionTitle('MDK 内核设置', Icons.memory),
+            const SizedBox(height: 8),
+
+            _buildNavigateItem(
+              icon: Icons.av_timer,
+              title: '最小缓冲',
+              subtitle: '当前：${PlayerPref.mdkBufferMin}ms（等待缓冲达标后才开始播放）',
+              onTap: () => _showIntDialog(
+                title: '最小缓冲',
+                currentValue: PlayerPref.mdkBufferMin,
+                suffix: 'ms',
+                min: 0,
+                max: 30000,
+                onConfirm: (v) => PlayerPref.mdkBufferMin = v,
+              ),
+            ),
+            const SizedBox(height: 8),
+
+            _buildNavigateItem(
+              icon: Icons.storage_outlined,
+              title: '最大缓冲',
+              subtitle: '当前：${PlayerPref.mdkBufferMax}ms（0 表示不限制）',
+              onTap: () => _showIntDialog(
+                title: '最大缓冲',
+                currentValue: PlayerPref.mdkBufferMax,
+                suffix: 'ms',
+                min: 0,
+                max: 60000,
+                onConfirm: (v) => PlayerPref.mdkBufferMax = v,
+              ),
+            ),
+          ],
 
           // ===== 底部说明 =====
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 12),
             child: Text(
-              '提示：以上设置仅对 MPV 内核生效，MDK 内核（FVP）不支持。'
-              '修改后请在切换剧集或重新打开视频时观察效果。',
+              PlayerPref.playerEngine == PlayerEngineType.mediaKit
+                  ? '提示：以上设置仅对 MPV 内核生效。修改后请在切换剧集或重新打开视频时观察效果。'
+                  : '提示：以上设置仅对 MDK（FVP）内核生效。修改后请在切换剧集或重新打开视频时观察效果。',
               style: TextStyle(
                 fontSize: 12,
                 color: colorScheme.outline,
@@ -137,78 +171,35 @@ class _AvSettingPageState extends State<AvSettingPage> {
     );
   }
 
-  /// 顶部内核提示条：告知用户当前内核是否支持这些设置
+  /// 顶部内核提示条
   Widget _buildEngineBanner() {
     final colorScheme = ColorScheme.of(context);
     final isMpv = PlayerPref.playerEngine == PlayerEngineType.mediaKit;
 
-    if (isMpv) {
-      // MPV 内核：中性信息条
-      return Container(
-        margin: const EdgeInsets.only(bottom: 12),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          color: colorScheme.primaryContainer.withOpacity(0.35),
-          borderRadius: Style.mdRadius,
-        ),
-        child: Row(
-          children: [
-            Icon(Icons.check_circle_outline,
-                color: colorScheme.primary, size: 20),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                '当前内核：MPV（以下设置已生效）',
-                style: TextStyle(
-                  fontSize: 13,
-                  color: colorScheme.onSurface,
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    // MDK 内核：警告信息条
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: colorScheme.errorContainer.withOpacity(0.4),
+        color: colorScheme.primaryContainer.withOpacity(0.35),
         borderRadius: Style.mdRadius,
       ),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Padding(
-            padding: const EdgeInsets.only(top: 1),
-            child: Icon(Icons.warning_amber_rounded,
-                color: colorScheme.error, size: 20),
+          Icon(
+            Icons.check_circle_outline,
+            color: colorScheme.primary,
+            size: 20,
           ),
           const SizedBox(width: 8),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '当前内核：MDK（FVP）',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: colorScheme.onErrorContainer,
-                  ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  '以下设置暂不生效。如需使用，请到「设置 → 播放设置 → 默认播放器」切换到 MPV 内核。',
-                  style: TextStyle(
-                    fontSize: 12,
-                    height: 1.5,
-                    color: colorScheme.onErrorContainer,
-                  ),
-                ),
-              ],
+            child: Text(
+              isMpv
+                  ? '当前内核：MPV（以下设置已生效）'
+                  : '当前内核：MDK（FVP，以下设置已生效）',
+              style: TextStyle(
+                fontSize: 13,
+                color: colorScheme.onSurface,
+              ),
             ),
           ),
         ],
@@ -219,6 +210,36 @@ class _AvSettingPageState extends State<AvSettingPage> {
   // ============================================================
   // UI 组件（与 extra_setting_page.dart 风格保持一致）
   // ============================================================
+
+  /// 分组标题（带图标和横线）
+  Widget _buildSectionTitle(String title, IconData icon) {
+    final colorScheme = ColorScheme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(left: 4, top: 4, bottom: 4),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: colorScheme.primary),
+          const SizedBox(width: 8),
+          Text(
+            title,
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: colorScheme.primary,
+              letterSpacing: 0.5,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Container(
+              height: 1,
+              color: colorScheme.outline.withOpacity(0.15),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _buildIconContainer(IconData icon) {
     final colorScheme = ColorScheme.of(context);
@@ -398,6 +419,68 @@ class _AvSettingPageState extends State<AvSettingPage> {
             TextButton(
               onPressed: () {
                 final parsed = double.tryParse(controller.text);
+                if (parsed == null) {
+                  SmartDialog.showToast('请输入有效数字');
+                  return;
+                }
+                if (parsed < min || parsed > max) {
+                  SmartDialog.showToast('数值超出范围');
+                  return;
+                }
+                Get.back(result: parsed);
+              },
+              child: const Text('确定'),
+            ),
+          ],
+        );
+      },
+    );
+    controller.dispose();
+
+    if (result == null) return;
+    onConfirm(result);
+    _refresh();
+    SmartDialog.showToast('设置已保存，下次播放生效');
+  }
+
+  Future<void> _showIntDialog({
+    required String title,
+    required int currentValue,
+    required String suffix,
+    required int min,
+    required int max,
+    required ValueChanged<int> onConfirm,
+  }) async {
+    final controller = TextEditingController(text: currentValue.toString());
+    final result = await showDialog<int>(
+      context: context,
+      builder: (context) {
+        final colorScheme = Theme.of(context).colorScheme;
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: Style.mdRadius),
+          title: Text(title),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            decoration: InputDecoration(
+              suffixText: suffix,
+              suffixStyle: TextStyle(color: colorScheme.outline),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+              helperText: '有效范围：$min ~ $max $suffix',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: Get.back,
+              child: Text('取消', style: TextStyle(color: colorScheme.outline)),
+            ),
+            TextButton(
+              onPressed: () {
+                final parsed = int.tryParse(controller.text);
                 if (parsed == null) {
                   SmartDialog.showToast('请输入有效数字');
                   return;

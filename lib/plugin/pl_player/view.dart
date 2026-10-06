@@ -667,25 +667,15 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
       BottomControlType.next,
     ];
 
-    List<BottomControlType> rightItems;
-    if (isFvpEngine) {
-      rightItems = [
-        BottomControlType.parser,
-        BottomControlType.episode,
-        BottomControlType.fit,
-        BottomControlType.speed,
-        if (!plPlayerController.isDesktopPip) BottomControlType.fullscreen,
-      ];
-    } else {
-      rightItems = [
-        BottomControlType.parser,
-        BottomControlType.episode,
-        BottomControlType.fit,
-        BottomControlType.subtitle,
-        BottomControlType.speed,
-        if (!plPlayerController.isDesktopPip) BottomControlType.fullscreen,
-      ];
-    }
+    // 双内核统一：都显示字幕按钮
+    final rightItems = <BottomControlType>[
+      BottomControlType.parser,
+      BottomControlType.episode,
+      BottomControlType.fit,
+      BottomControlType.subtitle,
+      BottomControlType.speed,
+      if (!plPlayerController.isDesktopPip) BottomControlType.fullscreen,
+    ];
 
     return PlayerBar(
       children: [

@@ -119,11 +119,15 @@ class LxSearchController extends GetxController {
     }
   }
 
-  void setSource(String newSource) {
+  /// 切换搜索源
+  ///
+  /// [autoSearch] 为 true 时，如果当前有关键词会立即用新源重搜（默认行为）。
+  /// 歌单模式下切源会传 false，避免触发歌曲搜索，由 UI 层自己重搜歌单。
+  void setSource(String newSource, {bool autoSearch = true}) {
     if (source.value == newSource) return;
     source.value = newSource;
     _loadHotSearch();
-    if (query.value.isNotEmpty) {
+    if (autoSearch && query.value.isNotEmpty) {
       search(query.value);
     }
   }

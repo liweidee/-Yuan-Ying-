@@ -187,7 +187,7 @@ class _SettingSheetState extends State<SettingSheet> {
       ),
 
       // ===== 音轨选择 =====
-      if (controller.audioTracks.isNotEmpty && !isFvpEngine)
+      if (controller.audioTracks.isNotEmpty)
         _buildSettingItem(
           icon: Icons.audiotrack,
           title: '音轨选择',
@@ -195,8 +195,9 @@ class _SettingSheetState extends State<SettingSheet> {
           onTap: _showAudioTrackDialog,
         ),
 
-      // ===== 视轨选择 =====
-      if (controller.videoTracks.isNotEmpty && !isFvpEngine)
+      // ===== 视轨选择（FVP 不支持切换，仅 MPV 显示）=====
+      if (PlayerPref.playerEngine != PlayerEngineType.fvp &&
+          controller.videoTracks.isNotEmpty)
         _buildSettingItem(
           icon: Icons.videocam,
           title: '视轨选择',
@@ -205,7 +206,7 @@ class _SettingSheetState extends State<SettingSheet> {
         ),
 
       // ===== 字幕轨道 =====
-      if (controller.subtitleTracks.isNotEmpty && !isFvpEngine)
+      if (controller.subtitleTracks.isNotEmpty)
         _buildSettingItem(
           icon: Icons.closed_caption,
           title: '字幕轨道',
@@ -246,21 +247,20 @@ class _SettingSheetState extends State<SettingSheet> {
       //       controller.translateCurrentSubtitle();
       //     },
       //   ),
-      if (!isFvpEngine)
-        Obx(() {
-          final p = controller.translationProgress.value;
-          return _buildSettingItem(
-            icon: Icons.translate,
-            title: '翻译当前字幕',
-            subtitle: p != null
-                ? '翻译中 ${p.done}/${p.total}'
-                : '使用在线翻译服务翻译当前字幕',
-            onTap: () {
-              Navigator.pop(context);
-              controller.translateCurrentSubtitle();
-            },
-          );
-        }),
+      Obx(() {
+        final p = controller.translationProgress.value;
+        return _buildSettingItem(
+          icon: Icons.translate,
+          title: '翻译当前字幕',
+          subtitle: p != null
+              ? '翻译中 ${p.done}/${p.total}'
+              : '使用在线翻译服务翻译当前字幕',
+          onTap: () {
+            Navigator.pop(context);
+            controller.translateCurrentSubtitle();
+          },
+        );
+      }),
 
       const SizedBox(height: 4),
 
@@ -310,6 +310,16 @@ class _SettingSheetState extends State<SettingSheet> {
         subtitle: '重新加载当前视频',
         onTap: _reloadVideo,
       ),
+
+      // ===== 外部音频（FVP 专属，视频无音轨时显示）=====
+      if (PlayerPref.playerEngine == PlayerEngineType.fvp &&
+          controller.audioTracks.isEmpty)
+        _buildSettingItem(
+          icon: Icons.audiotrack,
+          title: '外部音频',
+          subtitle: '为无音轨视频加载外部音频文件',
+          onTap: _showExternalAudioDialog,
+        ),
 
       // ===== 加载字幕 =====
       // if (!isFvpEngine)
@@ -393,6 +403,30 @@ class _SettingSheetState extends State<SettingSheet> {
         onTap: onTap,
       ),
     );
+  }
+
+  List<Widget> _buildMediaInfoRows(ColorScheme colorScheme) {
+    final info = controller.playerController.mediaInfo.value;
+    if (info == null) {
+      return [_infoRow('媒体详情', '暂未获取', colorScheme)];
+    }
+
+    String? format;
+    int? bitRate;
+    int? fileSize;
+    bool? isSeekable;
+
+    // 防御式访问，字段名异常时返回 null 不抛错
+    try { format = (info as dynamic).format as String?; } catch (_) {}
+    try { bitRate = (info as dynamic).bitRate as int?; } catch (_) {}
+    try { fileSize = (info as dynamic).fileSize as int?; } catch (_) {}
+    try { isSeekable = (info as dynamic).isSeekable as bool?; } catch (_) {}
+
+    return [
+      _infoRow('容器格式', format ?? '未知', colorScheme),
+      _infoRow('码率', bitRate != null ? '${(bitRate / 1000).toStringAsFixed(0)} kbps' : '未知', colorScheme),
+      _infoRow('文件大小', fileSize != null ? '${(fileSize / 1024 / 1024).toStringAsFixed(2)} MB' : '未知', colorScheme),
+    ];
   }
 
   // ===== 水平操作区 =====
@@ -766,6 +800,52 @@ class _SettingSheetState extends State<SettingSheet> {
           ),
         ),
       );
+    });
+  }
+
+  void _showExternalAudioDialog() {
+    Navigator.pop(context);
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final colorScheme = Theme.of(Get.context!).colorScheme;
+      final textController = TextEditingController();
+      final result = await showDialog<String>(
+        context: Get.context!,
+        builder: (context) => AlertDialog(
+          title: const Text('外部音频'),
+          content: TextField(
+            controller: textController,
+            autofocus: true,
+            decoration: InputDecoration(
+              hintText: '输入音频文件路径或 URL',
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('取消', style: TextStyle(color: colorScheme.outline)),
+            ),
+            TextButton(
+              onPressed: () {
+                final v = textController.text.trim();
+                if (v.isEmpty) {
+                  SmartDialog.showToast('请输入有效路径');
+                  return;
+                }
+                Navigator.pop(context, v);
+              },
+              child: const Text('确定'),
+            ),
+          ],
+        ),
+      );
+      textController.dispose();
+      if (result != null && result.isNotEmpty) {
+        controller.playerController.setExternalAudio(result);
+        SmartDialog.showToast('外部音频已加载');
+      }
     });
   }
 
@@ -2104,6 +2184,11 @@ class _SettingSheetState extends State<SettingSheet> {
               _infoRow('当前音轨', audioName, colorScheme),
               _infoRow('当前视轨', videoName, colorScheme),
               _infoRow('硬解模式', hwdec, colorScheme),
+              // ===== FVP 高级信息 =====
+              if (PlayerPref.playerEngine == PlayerEngineType.fvp) ...[
+                _infoRow('是否直播', controller.playerController.isLive.value ? '是' : '否', colorScheme),
+                ..._buildMediaInfoRows(colorScheme),
+              ],
             ],
           ),
           actions: [

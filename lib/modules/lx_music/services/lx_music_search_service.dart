@@ -25,6 +25,18 @@ class LxMusicSearchService {
 
   static const List<String> availableSources = ['kw', 'kg', 'tx', 'wy', 'mg', 'all'];
 
+  /// 歌单搜索支持的源
+  ///
+  /// 与 LxSonglistService.searchSonglists 的 switch 分支保持一致：
+  /// 目前只有 kw / tx / wy 三个独立源，加上 'all' 聚合。
+  /// 酷狗和咪咕暂无公开歌单接口，不在列表中。
+  static const List<String> songlistSupportedSources = [
+    'kw',
+    'tx',
+    'wy',
+    'all',
+  ];
+
   static const Map<String, String> sourceNames = {
     'kw': '小蜗音乐',
     'kg': '小枸音乐',

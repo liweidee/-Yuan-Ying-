@@ -39,8 +39,23 @@ class PlayerPref {
   static double get longPressSpeedDefault => _box.get('longPressSpeedDefault', defaultValue: 3.0);
   static set longPressSpeedDefault(double value) => _box.put('longPressSpeedDefault', value);
 
-  /// 倍速列表
-  static List<double> get speedList => _box.get('speedList', defaultValue: [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 3.0]);
+  /// 类型安全转换，防止 Hive 里存成 List<dynamic> 导致强转失败）
+  static List<double> get speedList {
+    final raw = _box.get(
+      'speedList',
+      defaultValue: <double>[0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 3.0],
+    );
+    if (raw is List) {
+      try {
+        return raw.map((e) => (e as num).toDouble()).toList();
+      } catch (_) {
+        // 数据被污染，回退到默认值
+        return <double>[0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 3.0];
+      }
+    }
+    return <double>[0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 3.0];
+  }
+
   static set speedList(List<double> value) => _box.put('speedList', value);
 
   /// 长按自动加倍
@@ -272,6 +287,17 @@ class PlayerPref {
   // 弹幕颜色模式：0=默认（使用原始颜色），1=随机彩色，2=渐变彩色
   static int get danmakuColorMode => _box.get('danmakuColorMode', defaultValue: 0);
   static set danmakuColorMode(int value) => _box.put('danmakuColorMode', value);
+
+  // ===== MDK 内核缓冲配置 =====
+  /// 最小缓冲时长（毫秒），默认 1000
+  /// 等待缓冲到该时长后才开始播放
+  static int get mdkBufferMin => _box.get('mdkBufferMin', defaultValue: 1000);
+  static set mdkBufferMin(int value) => _box.put('mdkBufferMin', value);
+
+  /// 最大缓冲时长（毫秒），默认 4000
+  /// 0 表示不限制缓冲上限
+  static int get mdkBufferMax => _box.get('mdkBufferMax', defaultValue: 4000);
+  static set mdkBufferMax(int value) => _box.put('mdkBufferMax', value);
 
   // ===== 后台播放 =====
 

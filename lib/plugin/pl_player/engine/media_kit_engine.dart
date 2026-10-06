@@ -80,6 +80,7 @@ class MediaKitEngine implements IPlayerEngine {
   StreamSubscription<Duration>? _durationSubscription;
 
   bool _isDisposed = false;
+  bool _skipEndTriggered = false;
 
   late double lastPlaybackSpeed = 1.0;
   final RxDouble _playbackSpeed = PlayerPref.playSpeedDefault.obs;
@@ -265,6 +266,29 @@ class MediaKitEngine implements IPlayerEngine {
   void onUpdatePadding(EdgeInsets padding) {
     subtitlePaddingB = padding.bottom.round().clamp(0, 200);
     putSubtitleSettings();
+  }
+
+  // ===== 直播检测（mpv 无直接 API，通过 duration 判断）=====
+  final RxBool isLive = false.obs;
+
+  // ===== 媒体详情（mpv 不支持，保留占位）=====
+  final Rxn<dynamic> mediaInfo = Rxn<dynamic>();
+
+  // ===== 字幕文本（mpv 不支持扩展回调，保留占位）=====
+  final Rxn<String> currentSubtitleText = Rxn<String>();
+
+  @override
+  void record(String? path) {
+    // media_kit 通过 mpv 命令支持录制，但需走 NativePlayer.command
+    // 此处保留占位，如需要可后续通过 mpv 命令实现
+    debugPrint('[MediaKitEngine] record 未实现: $path');
+  }
+
+  @override
+  void setExternalAudio(String? url) {
+    // media_kit 通过 `setAudioTrack` 配合 Media 构造实现
+    // 暂不提供，保留占位
+    debugPrint('[MediaKitEngine] setExternalAudio 未实现: $url');
   }
 
   // ===== 配置 =====
@@ -680,13 +704,21 @@ class MediaKitEngine implements IPlayerEngine {
         for (final element in _positionListeners) {
           element(event);
         }
+        // ===== 跳过片尾 =====
+        // 关键：不能 pause，否则 completed 事件不会触发，自动切集会失效。
+        // 改为 seek 到末尾前 500ms，让播放器自然播完，走正常切集流程。
         final endSkip = skipEndDuration.value;
-        if (endSkip > 0) {
+        if (endSkip > 0 && !_skipEndTriggered) {
           final total = duration.value.inSeconds;
           if (total > 0 && event.inSeconds >= total - endSkip) {
             if (playerStatus.isPlaying) {
-              pause();
-              SmartDialog.showToast('已跳过片尾');
+              _skipEndTriggered = true;
+              final nearEnd = Duration(seconds: total) -
+                  const Duration(milliseconds: 500);
+              if (event < nearEnd) {
+                seekTo(nearEnd, isSeek: false);
+                SmartDialog.showToast('已跳过片尾');
+              }
             }
           }
         }
@@ -697,6 +729,8 @@ class MediaKitEngine implements IPlayerEngine {
       }),
       stream.duration.listen((Duration event) {
         duration.value = event;
+        // mpv 直播流 duration 通常为 0
+        isLive.value = event == Duration.zero && playerStatus.value.isPlaying;
       }),
       stream.buffer.listen((Duration event) {
         buffered.value = event;
@@ -775,6 +809,8 @@ class MediaKitEngine implements IPlayerEngine {
     if (_isDisposed) {
       await init();
     }
+
+    _skipEndTriggered = false;   // 重置跳过片尾标志
 
     try {
       _processing = true;

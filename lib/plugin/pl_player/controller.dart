@@ -92,6 +92,51 @@ class PlPlayerController {
   PlayRepeat _currentPlayRepeat = PlayRepeat.pause;
 
   // ============================================================
+  // 3.1 录制状态
+  // ============================================================
+  final RxBool _isRecording = false.obs;
+  final RxInt _recordingSeconds = 0.obs;
+  Timer? _recordingTimer;
+
+  RxBool get isRecording => _isRecording;
+  RxInt get recordingSeconds => _recordingSeconds;
+
+  /// 开始录制
+  /// [path] 完整的录制文件路径
+  /// 返回是否启动成功
+  bool startRecording(String path) {
+    if (_isRecording.value) return false;
+    try {
+      _ensureEngine().record(path);
+      _isRecording.value = true;
+      _recordingSeconds.value = 0;
+
+      _recordingTimer?.cancel();
+      _recordingTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+        _recordingSeconds.value++;
+      });
+      return true;
+    } catch (e) {
+      debugPrint('[PlPlayerController] 启动录制失败: $e');
+      return false;
+    }
+  }
+
+  /// 停止录制（幂等）
+  void stopRecording() {
+    if (!_isRecording.value) return;
+    try {
+      _ensureEngine().record(null);
+    } catch (e) {
+      debugPrint('[PlPlayerController] 停止录制失败: $e');
+    }
+    _isRecording.value = false;
+    _recordingSeconds.value = 0;
+    _recordingTimer?.cancel();
+    _recordingTimer = null;
+  }
+
+  // ============================================================
   // 4. 构造
   // ============================================================
   PlPlayerController._() {
@@ -231,7 +276,15 @@ class PlPlayerController {
   // ============================================================
   // 7. 透传：生命周期
   // ============================================================
-  void dispose() => _engine?.dispose();
+  void dispose() {
+    // 停止录制计时器
+    _recordingTimer?.cancel();
+    _recordingTimer = null;
+    _isRecording.value = false;
+    _recordingSeconds.value = 0;
+
+    _engine?.dispose();
+  }
   void onCloseAll() => _engine?.onCloseAll();
 
   // ============================================================
@@ -424,6 +477,31 @@ class PlPlayerController {
   void refreshDanmakuConfig() => _ensureEngine().refreshDanmakuConfig();
   dynamic get danmakuController => _ensureEngine().danmakuController;
   set danmakuController(dynamic value) => _ensureEngine().danmakuController = value;
+
+  // ============================================================
+  // 16.1 透传：直播检测
+  // ============================================================
+  RxBool get isLive => _ensureEngine().isLive;
+
+  // ============================================================
+  // 16.2 透传：媒体详情
+  // ============================================================
+  Rxn<dynamic> get mediaInfo => _ensureEngine().mediaInfo;
+
+  // ============================================================
+  // 16.3 透传：字幕文本
+  // ============================================================
+  Rxn<String> get currentSubtitleText => _ensureEngine().currentSubtitleText;
+
+  // ============================================================
+  // 16.4 透传：录制
+  // ============================================================
+  void record(String? path) => _ensureEngine().record(path);
+
+  // ============================================================
+  // 16.5 透传：外部音频
+  // ============================================================
+  void setExternalAudio(String? url) => _ensureEngine().setExternalAudio(url);
 
   // ============================================================
   // 17. 透传：播放模式

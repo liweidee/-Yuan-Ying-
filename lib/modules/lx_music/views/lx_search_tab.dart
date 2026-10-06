@@ -28,7 +28,8 @@ class _LxSearchTabState extends State<LxSearchTab> {
 
   bool _playlistMode = false;
 
-  final RxString _playlistSource = 'tx'.obs;
+  // 歌单结果保持局部状态（歌单结果本身不跨模式共享）
+  // 平台源统一使用 _controller.source，不再维护独立的 _playlistSource
   final RxList<LxSonglistInfo> _playlistResults = <LxSonglistInfo>[].obs;
   final RxBool _isSearchingPlaylists = false.obs;
   final RxString _playlistSearchError = ''.obs;
@@ -77,12 +78,19 @@ class _LxSearchTabState extends State<LxSearchTab> {
 
   Future<void> _searchPlaylists(String keyword) async {
     if (keyword.isEmpty) return;
+
+    // 兜底：如果当前源不支持歌单，自动切到聚合
+    final source = _controller.source.value;
+    if (!LxMusicSearchService.songlistSupportedSources.contains(source)) {
+      _controller.setSource('all', autoSearch: false);
+    }
+
     _isSearchingPlaylists.value = true;
     _playlistSearchError.value = '';
     try {
       final list = await LxSonglistService.instance.searchSonglists(
         keyword,
-        source: _playlistSource.value,
+        source: _controller.source.value,
         page: 1,
         pageSize: 30,
       );
@@ -97,7 +105,21 @@ class _LxSearchTabState extends State<LxSearchTab> {
 
   void _switchMode(bool playlist) {
     if (_playlistMode == playlist) return;
+
+    // 从歌曲模式切到歌单模式时，如果当前源不支持歌单，自动切换到"全网"
+    if (playlist) {
+      final currentSource = _controller.source.value;
+      if (!LxMusicSearchService.songlistSupportedSources.contains(currentSource)) {
+        _controller.setSource('all', autoSearch: false);
+        SmartDialog.showToast(
+          '${LxMusicSearchService.sourceNames[currentSource] ?? currentSource} 暂不支持歌单搜索，已切换到 全网',
+        );
+      }
+    }
+
     setState(() => _playlistMode = playlist);
+
+    // 切换模式后，如果有关键词立即用新模式的逻辑重搜
     final q = _searchController.text.trim();
     if (q.isNotEmpty) _performSearch();
   }
@@ -182,9 +204,7 @@ class _LxSearchTabState extends State<LxSearchTab> {
           ),
         ),
         const SizedBox(height: 8),
-        _playlistMode
-            ? _buildPlaylistSourceSelector(colorScheme)
-            : _buildSourceSelector(colorScheme),
+        _buildSourceSelector(colorScheme),
         Expanded(
           child: _playlistMode
               ? _buildPlaylistContent(colorScheme)
@@ -222,7 +242,14 @@ class _LxSearchTabState extends State<LxSearchTab> {
   }
 
   Widget _buildSourceSelector(ColorScheme colorScheme) {
-    final sources = LxMusicSearchService.availableSources
+    // 按当前模式决定可选源列表
+    // - 歌曲模式：全部源（kw/kg/tx/wy/mg/all）
+    // - 歌单模式：只显示支持歌单的源（kw/tx/wy/all）
+    final sourceIds = _playlistMode
+        ? LxMusicSearchService.songlistSupportedSources
+        : LxMusicSearchService.availableSources;
+
+    final sources = sourceIds
         .map((id) => {
               'id': id,
               'name':
@@ -234,17 +261,32 @@ class _LxSearchTabState extends State<LxSearchTab> {
       height: 48,
       child: Obx(() {
         final current = _controller.source.value;
+
+        // 兜底：如果当前源不在可选列表（例如从歌曲模式带着 mg 切到歌单模式但
+        // 由于某些原因没被自动纠正），UI 上突出显示第一个可选源，避免"无选中"
+        // 的视觉空白。真正的搜索请求在 _searchPlaylists 里也会被兜底到 'all'。
+        final effectiveCurrent =
+            sourceIds.contains(current) ? current : sourceIds.first;
+
         return ListView.builder(
           scrollDirection: Axis.horizontal,
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           itemCount: sources.length,
           itemBuilder: (context, index) {
             final s = sources[index];
-            final selected = s['id'] == current;
+            final selected = s['id'] == effectiveCurrent;
             return Padding(
               padding: const EdgeInsets.only(right: 8),
               child: GestureDetector(
-                onTap: () => _controller.setSource(s['id']!),
+                onTap: () {
+                  if (_controller.source.value == s['id']) return;
+                  // 切源：不自动触发歌曲搜索，由下面的 _performSearch 决定
+                  // 是按歌曲搜还是按歌单搜
+                  _controller.setSource(s['id']!, autoSearch: false);
+                  if (_searchController.text.trim().isNotEmpty) {
+                    _performSearch();
+                  }
+                },
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 200),
                   padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -270,63 +312,6 @@ class _LxSearchTabState extends State<LxSearchTab> {
               ),
             );
           },
-        );
-      }),
-    );
-  }
-
-  Widget _buildPlaylistSourceSelector(ColorScheme colorScheme) {
-    const options = [
-      ('tx', '小秋音乐'),
-      ('kw', '小蜗音乐'),
-      ('wy', '小芸音乐'),
-      ('mg', '小咪音乐'),
-      ('all', '聚合'),
-    ];
-
-    return SizedBox(
-      height: 48,
-      child: Obx(() {
-        final current = _playlistSource.value;
-        return ListView(
-          scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          children: options.map((opt) {
-            final selected = current == opt.$1;
-            return Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: GestureDetector(
-                onTap: () {
-                  if (_playlistSource.value == opt.$1) return;
-                  _playlistSource.value = opt.$1;
-                  final q = _searchController.text.trim();
-                  if (q.isNotEmpty) _searchPlaylists(q);
-                },
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: selected
-                        ? colorScheme.primary
-                        : colorScheme.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Text(
-                    opt.$2,
-                    style: TextStyle(
-                      color: selected
-                          ? colorScheme.onPrimary
-                          : colorScheme.onSurfaceVariant,
-                      fontSize: 12,
-                      fontWeight:
-                          selected ? FontWeight.w600 : FontWeight.normal,
-                    ),
-                  ),
-                ),
-              ),
-            );
-          }).toList(),
         );
       }),
     );

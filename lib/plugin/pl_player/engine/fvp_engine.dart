@@ -1,10 +1,13 @@
 // lib/plugin/pl_player/engine/fvp_engine.dart
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' show min;
+import 'dart:typed_data' show Uint8List;
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:get/get.dart';
@@ -12,6 +15,8 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:video_player/video_player.dart' hide VideoTrack, SubtitleTrack;
 import 'package:fvp/fvp.dart' as fvp;
+import 'package:fvp/mdk.dart' as mdk;
+import 'package:battery_plus/battery_plus.dart';
 
 import '../models/data_source.dart';
 import '../models/data_status.dart';
@@ -26,6 +31,7 @@ import 'i_player_engine.dart';
 import 'package:yuanying/core/routes/app_pages.dart';
 import '../utils/fullscreen.dart';
 import '../../../utils/platform_utils.dart';
+import 'package:yuanying/utils/image_utils.dart';
 
 /// FVP 播放器引擎实现
 class FvpEngine implements IPlayerEngine {
@@ -35,6 +41,7 @@ class FvpEngine implements IPlayerEngine {
   VideoPlayerController? _controller;
   bool _isInitialized = false;
   bool _isDisposed = false;
+  bool _skipEndTriggered = false;
   bool _isPlaying = false;
 
   // ---- 状态流（Rx） ----
@@ -77,6 +84,25 @@ class FvpEngine implements IPlayerEngine {
 
   final RxBool _initializedRx = false.obs;
   final RxInt _rebuildCounter = 0.obs;
+
+  // ============================================================
+  // 1.1 FVP 高级特性（官方 0.38.0+ 扩展）
+  // ============================================================
+
+  /// 直播检测（FVP 扩展 `isLive()`）
+  final RxBool isLive = false.obs;
+
+  /// 媒体详细信息（FVP 扩展 `getMediaInfo()`，类型为 mdk.MediaInfo）
+  final Rxn<dynamic> mediaInfo = Rxn<dynamic>();
+
+  /// 当前字幕文本（FVP 扩展 `onSubtitleText()`）
+  final Rxn<String> currentSubtitleText = Rxn<String>();
+
+  /// 外部音频 URL（FVP 扩展 `setMedia(MediaType.audio)`）
+  String? _externalAudioUrl;
+
+  /// 截图用的 GlobalKey（包裹视频层 RepaintBoundary）
+  final GlobalKey _screenshotKey = GlobalKey();
 
   // ---- 音量/亮度 ----
   final RxDouble volume = 1.0.obs;
@@ -179,6 +205,9 @@ class FvpEngine implements IPlayerEngine {
   bool get setSystemBrightness => false;
   final RxString batteryLevel = '--'.obs;
 
+  final Battery _battery = Battery();
+  StreamSubscription<BatteryState>? _batterySubscription;
+
   // ---- 监听器 ----
   final Set<ValueChanged<Duration>> _positionListeners = {};
   final Set<ValueChanged<PlayerStatus>> _statusListeners = {};
@@ -258,6 +287,25 @@ class FvpEngine implements IPlayerEngine {
   @override
   Future<void> init() async {
     _isDisposed = false;
+    initBatteryListener();
+  }
+
+  void initBatteryListener() {
+    // 先取消旧的，避免重复 init 时叠加订阅
+    _batterySubscription?.cancel();
+    _batterySubscription = _battery.onBatteryStateChanged.listen((state) {
+      _updateBatteryLevel();
+    });
+    _updateBatteryLevel();
+  }
+
+  Future<void> _updateBatteryLevel() async {
+    try {
+      final level = await _battery.batteryLevel;
+      batteryLevel.value = '$level%';
+    } catch (_) {
+      batteryLevel.value = '--%';
+    }
   }
 
   @override
@@ -265,9 +313,11 @@ class FvpEngine implements IPlayerEngine {
     if (_isDisposed) return;
     _isDisposed = true;
 
-    //（关闭 Rx 是导致 Null 异常的根源）
-    // try { _initializedRx.close(); } catch (_) {}
-    // try { _rebuildCounter.close(); } catch (_) {}
+    _batterySubscription?.cancel();
+    _batterySubscription = null;
+
+    // 清理外部音频状态
+    _externalAudioUrl = null;
 
     _removeListeners();
     _controller?.dispose();
@@ -329,12 +379,20 @@ class FvpEngine implements IPlayerEngine {
       await init();
     }
 
+    _skipEndTriggered = false;   // 重置跳过片尾标志
+
     _processing = true;
     _vodId = vodId;
     _width = width;
     _height = height;
     _playbackSpeed = speed;
     this.dataSource = dataSource;
+
+    // 切换媒体前清理状态（避免 fvp Issue #85 外部音频 bug）
+    _externalAudioUrl = null;
+    mediaInfo.value = null;
+    currentSubtitleText.value = null;
+    isLive.value = false;
 
     _removeListeners();
     await _controller?.dispose();
@@ -379,6 +437,48 @@ class FvpEngine implements IPlayerEngine {
       _initializedRx.value = true;
       _rebuildCounter.value++;
 
+      // ============================================================
+      // FVP 官方扩展初始化（必须在 initialize 之后调用）
+      // ============================================================
+
+      // 1) 缓冲范围（FVP 扩展 `setBufferRange`）
+      try {
+        final bufMin = PlayerPref.mdkBufferMin;
+        final bufMax = PlayerPref.mdkBufferMax;
+        _controller!.setBufferRange(min: bufMin, max: bufMax);
+        debugPrint('[FvpEngine] setBufferRange: min=$bufMin, max=$bufMax');
+      } catch (e) {
+        debugPrint('[FvpEngine] setBufferRange 失败: $e');
+      }
+
+      // 2) 直播检测（FVP 扩展 `isLive()`）
+      try {
+        isLive.value = _controller!.isLive();
+        debugPrint('[FvpEngine] isLive = ${isLive.value}');
+      } catch (e) {
+        debugPrint('[FvpEngine] isLive 失败: $e');
+      }
+
+      // 3) 媒体详情（FVP 扩展 `getMediaInfo()`）
+      try {
+        mediaInfo.value = _controller!.getMediaInfo();
+        debugPrint('[FvpEngine] mediaInfo 已获取');
+      } catch (e) {
+        debugPrint('[FvpEngine] getMediaInfo 失败: $e');
+      }
+
+      // 4) 字幕文本回调（FVP 扩展 `onSubtitleText()`）
+      try {
+        _controller!.onSubtitleText((start, end, text) {
+          currentSubtitleText.value = text.join('\n');
+        });
+        debugPrint('[FvpEngine] onSubtitleText 已注册');
+      } catch (e) {
+        debugPrint('[FvpEngine] onSubtitleText 注册失败: $e');
+      }
+
+      // ============================================================
+
       _isInitialized = true;
       this.duration.value = _controller!.value.duration;
       position = _controller!.value.position;
@@ -410,7 +510,6 @@ class FvpEngine implements IPlayerEngine {
 
       if (autoplay) {
         debugPrint('[FvpEngine] Autoplay: playing');
-        // 如果已经处于播放状态，先重置再播放（确保干净状态）
         if (_isPlaying) {
           _isPlaying = false;
         }
@@ -458,13 +557,13 @@ class FvpEngine implements IPlayerEngine {
       debugPrint('[FvpEngine] play() skipped: controller=$_controller, isInitialized=$_isInitialized');
       return;
     }
-    
-    // ===== 幂等性保护：如果已经在播放，直接返回，不触发内部状态机重置 =====
+
+    // 幂等性保护：如果已经在播放，直接返回
     if (_isPlaying && _controller!.value.isPlaying) {
       debugPrint('[FvpEngine] play() skipped: already playing, no-op');
       return;
     }
-    
+
     controls = !hideControls;
     if (repeat) {
       await _controller!.seekTo(Duration.zero);
@@ -494,10 +593,26 @@ class FvpEngine implements IPlayerEngine {
       return;
     }
     try {
-      await _controller!.fastSeekTo(target);
+      await _controller!.seekTo(target);
     } catch (_) {
       await _controller!.seekTo(target);
     }
+
+    // ============================================================
+    // 参考：FVP 扩展方法 fastSeekTo 用法（默认不启用）
+    // ============================================================
+    // 官方文档：fast seek to a key frame
+    // 特点：跳转更快，但结果位置可能与请求位置有偏差（不精确）
+    // 适用场景：快速预览、长按倍速前进
+    // 注意：会导致跳过片头片尾不准、拖拽进度条偏移
+    //
+    // 接入方式：
+    //   try {
+    //     await _controller!.fastSeekTo(target);
+    //   } catch (_) {
+    //     await _controller!.seekTo(target);
+    //   }
+
     this.position = target;
     updatePositionSecond();
   }
@@ -620,74 +735,202 @@ class FvpEngine implements IPlayerEngine {
   // 8. 轨道控制
   // ============================================================
 
+  /// 刷新轨道列表
+  ///
+  /// 关键点 1：`getActiveAudioTracks()` / `getActiveSubtitleTracks()`
+  /// 返回的是"轨道在列表中的位置"（0-indexed），不是流的全局 index。
+  /// 因此 track.id 后缀必须用列表位置 i。
+  ///
+  /// 关键点 2：MKV 压制常留下空占位字幕轨（只有 1 帧 / 几十字节），
+  /// 切换这类轨道无任何视觉效果。需通过 metadata 里的
+  /// NUMBER_OF_FRAMES / NUMBER_OF_BYTES 过滤掉它们，
+  /// 与 MPV 内核的 _isValidSubtitleTrack 行为对齐。
   void _updateTracks() {
     if (_controller == null || !_isInitialized) return;
 
     try {
-      final audioTracks = (_controller!.getActiveAudioTracks() ?? []) as List<dynamic>;
-      final videoTracks = (_controller!.getActiveVideoTracks() ?? []) as List<dynamic>;
-      final subtitleTracks = (_controller!.getActiveSubtitleTracks() ?? []) as List<dynamic>;
-
       availableAudioTracks.clear();
       availableVideoTracks.clear();
       availableSubtitleTracks.clear();
 
-      for (final item in audioTracks) {
-        final idx = item is int ? item : 0;
-        availableAudioTracks.add(AudioTrack(
-          'fvp_audio_$idx',
-          '音轨 ${idx + 1}',
-          '',
-        ));
+      final info = _controller!.getMediaInfo();
+
+      if (info != null) {
+        // ===== 音轨 =====
+        final audioList = info.audio ?? [];
+        for (int i = 0; i < audioList.length; i++) {
+          final stream = audioList[i];
+          String? title;
+          String? lang;
+          try {
+            final m = stream.metadata;
+            if (m is Map) {
+              title = m['title']?.toString();
+              lang = m['language']?.toString();
+            }
+          } catch (_) {}
+
+          String codecName = '';
+          final codecObj = stream.codec;
+          if (codecObj != null) {
+            try {
+              codecName = (codecObj as dynamic).codec?.toString() ?? '';
+            } catch (_) {}
+          }
+
+          final buf = StringBuffer();
+          if (title != null && title.isNotEmpty) {
+            buf.write(title);
+          } else if (lang != null && lang.isNotEmpty) {
+            buf.write('音轨 ${i + 1} ($lang)');
+          } else {
+            buf.write('音轨 ${i + 1}');
+          }
+          if (codecName.isNotEmpty) buf.write(' · ${codecName.toUpperCase()}');
+
+          availableAudioTracks.add(
+            AudioTrack('fvp_audio_$i', buf.toString(), lang ?? ''),
+          );
+        }
+
+        // ===== 视轨 =====
+        final videoList = info.video ?? [];
+        for (int i = 0; i < videoList.length; i++) {
+          final stream = videoList[i];
+          String codecName = '';
+          final codecObj = stream.codec;
+          if (codecObj != null) {
+            try {
+              codecName = (codecObj as dynamic).codec?.toString() ?? '';
+            } catch (_) {}
+          }
+          final rotation = stream.rotation;
+          final buf = StringBuffer('视轨 ${i + 1}');
+          if (codecName.isNotEmpty) buf.write(' · ${codecName.toUpperCase()}');
+          if (rotation != null && rotation != 0) buf.write(' · ${rotation}°');
+
+          availableVideoTracks.add(
+            VideoTrack('fvp_video_$i', buf.toString(), ''),
+          );
+        }
+
+        // ===== 字幕轨 =====
+        final subtitleList = info.subtitle ?? [];
+        for (int i = 0; i < subtitleList.length; i++) {
+          final stream = subtitleList[i];
+
+          // ---- 空占位字幕轨过滤 ----
+          // MKV 压制常留下只有 1 帧/几十字节的空字幕轨，
+          // 切换时无任何视觉效果，会造成"点了没反应"的困惑。
+          int? frameCount;
+          int? byteCount;
+          try {
+            final m = stream.metadata;
+            if (m is Map) {
+              frameCount = int.tryParse(m['NUMBER_OF_FRAMES']?.toString() ?? '');
+              byteCount = int.tryParse(m['NUMBER_OF_BYTES']?.toString() ?? '');
+            }
+          } catch (_) {}
+
+          final isEmptyTrack =
+              (frameCount != null && frameCount < 2) ||
+              (byteCount != null && byteCount < 100);
+
+          if (isEmptyTrack) {
+            debugPrint('[FvpEngine] 跳过空占位字幕轨 '
+                'index=${stream.index} (frames=$frameCount, bytes=$byteCount)');
+            continue;
+          }
+
+          String? title;
+          String? lang;
+          try {
+            final m = stream.metadata;
+            if (m is Map) {
+              title = m['title']?.toString();
+              lang = m['language']?.toString();
+            }
+          } catch (_) {}
+
+          final buf = StringBuffer();
+          if (title != null && title.isNotEmpty) {
+            buf.write(title);
+          } else if (lang != null && lang.isNotEmpty) {
+            buf.write('字幕 ${i + 1} ($lang)');
+          } else {
+            buf.write('字幕 ${i + 1}');
+          }
+
+          // 用过滤后列表的长度作为 id 后缀，
+          // 保证 id 连续（0,1,2...），与 setSubtitleTracks 的位置语义匹配。
+          final pos = availableSubtitleTracks.length;
+          availableSubtitleTracks.add(
+            SubtitleTrack('fvp_subtitle_$pos', buf.toString(), lang ?? '', uri: false),
+          );
+        }
       }
 
-      for (final item in videoTracks) {
-        final idx = item is int ? item : 0;
-        availableVideoTracks.add(VideoTrack(
-          'fvp_video_$idx',
-          '视轨 ${idx + 1}',
-          '',
-        ));
+      // ===== 降级：仅在 mediaInfo 完全读取失败时触发 =====
+      // 关键：不能用"过滤后列表是否为空"作为降级条件，
+      //      否则"所有字幕轨都被过滤掉"的正常情况会被降级路径重新填充假轨道。
+      if (info == null) {
+        if (availableAudioTracks.isEmpty) {
+          final active = _controller!.getActiveAudioTracks() ?? [];
+          for (int i = 0; i < active.length; i++) {
+            availableAudioTracks.add(
+              AudioTrack('fvp_audio_${active[i]}', '音轨 ${i + 1}', ''),
+            );
+          }
+        }
+        if (availableSubtitleTracks.isEmpty) {
+          final active = _controller!.getActiveSubtitleTracks() ?? [];
+          for (int i = 0; i < active.length; i++) {
+            availableSubtitleTracks.add(
+              SubtitleTrack('fvp_subtitle_${active[i]}', '字幕 ${i + 1}', '', uri: false),
+            );
+          }
+        }
       }
 
-      for (final item in subtitleTracks) {
-        final idx = item is int ? item : 0;
-        availableSubtitleTracks.add(SubtitleTrack(
-          'fvp_subtitle_$idx',
-          '字幕 ${idx + 1}',
-          '',
-          uri: false,
-        ));
+      // ===== 同步当前激活 =====
+      final activeAudio = _controller!.getActiveAudioTracks() ?? [];
+      if (activeAudio.isNotEmpty) {
+        final pos = activeAudio.first;
+        if (pos >= 0 && pos < availableAudioTracks.length) {
+          currentAudioTrack.value = availableAudioTracks[pos];
+        } else {
+          currentAudioTrack.value = null;
+        }
+      } else {
+        currentAudioTrack.value = null;
       }
 
-      if (audioTracks.isNotEmpty) {
-        final firstIdx = audioTracks[0] is int ? audioTracks[0] as int : 0;
-        currentAudioTrack.value = AudioTrack(
-          'fvp_audio_$firstIdx',
-          '音轨 ${firstIdx + 1}',
-          '',
-        );
-      }
-      if (videoTracks.isNotEmpty) {
-        final firstIdx = videoTracks[0] is int ? videoTracks[0] as int : 0;
-        currentVideoTrack.value = VideoTrack(
-          'fvp_video_$firstIdx',
-          '视轨 ${firstIdx + 1}',
-          '',
-        );
-      }
-      if (subtitleTracks.isNotEmpty) {
-        final firstIdx = subtitleTracks[0] is int ? subtitleTracks[0] as int : 0;
-        currentSubtitleTrack.value = SubtitleTrack(
-          'fvp_subtitle_$firstIdx',
-          '字幕 ${firstIdx + 1}',
-          '',
-          uri: false,
-        );
+      final activeVideo = _controller!.getActiveVideoTracks() ?? [];
+      if (activeVideo.isNotEmpty) {
+        final pos = activeVideo.first;
+        if (pos >= 0 && pos < availableVideoTracks.length) {
+          currentVideoTrack.value = availableVideoTracks[pos];
+        } else {
+          currentVideoTrack.value = null;
+        }
+      } else {
+        currentVideoTrack.value = null;
       }
 
-    } catch (e) {
-      if (kDebugMode) debugPrint('FvpEngine._updateTracks error: $e');
+      final activeSubtitle = _controller!.getActiveSubtitleTracks() ?? [];
+      if (activeSubtitle.isNotEmpty) {
+        final pos = activeSubtitle.first;
+        if (pos >= 0 && pos < availableSubtitleTracks.length) {
+          currentSubtitleTrack.value = availableSubtitleTracks[pos];
+        } else {
+          // 底层说有激活轨，但过滤后列表为空 → 视为"无字幕"
+          currentSubtitleTrack.value = null;
+        }
+      } else {
+        currentSubtitleTrack.value = null;
+      }
+    } catch (e, st) {
+      debugPrint('[FvpEngine] _updateTracks error: $e\n$st');
     }
   }
 
@@ -695,36 +938,92 @@ class FvpEngine implements IPlayerEngine {
   Future<void> setAudioTrack(AudioTrack track) async {
     if (_controller == null || !_isInitialized) return;
     final id = track.id;
-    if (id.startsWith('fvp_audio_')) {
-      final index = int.tryParse(id.substring('fvp_audio_'.length));
-      if (index != null) {
-        try {
-          _controller!.setAudioTracks([index]);
-          currentAudioTrack.value = track;
-        } catch (e) {
-          if (kDebugMode) debugPrint('setAudioTrack error: $e');
-        }
+
+    // 关闭音轨
+    if (id == 'no' || id.isEmpty) {
+      try {
+        _controller!.setAudioTracks([]);
+      } catch (e) {
+        debugPrint('[FvpEngine] 关闭音轨失败: $e');
       }
+      currentAudioTrack.value = track;
+      return;
+    }
+
+    // 自动选择
+    if (id == 'auto') {
+      try {
+        _controller!.setAudioTracks([0]);
+      } catch (e) {
+        debugPrint('[FvpEngine] 自动选择失败: $e');
+      }
+      currentAudioTrack.value = track;
+      return;
+    }
+
+    // 指定音轨
+    if (!id.startsWith('fvp_audio_')) return;
+    final position = int.tryParse(id.substring('fvp_audio_'.length));
+    if (position == null) return;
+
+    try {
+      _controller!.setAudioTracks([position]);
+      currentAudioTrack.value = track;
+    } catch (e) {
+      debugPrint('[FvpEngine] 音轨切换失败: $e');
     }
   }
 
   @override
   Future<void> setVideoTrack(VideoTrack track) async {
-    currentVideoTrack.value = track;
+    // FVP 不支持运行时切换视频轨
+    // 原因：FVPControllerExtensions 只提供 getActiveVideoTracks() 查询，
+    //      没有对应的 setVideoTracks() 切换 API
+    debugPrint('[FvpEngine] FVP 不支持切换视频轨，操作已忽略');
   }
-
-  // fvp_engine.dart - setSubtitleTrack 方法（修改后）
 
   @override
   Future<void> setSubtitleTrack(SubtitleTrack track) async {
     if (_controller == null || !_isInitialized) return;
     final id = track.id;
-    if (id.isEmpty) {
+
+    // 关闭字幕
+    if (id == 'no' || id.isEmpty) {
+      try {
+        _controller!.setSubtitleTracks([]);
+      } catch (e) {
+        debugPrint('[FvpEngine] 关闭字幕失败: $e');
+      }
       currentSubtitleTrack.value = track;
       return;
     }
 
-    // 判断是否为外部字幕（URI 或路径）
+    // 自动选择
+    if (id == 'auto') {
+      try {
+        _controller!.setSubtitleTracks([0]);
+      } catch (e) {
+        debugPrint('[FvpEngine] 自动选择字幕失败: $e');
+      }
+      currentSubtitleTrack.value = track;
+      return;
+    }
+
+    // 内嵌字幕轨
+    if (id.startsWith('fvp_subtitle_')) {
+      final position = int.tryParse(id.substring('fvp_subtitle_'.length));
+      if (position != null) {
+        try {
+          _controller!.setSubtitleTracks([position]);
+          currentSubtitleTrack.value = track;
+        } catch (e) {
+          debugPrint('[FvpEngine] 切换内嵌字幕失败: $e');
+        }
+        return;
+      }
+    }
+
+    // 外部字幕文件
     bool isExternal = track.uri ||
         id.startsWith('http') ||
         id.startsWith('file://') ||
@@ -734,31 +1033,29 @@ class FvpEngine implements IPlayerEngine {
     if (isExternal) {
       try {
         String subtitleId = id;
-        // 核心转换：将 file:// URI 转为本地文件路径
         if (subtitleId.startsWith('file://')) {
-          // 去掉 "file://" 前缀
           String pathPart = subtitleId.substring('file://'.length);
-          // Windows 下路径形如 "/C:/..."，需要去掉前导 "/"
           if (Platform.isWindows && pathPart.startsWith('/')) {
             pathPart = pathPart.substring(1);
           }
-          // 解码 URL 百分号编码（如中文、空格等）
           subtitleId = Uri.decodeComponent(pathPart);
         }
-
-        // 调用底层加载（传入纯文件路径）
         _controller!.setExternalSubtitle(subtitleId);
         currentSubtitleTrack.value = track;
-        if (kDebugMode) {
-          debugPrint('FvpEngine: 设置外挂字幕文件: $subtitleId');
+
+        // ===== 关键补充 =====
+        // FVP 的 getMediaInfo() 不返回外挂字幕，需要手动加入可选列表，
+        // 否则底部 CC 按钮因 availableSubtitleTracks 为空而隐藏，
+        // 用户无法在多个外挂字幕（含 AI 翻译）之间切换。
+        if (!availableSubtitleTracks.any((t) => t.id == track.id)) {
+          availableSubtitleTracks.add(track);
         }
-        return;
       } catch (e) {
-        if (kDebugMode) debugPrint('FvpEngine setExternalSubtitle error: $e');
-        // 失败时仍记录状态，避免 UI 不一致
+        debugPrint('[FvpEngine] 加载外部字幕失败: $e');
       }
+      return;
     }
-    // 非外部字幕只记录状态
+
     currentSubtitleTrack.value = track;
   }
 
@@ -768,19 +1065,145 @@ class FvpEngine implements IPlayerEngine {
 
   @override
   Future<void> takeScreenshot() async {
-    if (_controller == null || !_isInitialized) {
+    if (_isDisposed || _controller == null || !_isInitialized) {
       SmartDialog.showToast('播放器未就绪');
       return;
     }
+
+    SmartDialog.showToast('截图中');
+
     try {
-      final imageData = await _controller!.snapshot();
-      if (imageData != null) {
-        SmartDialog.showToast('截图成功');
-      } else {
-        SmartDialog.showToast('截图失败');
+      final boundary = _screenshotKey.currentContext?.findRenderObject()
+          as RenderRepaintBoundary?;
+      if (boundary == null) {
+        SmartDialog.showToast('截图失败：界面未就绪');
+        return;
       }
+
+      // pixelRatio 决定分辨率，2.0 = 两倍图
+      final ui.Image image = await boundary.toImage(pixelRatio: 2.0);
+      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      image.dispose();
+
+      if (byteData == null) {
+        SmartDialog.showToast('截图失败');
+        return;
+      }
+
+      final Uint8List imageBytes = byteData.buffer.asUint8List();
+
+      SmartDialog.showToast('点击弹窗保存截图');
+      showDialog(
+        context: Get.context!,
+        builder: (context) => GestureDetector(
+          onTap: () async {
+            try {
+              await ImageUtils.saveByteImg(
+                bytes: imageBytes,
+                fileName: 'screenshot_${ImageUtils.time}',
+              );
+            } catch (e) {
+              debugPrint('saveByteImg failed: $e');
+            }
+            if (Get.context != null) Get.back();
+          },
+          child: Align(
+            alignment: Alignment.centerRight,
+            child: Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: min(MediaQuery.widthOf(context) / 3, 350),
+                ),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    border: Border.all(
+                      width: 5,
+                      color: Theme.of(context).colorScheme.surface,
+                    ),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(5),
+                    child: Image.memory(imageBytes),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
     } catch (e) {
       SmartDialog.showToast('截图失败: $e');
+    }
+  }
+
+  // ============================================================
+  // 9.1 录制（FVP 扩展 `record`）
+  // ============================================================
+  //
+  // 说明：
+  //   - 优先尝试硬件编码器（按平台），全部失败回退默认编码器
+  //   - FVP API 不支持指定分辨率，录制跟随源视频分辨率
+  //   - 使用 dynamic 调用，兼容不同版本的 fvp 签名差异
+  //
+  @override
+  void record(String? path) {
+    if (_controller == null || !_isInitialized) {
+      debugPrint('[FvpEngine] record skipped: player not ready');
+      return;
+    }
+
+    // 停止录制
+    if (path == null || path.isEmpty) {
+      try {
+        _controller!.record(to: null);
+        debugPrint('[FvpEngine] 录制停止');
+      } catch (e) {
+        debugPrint('[FvpEngine] 停止录制失败: $e');
+      }
+      return;
+    }
+
+    // 开始录制：先用默认编码器验证
+    try {
+      _controller!.record(to: path);
+      debugPrint('[FvpEngine] 录制启动（默认）: $path');
+    } catch (e) {
+      debugPrint('[FvpEngine] 录制启动失败: $e');
+    }
+  }
+
+  // ============================================================
+  // 9.2 外部音频（FVP 扩展，用于无音轨视频）
+  // ============================================================
+  //
+  // 已知风险：fvp 官方 Issue #85 记录了外部音频的 bug，
+  //   视频无音轨时加载外部音频后切换到普通视频可能卡顿/死锁。
+  //   兜底策略：切换媒体源前清理外部音频（见 setDataSource 顶部）。
+  //
+  @override
+  void setExternalAudio(String? url) {
+    _externalAudioUrl = url;
+    if (_controller == null || !_isInitialized) {
+      debugPrint('[FvpEngine] setExternalAudio deferred: $url');
+      return;
+    }
+
+    if (url == null || url.isEmpty) {
+      debugPrint('[FvpEngine] 外部音频已清除');
+      return;
+    }
+
+    try {
+      final platform = (_controller as dynamic).platform;
+      if (platform != null) {
+        (platform as dynamic).setMedia(url, mdk.MediaType.audio);
+        debugPrint('[FvpEngine] 外部音频已加载: $url');
+      } else {
+        debugPrint('[FvpEngine] 无法获取底层 Player');
+      }
+    } catch (e) {
+      debugPrint('[FvpEngine] 外部音频加载异常: $e');
     }
   }
 
@@ -903,7 +1326,6 @@ class FvpEngine implements IPlayerEngine {
     showControls.value = visible;
     _timer?.cancel();
     if (visible) {
-      // 强制复位
       isSliderMoving.value = false;
       hideTaskControls();
     }
@@ -988,7 +1410,7 @@ class FvpEngine implements IPlayerEngine {
   void _addListeners() {
     if (_controller == null) return;
     _listenerCallback = () {
-      // ===== 防止在销毁后继续处理回调 =====
+      // 防止在销毁后继续处理回调
       if (_isDisposed) return;
       final controller = _controller;
       if (controller == null || !_isInitialized) return;
@@ -1032,6 +1454,13 @@ class FvpEngine implements IPlayerEngine {
 
       isBuffering.value = value.isBuffering;
 
+      // ===== 轨道懒刷新：媒体完全加载后拉取 =====
+      if (value.isInitialized &&
+          availableAudioTracks.isEmpty &&
+          availableSubtitleTracks.isEmpty) {
+        _updateTracks();
+      }
+
       // 播放状态变化
       if (value.isPlaying && !_isPlaying) {
         _isPlaying = true;
@@ -1059,13 +1488,21 @@ class FvpEngine implements IPlayerEngine {
         }
       }
 
+      // ===== 跳过片尾 =====
+      // 关键：不能 pause，否则 completed 事件不会触发，自动切集会失效。
+      // 改为 seek 到末尾前 500ms，让播放器自然播完，走正常切集流程。
       final endSkip = skipEndDuration.value;
-      if (endSkip > 0) {
+      if (endSkip > 0 && !_skipEndTriggered) {
         final total = duration.value.inSeconds;
         if (total > 0 && value.position.inSeconds >= total - endSkip) {
           if (_isPlaying) {
-            pause();
-            SmartDialog.showToast('已跳过片尾');
+            _skipEndTriggered = true;
+            final nearEnd = Duration(seconds: total) -
+                const Duration(milliseconds: 500);
+            if (value.position < nearEnd) {
+              seekTo(nearEnd, isSeek: false);
+              SmartDialog.showToast('已跳过片尾');
+            }
           }
         }
       }
@@ -1113,54 +1550,54 @@ class FvpEngine implements IPlayerEngine {
     required bool flipX,
     required bool flipY,
   }) {
-    return Obx(() {
-      // 1. 强制依赖重建计数器（无论是否初始化，都会追踪）
-      final rebuild = _rebuildCounter.value;
-      
-      // 2. 显式读取播放器状态（如果控制器存在）
-      bool isInitialized = false;
-      try {
-        if (_controller != null) {
-          isInitialized = _controller!.value.isInitialized;
+    return RepaintBoundary(
+      key: _screenshotKey,
+      child: Obx(() {
+        // 1. 强制依赖重建计数器
+        final rebuild = _rebuildCounter.value;
+
+        // 2. 显式读取播放器状态
+        bool isInitialized = false;
+        try {
+          if (_controller != null) {
+            isInitialized = _controller!.value.isInitialized;
+          }
+        } catch (_) {}
+
+        if (_isDisposed || _controller == null || !isInitialized) {
+          return const ColoredBox(color: Colors.black);
         }
-      } catch (_) {}
 
-      // 3. 强制依赖 isInitialized（动态变化）
-      // 虽然 isInitialized 不是 Rx，但通过 rebuild 触发重建
-      
-      if (_isDisposed || _controller == null || !isInitialized) {
-        return const ColoredBox(color: Colors.black);
-      }
+        try {
+          final controller = _controller!;
+          final videoSize = controller.value.size;
+          final double width = videoSize?.width ?? 640;
+          final double height = videoSize?.height ?? 360;
 
-      try {
-        final controller = _controller!;
-        final videoSize = controller.value.size;
-        final double width = videoSize?.width ?? 640;
-        final double height = videoSize?.height ?? 360;
-
-        Widget video = VideoPlayer(
-          controller,
-          key: ValueKey(rebuild), // 利用 rebuild 强制重建
-        );
-
-        if (flipX || flipY) {
-          video = Transform(
-            transform: Matrix4.identity()
-              ..setEntry(0, 0, flipX ? -1 : 1)
-              ..setEntry(1, 1, flipY ? -1 : 1),
-            alignment: Alignment.center,
-            child: video,
+          Widget video = VideoPlayer(
+            controller,
+            key: ValueKey(rebuild),
           );
-        }
 
-        return FittedBox(
-          fit: fit,
-          child: SizedBox(width: width, height: height, child: video),
-        );
-      } catch (e) {
-        return const ColoredBox(color: Colors.black);
-      }
-    });
+          if (flipX || flipY) {
+            video = Transform(
+              transform: Matrix4.identity()
+                ..setEntry(0, 0, flipX ? -1 : 1)
+                ..setEntry(1, 1, flipY ? -1 : 1),
+              alignment: Alignment.center,
+              child: video,
+            );
+          }
+
+          return FittedBox(
+            fit: fit,
+            child: SizedBox(width: width, height: height, child: video),
+          );
+        } catch (e) {
+          return const ColoredBox(color: Colors.black);
+        }
+      }),
+    );
   }
 
   // ============================================================
