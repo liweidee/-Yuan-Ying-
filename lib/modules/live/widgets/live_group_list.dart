@@ -82,13 +82,10 @@ class _GroupItem extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 if (isSelected)
-                  Container(
-                    width: 6,
-                    height: 6,
-                    decoration: BoxDecoration(
-                      color: colorScheme.primary,
-                      shape: BoxShape.circle,
-                    ),
+                  Icon(
+                    Icons.play_circle_filled,
+                    color: colorScheme.primary,
+                    size: 16,
                   ),
                 if (isSelected) const SizedBox(width: 6),
                 Expanded(

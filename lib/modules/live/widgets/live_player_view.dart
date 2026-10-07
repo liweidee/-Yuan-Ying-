@@ -9,7 +9,6 @@ import 'package:yuanying/modules/live/controllers/live_controller.dart';
 import 'package:yuanying/utils/platform_utils.dart';
 import 'package:yuanying/plugin/pl_player/models/video_fit_type.dart';
 import 'package:yuanying/plugin/pl_player/widgets/common_btn.dart';
-import 'package:yuanying/common/widgets/view_safe_area.dart';
 
 /// 手势类型
 enum _GestureType {
@@ -73,7 +72,13 @@ class _LivePlayerViewState extends State<LivePlayerView> {
 
   @override
   Widget build(BuildContext context) {
-    final bottomSafe = MediaQuery.viewPaddingOf(context).bottom;
+    // ===== 读取刘海安全区 =====
+    // 移动端全屏不做 EnterNativeFullscreen，viewPadding 始终正常上报，
+    // 直接读即可。叠加到按钮位置做刘海避让。
+    final viewPadding = MediaQuery.viewPaddingOf(context);
+    final double leftSafe = viewPadding.left;
+    final double rightSafe = viewPadding.right;
+    final double bottomSafe = viewPadding.bottom;
 
     Widget playerContent = Container(
       color: Colors.black,
@@ -209,43 +214,39 @@ class _LivePlayerViewState extends State<LivePlayerView> {
             );
           }),
 
-          // ===== 锁屏按钮（仅全屏时显示，锁屏状态下常显） =====
+          // ===== 锁屏按钮（左侧垂直居中） =====
           //
           // 交互设计：
-          //   - 非锁屏 + 控制栏可见：显示"锁定"图标（左侧居中）
-          //   - 锁屏：显示"解锁"图标且常显（不受控制栏显隐影响）
+          //   - 非锁屏 + 控制栏可见：显示"锁定"图标
+          //   - 锁屏：显示"解锁"图标且常显
           //   - 非全屏：不显示
           //
-          // 安全区适配（参考视频播放页 view.dart）：
-          //   使用 ViewSafeArea 包裹，left: true 让按钮根据 viewPadding.left
-          //   自动避开 iOS 横屏刘海；额外再叠加 16px 视觉边距。
+          // 安全区适配：叠加 viewPadding.left，
+          // iOS 横屏刘海在左侧时 16 + leftSafe 能正确避让。
           Obx(() {
             if (!ctrl.isFullScreen.value) return const SizedBox.shrink();
             final isLocked = ctrl.controlsLock.value;
             final visible = isLocked || ctrl.controlsVisible.value;
             if (!visible) return const SizedBox.shrink();
 
-            return ViewSafeArea(
-              left: true,
-              right: false,
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Padding(
-                  padding: const EdgeInsets.only(left: 16),
-                  child: DecoratedBox(
-                    decoration: const BoxDecoration(
-                      color: Color(0x45000000),
-                      borderRadius: BorderRadius.all(Radius.circular(8)),
+            return Positioned(
+              left: 16 + leftSafe,
+              top: 0,
+              bottom: 0,
+              child: Center(
+                child: DecoratedBox(
+                  decoration: const BoxDecoration(
+                    color: Color(0x45000000),
+                    borderRadius: BorderRadius.all(Radius.circular(8)),
+                  ),
+                  child: ComBtn(
+                    tooltip: isLocked ? '解锁' : '锁定',
+                    icon: Icon(
+                      isLocked ? Icons.lock : Icons.lock_open,
+                      size: 20,
+                      color: Colors.white,
                     ),
-                    child: ComBtn(
-                      tooltip: isLocked ? '解锁' : '锁定',
-                      icon: Icon(
-                        isLocked ? Icons.lock : Icons.lock_open,
-                        size: 20,
-                        color: Colors.white,
-                      ),
-                      onTap: ctrl.toggleControlsLock,
-                    ),
+                    onTap: ctrl.toggleControlsLock,
                   ),
                 ),
               ),
@@ -256,28 +257,17 @@ class _LivePlayerViewState extends State<LivePlayerView> {
           //
           // 交互设计：
           //   - 非全屏：不显示
-          //   - 锁屏：只显示"截图"（截图无副作用，锁屏时也应可随手截）
-          //   - 非锁屏 + 控制栏可见：截图 + 旋转屏幕（移动端）
+          //   - 锁屏：只显示"截图"
+          //   - 非锁屏 + 控制栏可见：截图 + 旋转（移动端）
           //   - 非锁屏 + 控制栏隐藏：不显示
           //
-          // 位置：
-          //   ViewSafeArea(right: true) + Align.centerRight
-          //   始终保持在右侧垂直居中，并根据 viewPadding.right
-          //   自动避开 iOS 横屏刘海；额外叠加 16px 视觉边距。
-          //
-          // 间距：
-          //   两按钮时（旋转在上 + 8px 间距 + 截图在下）
-          //   一按钮时（锁屏下只剩截图）
-          //   1 个 child 时 Column 依然垂直居中，不会贴顶/贴底。
+          // 安全区适配：叠加 viewPadding.right，
+          // iOS 横屏刘海在右侧时能正确避让，不被遮挡。
           Obx(() {
             if (!ctrl.isFullScreen.value) return const SizedBox.shrink();
 
             final bool isLocked = ctrl.controlsLock.value;
-
-            // 截图：锁屏时常显；非锁屏时跟随控制栏
             final bool showScreenshot = isLocked || ctrl.controlsVisible.value;
-
-            // 旋转：仅非锁屏 + 控制栏可见 + 移动端
             final bool showRotate = !isLocked &&
                 ctrl.controlsVisible.value &&
                 PlatformUtils.isMobile;
@@ -286,55 +276,52 @@ class _LivePlayerViewState extends State<LivePlayerView> {
               return const SizedBox.shrink();
             }
 
-            return ViewSafeArea(
-              left: false,
-              right: true,
-              child: Align(
-                alignment: Alignment.centerRight,
-                child: Padding(
-                  padding: const EdgeInsets.only(right: 16),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // 旋转屏幕（仅移动端，非锁屏时显示）
-                      if (showRotate) ...[
-                        DecoratedBox(
-                          decoration: const BoxDecoration(
-                            color: Color(0x45000000),
-                            borderRadius: BorderRadius.all(Radius.circular(8)),
-                          ),
-                          child: ComBtn(
-                            tooltip: '旋转屏幕',
-                            icon: const Icon(
-                              Icons.screen_rotation,
-                              size: 20,
-                              color: Colors.white,
-                            ),
-                            onTap: () => ctrl.toggleOrientation(Get.context!),
-                          ),
+            return Positioned(
+              right: 16 + rightSafe,
+              top: 0,
+              bottom: 0,
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // 旋转屏幕（仅移动端，非锁屏时显示）
+                    if (showRotate) ...[
+                      DecoratedBox(
+                        decoration: const BoxDecoration(
+                          color: Color(0x45000000),
+                          borderRadius: BorderRadius.all(Radius.circular(8)),
                         ),
-                        // 两按钮之间的垂直间距
-                        const SizedBox(height: 8),
-                      ],
-                      // 截图（锁屏时常显；非锁屏时跟随控制栏）
-                      if (showScreenshot)
-                        DecoratedBox(
-                          decoration: const BoxDecoration(
-                            color: Color(0x45000000),
-                            borderRadius: BorderRadius.all(Radius.circular(8)),
+                        child: ComBtn(
+                          tooltip: '旋转屏幕',
+                          icon: const Icon(
+                            Icons.screen_rotation,
+                            size: 20,
+                            color: Colors.white,
                           ),
-                          child: ComBtn(
-                            tooltip: '截图',
-                            icon: const Icon(
-                              Icons.photo_camera,
-                              size: 20,
-                              color: Colors.white,
-                            ),
-                            onTap: ctrl.takeScreenshot,
-                          ),
+                          onTap: () => ctrl.toggleOrientation(Get.context!),
                         ),
+                      ),
+                      // 两按钮之间的垂直间距
+                      const SizedBox(height: 8),
                     ],
-                  ),
+                    // 截图（锁屏时常显；非锁屏时跟随控制栏）
+                    if (showScreenshot)
+                      DecoratedBox(
+                        decoration: const BoxDecoration(
+                          color: Color(0x45000000),
+                          borderRadius: BorderRadius.all(Radius.circular(8)),
+                        ),
+                        child: ComBtn(
+                          tooltip: '截图',
+                          icon: const Icon(
+                            Icons.photo_camera,
+                            size: 20,
+                            color: Colors.white,
+                          ),
+                          onTap: ctrl.takeScreenshot,
+                        ),
+                      ),
+                  ],
                 ),
               ),
             );
@@ -488,6 +475,10 @@ class _LivePlayerViewState extends State<LivePlayerView> {
         )),
 
         // 画面比例下拉菜单
+        //
+        // 说明：
+        //   全屏改为 PageRoute 后，此按钮弹出的菜单会进入
+        //   当前 Navigator 的 Overlay，天然位于全屏页面之上。
         Obx(() => PopupMenuButton<VideoFitType>(
           tooltip: '画面比例',
           requestFocus: false,

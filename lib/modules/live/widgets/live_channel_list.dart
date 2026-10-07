@@ -76,14 +76,20 @@ class _ChannelItemState extends State<_ChannelItem> {
               ),
               child: Row(
                 children: [
+                  // if (isCurrent)
+                  //   Container(
+                  //     width: 5,
+                  //     height: 5,
+                  //     decoration: BoxDecoration(
+                  //       color: colorScheme.primary,
+                  //       shape: BoxShape.circle,
+                  //     ),
+                  //   ),
                   if (isCurrent)
-                    Container(
-                      width: 5,
-                      height: 5,
-                      decoration: BoxDecoration(
-                        color: colorScheme.primary,
-                        shape: BoxShape.circle,
-                      ),
+                    Icon(
+                      Icons.bar_chart,
+                      color: colorScheme.primary,
+                      size: 16,
                     ),
                   if (isCurrent) const SizedBox(width: 8),
                   Expanded(
@@ -98,12 +104,6 @@ class _ChannelItemState extends State<_ChannelItem> {
                       maxLines: 1,
                     ),
                   ),
-                  if (isCurrent)
-                    Icon(
-                      Icons.play_circle_filled,
-                      color: colorScheme.primary,
-                      size: 16,
-                    ),
                 ],
               ),
             ),

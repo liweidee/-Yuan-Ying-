@@ -86,6 +86,9 @@ class CategoryController extends GetxController {
   // 判断是否处于子目录模式
   bool get isSubCategoryMode => _currentRequestCategoryId != categoryId;
 
+  // 对外暴露"是否已加载到底"，供 CategoryPage 自动补齐判断使用
+  bool get isEnd => _isEnd;
+
   // 切换子目录（强制刷新）
   void switchToSubCategory(String subId) {
     _currentRequestCategoryId = subId;

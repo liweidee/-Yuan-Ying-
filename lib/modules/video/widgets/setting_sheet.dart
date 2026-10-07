@@ -225,13 +225,12 @@ class _SettingSheetState extends State<SettingSheet> {
       ),
 
       // ===== 字幕设置 =====
-      if (!isFvpEngine)
-        _buildSettingItem(
-          icon: Icons.subtitles_outlined,
-          title: '字幕设置',
-          subtitle: '字幕样式及加载',
-          onTap: _showSubtitleSettings,
-        ),
+      _buildSettingItem(
+        icon: Icons.subtitles_outlined,
+        title: '字幕设置',
+        subtitle: '字幕样式及加载',
+        onTap: _showSubtitleSettings,
+      ),
 
       // ===== 翻译当前字幕（仅 media_kit 内核）=====
       // if (!isFvpEngine)

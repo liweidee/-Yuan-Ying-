@@ -73,10 +73,9 @@ class LiveController extends GetxController {
   final RxDouble volume = 1.0.obs;
   final RxDouble brightness = (-1.0).obs;
 
-  // ===== 全屏 Overlay =====
-  OverlayEntry? _fullScreenOverlay;
-
-  // ===== 截图预览 Overlay（不走 showDialog，避免被 _fullScreenOverlay 遮挡） =====
+  // ===== 截图预览 Overlay =====
+  // 不走 showDialog，避免被全屏页面的导航栏层级影响。
+  // 直接 insert 到 root Overlay，后插入的一定在最上层。
   OverlayEntry? _screenshotOverlay;
 
   // ===== 内部标志 =====
@@ -92,7 +91,7 @@ class LiveController extends GetxController {
   // ===== 记录当前加载的配置 key，用于检测是否切换了配置 =====
   String? _currentConfigKey;
 
-  // ===== 全屏 MethodChannel =====
+  // ===== 全屏 MethodChannel（仅桌面端使用） =====
   static const MethodChannel _mediaKitChannel =
       MethodChannel('com.alexmercerind/media_kit_video');
 
@@ -235,8 +234,6 @@ class LiveController extends GetxController {
   void onClose() {
     _hideControlsTimer?.cancel();
     _cancelEpgBoundaryTimer();
-    _fullScreenOverlay?.remove();
-    _fullScreenOverlay = null;
     // 清理截图预览 Overlay，避免悬浮残留
     _screenshotOverlay?.remove();
     _screenshotOverlay = null;
@@ -293,11 +290,8 @@ class LiveController extends GetxController {
   /// 截图并显示预览浮层
   ///
   /// 说明：
-  ///   不用 showDialog —— 因为全屏用的是 OverlayEntry，
-  ///   而 showDialog 走的 Navigator route 在 z 序上可能被
-  ///   _fullScreenOverlay 盖住（全屏下不显示）。
-  ///   这里改为直接 Overlay.insert() 一个新的 OverlayEntry，
-  ///   后插入的一定在 _fullScreenOverlay 之上，全屏/非全屏都能看到。
+  ///   不用 showDialog —— 直接 Overlay.insert() 一个新的 OverlayEntry，
+  ///   后插入的一定在最上层，全屏/非全屏都能看到。
   Future<void> takeScreenshot() async {
     if (_player == null) {
       SmartDialog.showToast('播放器未初始化');
@@ -318,8 +312,7 @@ class LiveController extends GetxController {
       _screenshotOverlay?.remove();
       _screenshotOverlay = null;
 
-      // 用 rootOverlay 保证与 _fullScreenOverlay 处于同一个 Overlay，
-      // 后插入 → 一定在最上层
+      // 用 rootOverlay 保证处于最上层
       final overlay = Overlay.of(context, rootOverlay: true);
 
       late OverlayEntry entry;
@@ -937,11 +930,23 @@ class LiveController extends GetxController {
   // ============================================================
   // 全屏控制
   // ============================================================
+  //
+  // 设计说明（重要）：
+  //   之前全屏是 Overlay.insert(OverlayEntry)，会跟 Navigator route 形成
+  //   "两套窗口系统"，导致 PopupMenuButton / showModalBottomSheet 弹出的
+  //   浮层被覆盖（点不到）。
+  //   现在改为 Navigator.push 一个全屏 PageRoute，跟视频详情页一致：
+  //   - PopupMenu、showModalBottomSheet、返回键全部天然工作
+  //   - viewPadding 由 route 自然上报，不需要快照 MediaQuery
+  //   - 移动端不做 EnterNativeFullscreen（那是 iOS 原生全屏，会让
+  //     viewPadding 归零，刘海安全区失效）。视频详情页也是这么做的。
 
   Future<void> enterFullScreen(BuildContext context) async {
     if (isFullScreen.value) return;
 
+    // ===== 系统层进入全屏 =====
     if (PlatformUtils.isDesktop) {
+      // 桌面端：窗口全屏 + 原生全屏
       await windowManager.setTitleBarStyle(TitleBarStyle.hidden);
       await windowManager.setFullScreen(true);
       await Future.delayed(const Duration(milliseconds: 100));
@@ -949,48 +954,76 @@ class LiveController extends GetxController {
         await _mediaKitChannel.invokeMethod('Utils.EnterNativeFullscreen');
       } catch (_) {}
     } else {
-      try {
-        await _mediaKitChannel.invokeMethod('Utils.EnterNativeFullscreen');
-      } catch (_) {}
+      // 移动端：与视频详情页保持一致——只隐藏系统栏 + 改方向
+      // 不调 EnterNativeFullscreen（会触发 iOS 原生全屏，
+      // 导致 viewPadding 归零，刘海安全区失效）
+      hideSystemBar();
       await landscapeLeftMode();
     }
 
-    _fullScreenOverlay = OverlayEntry(
-      builder: (context) => _FullScreenOverlay(
-        onExit: () => exitFullScreen(),
-      ),
-    );
-    Overlay.of(context).insert(_fullScreenOverlay!);
-
+    // ===== 先更新状态，再 push =====
+    // 全屏页里的 LivePlayerView 读取 isFullScreen.value 判断
+    // 是否显示锁屏/截图/旋转按钮，所以必须在 push 前设置
     isFullScreen.value = true;
     showControls();
+
+    // ===== push 全屏页 =====
+    // 用 PageRouteBuilder + opaque + 零过渡时间，
+    // 避免视觉闪烁。push 到当前 Navigator 栈，
+    // 之后 PopupMenu 等浮层天然在其之上。
+    final navigator = Navigator.of(context);
+    navigator.push(
+      PageRouteBuilder(
+        opaque: true,
+        barrierDismissible: false,
+        transitionDuration: Duration.zero,
+        reverseTransitionDuration: Duration.zero,
+        pageBuilder: (_, __, ___) => const _FullScreenLivePage(),
+      ),
+    );
   }
 
+  /// 用户主动退出全屏（点击"退出全屏"按钮 / 双击）
+  ///
+  /// 只负责 pop；状态恢复统一在 [_onFullScreenPopped] 里做，
+  /// 这样无论用户是点击按钮还是用系统返回键 pop，都走同一路径。
   Future<void> exitFullScreen() async {
     if (!isFullScreen.value) return;
+    final navigator = Navigator.of(Get.context!);
+    if (navigator.canPop()) {
+      navigator.pop();
+    }
+  }
 
-    // 退出全屏时同时解锁（避免解锁按钮残留在窗口模式）
+  /// 全屏页被 pop 后的统一回调
+  ///
+  /// 由 _FullScreenLivePage 的 PopScope 触发。
+  /// 做两件事：
+  ///   1. 立即置 isFullScreen = false（防止重入 exitFullScreen）
+  ///   2. 恢复系统状态（系统栏 / 方向 / 桌面窗口）
+  void onFullScreenPopped() {
+    if (!isFullScreen.value) return;
+
+    // 立即置位，防止 exitFullScreen 重入造成二次 pop
+    isFullScreen.value = false;
+
+    // 退出全屏时自动解锁（避免解锁按钮残留在窗口模式）
     if (controlsLock.value) {
       controlsLock.value = false;
     }
 
-    _fullScreenOverlay?.remove();
-    _fullScreenOverlay = null;
-
+    // 恢复系统状态
     if (PlatformUtils.isDesktop) {
       try {
-        await _mediaKitChannel.invokeMethod('Utils.ExitNativeFullscreen');
+        _mediaKitChannel.invokeMethod('Utils.ExitNativeFullscreen');
       } catch (_) {}
-      await windowManager.setFullScreen(false);
-      await windowManager.setTitleBarStyle(TitleBarStyle.normal);
+      windowManager.setFullScreen(false);
+      windowManager.setTitleBarStyle(TitleBarStyle.normal);
     } else {
-      try {
-        await _mediaKitChannel.invokeMethod('Utils.ExitNativeFullscreen');
-      } catch (_) {}
-      await portraitUpMode();
+      showSystemBar();
+      portraitUpMode();
     }
 
-    isFullScreen.value = false;
     showControls();
   }
 
@@ -1051,21 +1084,33 @@ class LiveController extends GetxController {
 }
 
 // ============================================================
-// 全屏 Overlay 组件
+// 全屏页面
 // ============================================================
-
-class _FullScreenOverlay extends StatelessWidget {
-  final VoidCallback onExit;
-
-  const _FullScreenOverlay({required this.onExit});
+//
+// 使用 Navigator.push 的 PageRoute 承载全屏播放器，
+// 而不是 Overlay.insert(OverlayEntry)。
+//
+// 原因：
+//   Navigator.rearrange() 只重排它自己创建的 route entries，
+//   手动 insert 的 OverlayEntry 会被排在 route entries 之前，
+//   导致 route 内的 PopupMenu / showModalBottomSheet 被覆盖（点不到）。
+//   改成 PageRoute 后，全屏本身就是一个 route，
+//   浮层天然在其之上。
+//
+// 生命周期：
+//   页面被 pop 时触发 PopScope.onPopInvokedWithResult，
+//   由 LiveController.onFullScreenPopped() 统一恢复系统状态。
+class _FullScreenLivePage extends StatelessWidget {
+  const _FullScreenLivePage();
 
   @override
   Widget build(BuildContext context) {
+    final ctrl = Get.find<LiveController>(tag: 'live');
     return PopScope(
-      canPop: false,
+      canPop: true,
       onPopInvokedWithResult: (didPop, result) {
-        if (!didPop) {
-          onExit();
+        if (didPop) {
+          ctrl.onFullScreenPopped();
         }
       },
       child: Material(
@@ -1076,12 +1121,7 @@ class _FullScreenOverlay extends StatelessWidget {
           removeBottom: true,
           removeLeft: true,
           removeRight: true,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              const LivePlayerView(isFullScreen: true),
-            ],
-          ),
+          child: const LivePlayerView(isFullScreen: true),
         ),
       ),
     );

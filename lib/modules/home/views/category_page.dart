@@ -1,3 +1,5 @@
+import 'dart:async'; // ★ 新增：StreamSubscription
+
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:yuanying/common/widgets/flutter/refresh_indicator.dart' as custom;
@@ -26,8 +28,24 @@ class CategoryPage extends StatefulWidget {
 
 class _CategoryPageState extends State<CategoryPage>
     with AutomaticKeepAliveClientMixin {
-  late final CategoryController ctrl;
+  // 由 late final 改为 late：didUpdateWidget 里会重新赋值，
+  // late final 二次赋值会抛 LateInitializationError（原代码已有此隐患）
+  late CategoryController ctrl;
   final HomeController homeController = Get.find<HomeController>();
+
+  // ===== 自动补齐分页相关状态 =====
+  /// 防止同一帧内重复排队 postFrame 回调
+  bool _postFrameScheduled = false;
+
+  /// 连续自动补齐计数器（用户手动滚动时复位）
+  int _autoLoadCount = 0;
+
+  /// 连续自动补齐上限，避免极少数源每页只返回 1 条时无限请求
+  static const int _maxAutoLoad = 10;
+
+  /// videoList 的响应式订阅句柄（RxList 不支持 addListener，
+  /// 必须用 listen() 返回 StreamSubscription 才能 cancel）
+  StreamSubscription<List<VideoItem>>? _videoListSub;
 
   @override
   bool get wantKeepAlive => true;
@@ -37,7 +55,7 @@ class _CategoryPageState extends State<CategoryPage>
     super.initState();
     ctrl = widget.controller;
     // 只保留加载更多监听，不再处理顶部栏隐藏
-    ctrl.scrollController.addListener(_onScrollForLoadMore);
+    _bindListeners(ctrl);
   }
 
   @override
@@ -45,14 +63,35 @@ class _CategoryPageState extends State<CategoryPage>
     super.didUpdateWidget(oldWidget);
     // 如果 controller 变了，重新绑定
     if (oldWidget.controller != widget.controller) {
-      ctrl.scrollController.removeListener(_onScrollForLoadMore);
+      _unbindListeners(ctrl);
       ctrl = widget.controller;
-      ctrl.scrollController.addListener(_onScrollForLoadMore);
+      _autoLoadCount = 0; // 换控制器时复位计数器
+      _bindListeners(ctrl);
     }
+  }
+
+  // ===== 监听器绑定 / 解绑统一管理 =====
+
+  void _bindListeners(CategoryController c) {
+    c.scrollController.addListener(_onScrollForLoadMore);
+    // RxList 用 listen 订阅（返回 StreamSubscription），不是 addListener。
+    // 先取消旧订阅，防止 controller 复用时遗留订阅。
+    _videoListSub?.cancel();
+    _videoListSub = c.videoList.listen((_) => _checkAutoLoadMore());
+  }
+
+  void _unbindListeners(CategoryController c) {
+    c.scrollController.removeListener(_onScrollForLoadMore);
+    // 取消订阅，避免内存泄漏
+    _videoListSub?.cancel();
+    _videoListSub = null;
   }
 
   // 仅用于加载更多
   void _onScrollForLoadMore() {
+    // 用户手动滚动 → 页面已可滚动，复位自动补齐计数器
+    _autoLoadCount = 0;
+
     if (ctrl.isLoadingMore.value || ctrl.isLoading.value) return;
     if (ctrl.scrollController.position.pixels >=
         ctrl.scrollController.position.maxScrollExtent - 200) {
@@ -60,9 +99,37 @@ class _CategoryPageState extends State<CategoryPage>
     }
   }
 
+  /// 列表数据变化后检测"当前不可滚动且还没到底"，主动补齐下一页。
+  ///
+  /// 场景：部分源第一页只返回少数几条，卡片视图下一屏就能显示完，
+  ///      maxScrollExtent == 0，永远不会触发滚动加载。此时主动补下一页。
+  void _checkAutoLoadMore() {
+    if (_postFrameScheduled) return; // 同帧去重
+    _postFrameScheduled = true;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _postFrameScheduled = false;
+      if (!mounted) return;
+
+      // ===== 门禁（全部必须通过，顺序可任意）=====
+      if (_autoLoadCount >= _maxAutoLoad) return; // 上限保护
+      if (ctrl.isLoading.value || ctrl.isLoadingMore.value) return;
+      if (ctrl.isEnd) return;                     // 已到底
+      if (ctrl.videoList.isEmpty) return;         // 空列表交由原逻辑处理
+      if (ctrl.scrollController.positions.isEmpty) return;
+
+      final pos = ctrl.scrollController.position;
+      // 内容不足以滚动 → 主动加载下一页
+      if (pos.maxScrollExtent <= 0) {
+        _autoLoadCount++;
+        ctrl.loadMore();
+      }
+    });
+  }
+
   @override
   void dispose() {
-    ctrl.scrollController.removeListener(_onScrollForLoadMore);
+    _unbindListeners(ctrl);
     super.dispose();
   }
 
@@ -103,7 +170,7 @@ class _CategoryPageState extends State<CategoryPage>
       } else if (isError && videoList.isEmpty) {
         content = Center(
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24),  // ★ 新增：左右留白
+            padding: const EdgeInsets.symmetric(horizontal: 24),  // 左右留白
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [

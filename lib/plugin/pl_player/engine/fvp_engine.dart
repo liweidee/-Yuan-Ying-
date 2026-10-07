@@ -1142,9 +1142,10 @@ class FvpEngine implements IPlayerEngine {
   // ============================================================
   //
   // 说明：
-  //   - 优先尝试硬件编码器（按平台），全部失败回退默认编码器
+  //   - iOS 显式指定 h264_videotoolbox（Apple 硬件编码器）
+  //   - Android 优先尝试 h264_mediacodec，失败则回退默认编码器
+  //   - 其他平台（桌面端）保持默认编码器（已验证正常）
   //   - FVP API 不支持指定分辨率，录制跟随源视频分辨率
-  //   - 使用 dynamic 调用，兼容不同版本的 fvp 签名差异
   //
   @override
   void record(String? path) {
@@ -1164,10 +1165,27 @@ class FvpEngine implements IPlayerEngine {
       return;
     }
 
-    // 开始录制：先用默认编码器验证
+    // 开始录制
     try {
-      _controller!.record(to: path);
-      debugPrint('[FvpEngine] 录制启动（默认）: $path');
+      if (Platform.isIOS) {
+        // iOS：显式指定 VideoToolbox 硬件编码器
+        _controller!.record(to: path, format: 'h264_videotoolbox');
+        debugPrint('[FvpEngine] 录制启动（iOS / h264_videotoolbox）: $path');
+      } else if (Platform.isAndroid) {
+        // Android：优先尝试 MediaCodec 硬件编码器，失败回退默认
+        try {
+          _controller!.record(to: path, format: 'h264_mediacodec');
+          debugPrint('[FvpEngine] 录制启动（Android / h264_mediacodec）: $path');
+        } catch (e) {
+          debugPrint('[FvpEngine] h264_mediacodec 不可用，回退默认编码器: $e');
+          _controller!.record(to: path);
+          debugPrint('[FvpEngine] 录制启动（Android / 默认编码器）: $path');
+        }
+      } else {
+        // 桌面端：使用默认编码器（已验证正常）
+        _controller!.record(to: path);
+        debugPrint('[FvpEngine] 录制启动（默认编码器）: $path');
+      }
     } catch (e) {
       debugPrint('[FvpEngine] 录制启动失败: $e');
     }
