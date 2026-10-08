@@ -28,28 +28,18 @@ class NodeJSManager private constructor(context: Context) {
 
         private val mainHandler = Handler(Looper.getMainLooper())
 
-        // ===== JNI 方法声明 =====
+        // ===== JNI 方法声明（新增 projectDir 参数）=====
         @JvmStatic
-        external fun nodeStart(args: Array<String>): Int
+        external fun nodeStart(args: Array<String>, projectDir: String): Int
     }
 
     private val appContext: Context = context
 
-    @Volatile
-    var isRunning = false
-        private set
-    @Volatile
-    var isNodeReady = false
-        private set
-    @Volatile
-    var nativeServerPort = 0
-        private set
-    @Volatile
-    var managementPort = 0
-        private set
-    @Volatile
-    var spiderPort = 0
-        private set
+    @Volatile var isRunning = false;        private set
+    @Volatile var isNodeReady = false;      private set
+    @Volatile var nativeServerPort = 0;     private set
+    @Volatile var managementPort = 0;       private set
+    @Volatile var spiderPort = 0;           private set
 
     private var webServer: NanoHTTPD? = null
 
@@ -63,7 +53,7 @@ class NodeJSManager private constructor(context: Context) {
     }
 
     // ============================================================
-    // 本地 HTTP 服务器
+    //  本地 HTTP 服务器（NanoHTTPD）
     // ============================================================
     private fun startLocalWebServer() {
         try {
@@ -72,12 +62,11 @@ class NodeJSManager private constructor(context: Context) {
                     val uri = session.uri
                     val params = session.parms
 
-                    return when {
-                        uri == "/onCatPawOpenPort" -> {
+                    return when (uri) {
+                        "/onCatPawOpenPort" -> {
                             val port = params["port"]?.toIntOrNull() ?: 0
                             val type = params["type"] ?: "spider"
                             Log.i(TAG, "Port received: $port, type: $type")
-
                             mainHandler.post {
                                 when (type) {
                                     "management" -> managementPort = port
@@ -87,23 +76,21 @@ class NodeJSManager private constructor(context: Context) {
                             }
                             newFixedLengthResponse(Response.Status.OK, "text/plain", "OK")
                         }
-
-                        uri == "/onMessage" -> {
-                            val body = session.inputStream.bufferedReader().readText()
+                        "/onMessage" -> {
+                            val body = try {
+                                session.inputStream.bufferedReader().readText()
+                            } catch (_: Exception) { "" }
                             try {
                                 val json = JSONObject(body)
-                                val message = json.optString("message")
-                                if (message == "ready") {
+                                if (json.optString("message") == "ready") {
                                     isNodeReady = true
-                                    mainHandler.post {
-                                        onNodeReady?.invoke()
-                                    }
+                                    mainHandler.post { onNodeReady?.invoke() }
                                 }
                             } catch (_: Exception) {}
                             newFixedLengthResponse(Response.Status.OK, "text/plain", "OK")
                         }
-
-                        else -> newFixedLengthResponse(Response.Status.NOT_FOUND, "text/plain", "Not Found")
+                        else -> newFixedLengthResponse(
+                            Response.Status.NOT_FOUND, "text/plain", "Not Found")
                     }
                 }
             }
@@ -117,17 +104,26 @@ class NodeJSManager private constructor(context: Context) {
 
     fun getDocumentsSourcePath(): String {
         val sourcePath = File(appContext.filesDir, "nodejs-project/src/source")
-        if (!sourcePath.exists()) {
-            sourcePath.mkdirs()
-        }
+        if (!sourcePath.exists()) sourcePath.mkdirs()
         return sourcePath.absolutePath
     }
 
     // ============================================================
-    // 启动 Node.js
+    //  启动 Node.js
     // ============================================================
     fun startNodeJS(completion: ((Boolean) -> Unit)? = null) {
+        // 已启动：重发端口回调（防止 Dart 侧错过），直接返回
         if (isRunning) {
+            Log.i(TAG, "startNodeJS: already running, re-fire port callbacks")
+            if (managementPort > 0) {
+                mainHandler.post { onPortReceived?.invoke(managementPort, "management") }
+            }
+            if (spiderPort > 0) {
+                mainHandler.post { onPortReceived?.invoke(spiderPort, "spider") }
+            }
+            if (isNodeReady) {
+                mainHandler.post { onNodeReady?.invoke() }
+            }
             completion?.invoke(true)
             return
         }
@@ -143,23 +139,35 @@ class NodeJSManager private constructor(context: Context) {
         Thread {
             try {
                 val projectDir = File(appContext.filesDir, "nodejs-project")
-                if (!projectDir.exists()) {
-                    copyAssetsToDir("nodejs-project/dist", projectDir)
+                val distDir = File(projectDir, "dist")
+                val scriptPath = File(distDir, "main.js")
+
+                // 首次启动 or 旧版本残留 → 清空重拷
+                if (!scriptPath.exists()) {
+                    if (projectDir.exists()) {
+                        Log.w(TAG, "Cleaning stale projectDir: ${projectDir.absolutePath}")
+                        projectDir.deleteRecursively()
+                    }
+                    Log.i(TAG, "Copying assets -> ${projectDir.absolutePath}")
+                    copyAssetsToDir("nodejs-project", projectDir)
                 }
 
-                val scriptPath = File(projectDir, "dist/main.js")
                 if (!scriptPath.exists()) {
-                    Log.e(TAG, "Node.js script not found: ${scriptPath.absolutePath}")
+                    Log.e(TAG, "main.js STILL not found after copy!")
+                    projectDir.walkTopDown().forEach {
+                        Log.e(TAG, "  listing: ${it.absolutePath}")
+                    }
                     mainHandler.post { completion?.invoke(false) }
                     return@Thread
                 }
 
-                val sourcePath = getDocumentsSourcePath()
+                // 确保 source 目录存在
+                getDocumentsSourcePath()
+
                 Log.i(TAG, "Starting Node.js: ${scriptPath.absolutePath}, native-port: $nativeServerPort")
 
                 val args = arrayOf(
                     "node",
-                    "--security-revert=CVE-2023-46809",
                     scriptPath.absolutePath,
                     "--native-port", nativeServerPort.toString()
                 )
@@ -167,13 +175,13 @@ class NodeJSManager private constructor(context: Context) {
                 isRunning = true
                 mainHandler.post { completion?.invoke(true) }
 
-                val result = nodeStart(args)
-                Log.i(TAG, "node_start returned: $result")
+                // node::Start 阻塞当前线程直到 Node 退出
+                val result = nodeStart(args, projectDir.absolutePath)
+                Log.i(TAG, "node::Start returned: $result")
 
                 mainHandler.post {
                     isRunning = false
                     isNodeReady = false
-                    webServer?.stop()
                 }
 
             } catch (e: Exception) {
@@ -185,77 +193,86 @@ class NodeJSManager private constructor(context: Context) {
     }
 
     // ============================================================
-    // 从 assets 复制文件（修复递归逻辑）
+    //  递归拷贝 assets -> destDir
+    //  修复：AssetManager.list() 对文件返回空数组 []，而非 null
     // ============================================================
     private fun copyAssetsToDir(assetPath: String, destDir: File) {
-        destDir.mkdirs()
         val assetManager = appContext.assets
-        val entries = assetManager.list(assetPath) ?: return
+        destDir.mkdirs()
+
+        val entries = assetManager.list(assetPath)
+        if (entries == null || entries.isEmpty()) return
 
         for (entry in entries) {
-            val srcPath = if (assetPath.isNotEmpty()) "$assetPath/$entry" else entry
+            val srcPath = if (assetPath.isEmpty()) entry else "$assetPath/$entry"
             val destFile = File(destDir, entry)
 
-            // 检查 asset 路径是否指向一个目录
-            // 在 Android assets 中，没有直接的 isDirectory() 方法，
-            // 但可以通过尝试列出其内容来判断。
-            // 如果 list 返回非空数组，则视为目录。
             val subEntries = assetManager.list(srcPath)
-            if (subEntries != null) {
-                // 这是一个目录：递归复制
+            val isDir = subEntries != null && subEntries.isNotEmpty()
+
+            if (isDir) {
                 copyAssetsToDir(srcPath, destFile)
             } else {
-                // 这是一个文件：复制
+                // list() 空数组可能是文件，也可能是空目录 → 用 open() 二次确认
                 try {
-                    val inputStream = assetManager.open(srcPath)
-                    FileOutputStream(destFile).use { output ->
-                        inputStream.copyTo(output)
+                    assetManager.open(srcPath).use { input ->
+                        destFile.parentFile?.mkdirs()
+                        FileOutputStream(destFile).use { output ->
+                            input.copyTo(output)
+                        }
                     }
-                    inputStream.close()
-                } catch (e: IOException) {
-                    Log.e(TAG, "Failed to copy file: $srcPath", e)
+                } catch (_: IOException) {
+                    destFile.mkdirs()  // 空目录
                 }
             }
         }
     }
 
     // ============================================================
-    // 下载辅助方法
+    //  下载辅助
     // ============================================================
-    private fun downloadString(url: String): String? {
+    private data class HttpResult(val code: Int, val body: String?)
+
+    private fun downloadStringWithCode(url: String, timeoutMs: Int = 5000): HttpResult {
         return try {
-            val connection = URL(url).openConnection() as HttpURLConnection
-            connection.connectTimeout = 5000
-            connection.readTimeout = 5000
-            connection.inputStream.bufferedReader().readText().trim().also {
-                connection.disconnect()
-            }
-        } catch (_: Exception) {
-            null
+            val conn = URL(url).openConnection() as HttpURLConnection
+            conn.connectTimeout = timeoutMs
+            conn.readTimeout = timeoutMs
+            conn.requestMethod = "GET"
+            val code = conn.responseCode
+            val body = if (code in 200..299) {
+                conn.inputStream.bufferedReader().readText().trim()
+            } else null
+            conn.disconnect()
+            HttpResult(code, body)
+        } catch (e: Exception) {
+            HttpResult(-1, null)
         }
+    }
+
+    private fun downloadString(url: String): String? {
+        val r = downloadStringWithCode(url)
+        return r.body
     }
 
     private fun downloadBytes(url: String): ByteArray? {
         return try {
-            val connection = URL(url).openConnection() as HttpURLConnection
-            connection.connectTimeout = 15000
-            connection.readTimeout = 15000
-            connection.inputStream.readBytes().also {
-                connection.disconnect()
-            }
-        } catch (_: Exception) {
-            null
-        }
+            val conn = URL(url).openConnection() as HttpURLConnection
+            conn.connectTimeout = 15000
+            conn.readTimeout = 15000
+            val bytes = conn.inputStream.readBytes()
+            conn.disconnect()
+            bytes
+        } catch (_: Exception) { null }
     }
 
     private fun md5(bytes: ByteArray): String {
         val md = MessageDigest.getInstance("MD5")
-        val digest = md.digest(bytes)
-        return digest.joinToString("") { "%02x".format(it) }
+        return md.digest(bytes).joinToString("") { "%02x".format(it) }
     }
 
     // ============================================================
-    // 加载源
+    //  加载源
     // ============================================================
     fun loadSourceFromURL(urlString: String, completion: ((Boolean, String?) -> Unit)? = null) {
         Log.i(TAG, "loadSourceFromURL: $urlString")
@@ -268,89 +285,94 @@ class NodeJSManager private constructor(context: Context) {
         Thread {
             try {
                 val sourcePath = getDocumentsSourcePath()
-                val indexJs = File(sourcePath, "index.js")
-                val indexMd5 = File(sourcePath, "index.js.md5")
-                val configJs = File(sourcePath, "index.config.js")
-                val configMd5 = File(sourcePath, "index.config.js.md5")
+                val sourceDir = File(sourcePath)
+                val indexJs = File(sourceDir, "index.js")
+                val indexMd5 = File(sourceDir, "index.js.md5")
+                val configJs = File(sourceDir, "index.config.js")
+                val configMd5 = File(sourceDir, "index.config.js.md5")
 
+                // ---------- 缓存检查（对齐 iOS：404 时用缓存）----------
                 var useCache = false
                 if (indexJs.exists() && indexMd5.exists()) {
-                    Log.i(TAG, "Cache exists, checking MD5...")
-                    val remoteMd5 = downloadString("$normalizedUrl.md5")
-                    if (remoteMd5 != null) {
-                        val localMd5 = indexMd5.readText().trim()
-                        if (remoteMd5 == localMd5) {
-                            Log.i(TAG, "✅ MD5 match! Using cached source")
+                    Log.i(TAG, "Cache exists, checking remote MD5...")
+                    val r = downloadStringWithCode("$normalizedUrl.md5")
+                    when {
+                        r.code == 404 -> {
+                            Log.i(TAG, "Remote MD5 404 -> use cached source")
                             useCache = true
-                        } else {
-                            Log.i(TAG, "MD5 mismatch: local=$localMd5, remote=$remoteMd5")
                         }
-                    } else {
-                        Log.w(TAG, "Failed to download remote MD5, will re-download")
+                        r.code in 200..299 && !r.body.isNullOrEmpty() -> {
+                            val localMd5 = indexMd5.readText().trim()
+                            if (r.body == localMd5) {
+                                Log.i(TAG, "MD5 match -> use cached source")
+                                useCache = true
+                            } else {
+                                Log.i(TAG, "MD5 mismatch: local=$localMd5 remote=${r.body}")
+                            }
+                        }
+                        else -> Log.w(TAG, "Fetch remote MD5 failed (code=${r.code})")
                     }
                 }
 
                 if (!useCache) {
-                    Log.i(TAG, "Downloading source from: $normalizedUrl")
-
+                    Log.i(TAG, "Downloading source: $normalizedUrl")
                     val jsData = downloadBytes(normalizedUrl)
                     if (jsData == null) {
                         mainHandler.post { completion?.invoke(false, "Failed to download index.js") }
                         return@Thread
                     }
 
-                    val remoteMd5 = downloadString("$normalizedUrl.md5")
-                    if (remoteMd5 != null) {
+                    val md5Resp = downloadStringWithCode("$normalizedUrl.md5")
+                    if (md5Resp.code in 200..299 && !md5Resp.body.isNullOrEmpty()) {
                         val actualMd5 = md5(jsData)
-                        if (actualMd5 != remoteMd5) {
+                        if (actualMd5 != md5Resp.body) {
                             mainHandler.post { completion?.invoke(false, "MD5 verification failed") }
                             return@Thread
                         }
-                        FileOutputStream(indexMd5).use { it.write(remoteMd5.toByteArray()) }
+                        sourceDir.mkdirs()
+                        FileOutputStream(indexMd5).use { it.write(md5Resp.body.toByteArray()) }
                     }
 
+                    sourceDir.mkdirs()
                     FileOutputStream(indexJs).use { it.write(jsData) }
 
-                    val configUrl = normalizedUrl.replace("/index.js", "/index.config.js")
+                    // index.config.js（可选）
                     try {
+                        val configUrl = normalizedUrl.replace("/index.js", "/index.config.js")
                         val configData = downloadBytes(configUrl)
                         if (configData != null) {
                             FileOutputStream(configJs).use { it.write(configData) }
-                            val configMd5Data = downloadString("$configUrl.md5")
-                            if (configMd5Data != null) {
-                                FileOutputStream(configMd5).use { it.write(configMd5Data.toByteArray()) }
+                            val cm = downloadStringWithCode("$configUrl.md5")
+                            if (cm.code in 200..299 && !cm.body.isNullOrEmpty()) {
+                                FileOutputStream(configMd5).use { it.write(cm.body.toByteArray()) }
                             }
                         }
                     } catch (_: Exception) {
-                        Log.w(TAG, "Config file not found, skipping")
+                        Log.w(TAG, "index.config.js not available, skip")
                     }
-
                     Log.i(TAG, "Download completed")
                 }
 
-                sendLoadCommandToNodeJS(sourcePath) { success, message ->
-                    mainHandler.post {
-                        completion?.invoke(success, message)
-                    }
+                sendLoadCommandToNodeJS(sourcePath) { ok, msg ->
+                    mainHandler.post { completion?.invoke(ok, msg) }
                 }
 
             } catch (e: Exception) {
                 Log.e(TAG, "loadSourceFromURL error", e)
-                mainHandler.post {
-                    completion?.invoke(false, e.message)
-                }
+                mainHandler.post { completion?.invoke(false, e.message) }
             }
         }.start()
     }
 
     // ============================================================
-    // 发送加载命令
+    //  通知 Node 加载源（POST /source/loadPath）
     // ============================================================
-    private fun sendLoadCommandToNodeJS(path: String, completion: ((Boolean, String?) -> Unit)? = null) {
+    private fun sendLoadCommandToNodeJS(path: String, completion: ((Boolean, String?) -> Unit)?) {
         sendLoadCommandToNodeJS(path, 3, completion)
     }
 
-    private fun sendLoadCommandToNodeJS(path: String, retryCount: Int, completion: ((Boolean, String?) -> Unit)? = null) {
+    private fun sendLoadCommandToNodeJS(path: String, retryCount: Int,
+                                        completion: ((Boolean, String?) -> Unit)?) {
         if (managementPort <= 0) {
             if (retryCount > 0) {
                 mainHandler.postDelayed({
@@ -365,28 +387,31 @@ class NodeJSManager private constructor(context: Context) {
         Thread {
             try {
                 val url = URL("http://127.0.0.1:$managementPort/source/loadPath")
-                val connection = url.openConnection() as HttpURLConnection
-                connection.requestMethod = "POST"
-                connection.setRequestProperty("Content-Type", "application/json")
-                connection.doOutput = true
-                connection.connectTimeout = 15000
-                connection.readTimeout = 15000
+                val conn = url.openConnection() as HttpURLConnection
+                conn.requestMethod = "POST"
+                conn.setRequestProperty("Content-Type", "application/json")
+                conn.doOutput = true
+                conn.connectTimeout = 15000
+                conn.readTimeout = 15000
 
-                val body = JSONObject().apply {
-                    put("path", path)
-                }
-                connection.outputStream.use { output ->
-                    output.write(body.toString().toByteArray())
-                }
+                val body = JSONObject().apply { put("path", path) }
+                conn.outputStream.use { it.write(body.toString().toByteArray()) }
 
-                val responseCode = connection.responseCode
-                if (responseCode in 200..299) {
+                val code = conn.responseCode
+                conn.disconnect()
+
+                if (code in 200..299) {
+                    Log.i(TAG, "sendLoadCommandToNodeJS OK")
                     completion?.invoke(true, "Source loaded successfully")
                 } else {
-                    completion?.invoke(false, "Server error: $responseCode")
+                    if (retryCount > 0) {
+                        mainHandler.postDelayed({
+                            sendLoadCommandToNodeJS(path, retryCount - 1, completion)
+                        }, 2000)
+                    } else {
+                        completion?.invoke(false, "Server error: $code")
+                    }
                 }
-                connection.disconnect()
-
             } catch (e: Exception) {
                 if (retryCount > 0) {
                     mainHandler.postDelayed({
@@ -400,11 +425,9 @@ class NodeJSManager private constructor(context: Context) {
     }
 
     fun deleteSource(completion: ((Boolean) -> Unit)? = null) {
-        val sourcePath = File(getDocumentsSourcePath())
         try {
-            if (sourcePath.exists()) {
-                sourcePath.deleteRecursively()
-            }
+            val sourcePath = File(getDocumentsSourcePath())
+            if (sourcePath.exists()) sourcePath.deleteRecursively()
             spiderPort = 0
             completion?.invoke(true)
         } catch (e: Exception) {
@@ -412,13 +435,13 @@ class NodeJSManager private constructor(context: Context) {
         }
     }
 
+    /**
+     * 软停止：
+     * Android 的 node::Start 是同进程阻塞调用，无法在进程内真正停止。
+     * 只清软状态，保留 webServer / 端口 / Node 运行状态，方便 Dart 侧复用。
+     */
     fun stopNodeJS() {
-        isRunning = false
+        Log.i(TAG, "stopNodeJS: soft reset (Node keeps running)")
         isNodeReady = false
-        webServer?.stop()
-        webServer = null
-        nativeServerPort = 0
-        managementPort = 0
-        spiderPort = 0
     }
 }

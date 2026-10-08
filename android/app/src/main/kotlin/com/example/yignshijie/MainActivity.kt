@@ -1,5 +1,6 @@
 package com.example.yuanying
 
+import org.json.JSONObject
 import android.content.Intent
 import android.content.res.Configuration
 import android.os.Build
@@ -15,10 +16,10 @@ import io.flutter.plugin.common.MethodChannel.Result
 
 class MainActivity : AudioServiceActivity(), MethodCallHandler {
 
-    // ===== Node.js 通道 =====
     private var nodeJSChannel: MethodChannel? = null
     private var nodeJSEventChannel: EventChannel? = null
     private var eventSink: EventChannel.EventSink? = null
+
     private lateinit var nodeJSManager: NodeJSManager
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -34,24 +35,37 @@ class MainActivity : AudioServiceActivity(), MethodCallHandler {
             window.attributes.layoutInDisplayCutoutMode =
                 LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
         }
-        // ===== 初始化 NodeJSManager =====
-        nodeJSManager = NodeJSManager.getInstance(this)
-        nodeJSManager.onPortReceived = { port, type ->
-            eventSink?.success(mapOf("port" to port, "type" to type))
-        }
-        nodeJSManager.onNodeReady = {
-            eventSink?.success(mapOf("event" to "ready"))
-        }
     }
 
-    // ===== 注册 Flutter 通道 =====
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+
+        // ===== 1) 初始化 NodeJSManager =====
+        nodeJSManager = NodeJSManager.getInstance(applicationContext)
+
+        // ===== 2) 挂回调 → 转发到 eventSink =====
+        nodeJSManager.onPortReceived = { port, type ->
+            val json = JSONObject().apply {
+                put("port", port)
+                put("type", type)
+            }.toString()
+            eventSink?.success(json)
+        }
+        nodeJSManager.onNodeReady = {
+            val json = JSONObject().apply {
+                put("event", "ready")
+            }.toString()
+            eventSink?.success(json)
+        }
+
+        // ===== 3) MethodChannel =====
         nodeJSChannel = MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             "com.tvbox/nodejs"
         )
         nodeJSChannel?.setMethodCallHandler(this)
+
+        // ===== 4) EventChannel =====
         nodeJSEventChannel = EventChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             "com.tvbox/nodejs/events"
@@ -59,6 +73,29 @@ class MainActivity : AudioServiceActivity(), MethodCallHandler {
         nodeJSEventChannel?.setStreamHandler(object : EventChannel.StreamHandler {
             override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
                 eventSink = events
+
+                if (!::nodeJSManager.isInitialized) return
+
+                if (nodeJSManager.managementPort > 0) {
+                    val json = JSONObject().apply {
+                        put("port", nodeJSManager.managementPort)
+                        put("type", "management")
+                    }.toString()
+                    events?.success(json)
+                }
+                if (nodeJSManager.spiderPort > 0) {
+                    val json = JSONObject().apply {
+                        put("port", nodeJSManager.spiderPort)
+                        put("type", "spider")
+                    }.toString()
+                    events?.success(json)
+                }
+                if (nodeJSManager.isNodeReady) {
+                    val json = JSONObject().apply {
+                        put("event", "ready")
+                    }.toString()
+                    events?.success(json)
+                }
             }
 
             override fun onCancel(arguments: Any?) {
@@ -68,8 +105,9 @@ class MainActivity : AudioServiceActivity(), MethodCallHandler {
     }
 
     override fun onDestroy() {
-        // ===== 停止 Node.js =====
-        nodeJSManager.stopNodeJS()
+        if (::nodeJSManager.isInitialized) {
+            nodeJSManager.stopNodeJS()
+        }
         stopService(Intent(this, com.ryanheise.audioservice.AudioService::class.java))
         super.onDestroy()
     }
@@ -87,13 +125,11 @@ class MainActivity : AudioServiceActivity(), MethodCallHandler {
         AndroidHelper.isPipMode = isInPictureInPictureMode
     }
 
-    // ===== MethodCallHandler 实现 =====
+    // ===== MethodCallHandler =====
     override fun onMethodCall(call: MethodCall, result: Result) {
         when (call.method) {
             "startNodeJS" -> {
-                nodeJSManager.startNodeJS { success ->
-                    result.success(success)
-                }
+                nodeJSManager.startNodeJS { success -> result.success(success) }
             }
             "loadSourceFromURL" -> {
                 val url = call.argument<String>("url")
@@ -102,25 +138,31 @@ class MainActivity : AudioServiceActivity(), MethodCallHandler {
                     return
                 }
                 nodeJSManager.loadSourceFromURL(url) { success, message ->
-                    if (success) {
-                        result.success(mapOf("success" to true))
-                    } else {
-                        result.success(
-                            mapOf(
-                                "success" to false,
-                                "message" to (message ?: "Unknown error")
-                            )
+                    result.success(
+                        mapOf(
+                            "success" to success,
+                            "message" to (message ?: "")
                         )
-                    }
+                    )
                 }
             }
             "deleteSource" -> {
-                nodeJSManager.deleteSource { success ->
-                    result.success(success)
-                }
+                nodeJSManager.deleteSource { success -> result.success(success) }
             }
             "getSourcePath" -> {
                 result.success(nodeJSManager.getDocumentsSourcePath())
+            }
+            "getNativeServerPort" -> {
+                result.success(nodeJSManager.nativeServerPort)
+            }
+            "getManagementPort" -> {
+                result.success(nodeJSManager.managementPort)
+            }
+            "getSpiderPort" -> {
+                result.success(nodeJSManager.spiderPort)
+            }
+            "isNodeReady" -> {
+                result.success(nodeJSManager.isNodeReady)
             }
             "stopNodeJS" -> {
                 nodeJSManager.stopNodeJS()

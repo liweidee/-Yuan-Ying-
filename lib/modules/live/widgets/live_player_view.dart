@@ -1,5 +1,6 @@
 // lib/modules/live/widgets/live_player_view.dart
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/gestures.dart';
@@ -230,7 +231,11 @@ class _LivePlayerViewState extends State<LivePlayerView> {
             if (!visible) return const SizedBox.shrink();
 
             return Positioned(
-              left: 16 + leftSafe,
+              // right: 16 + rightSafe,
+              // iOS 移动端全屏横屏时刘海始终在右侧，
+              // 系统 viewPadding 在沉浸式全屏下可能上报 0，
+              // 因此直接硬编码 60pt 避让（覆盖 iPhone X~15 全部机型）
+              right: Platform.isIOS ? 60.0 : 16.0,
               top: 0,
               bottom: 0,
               child: Center(

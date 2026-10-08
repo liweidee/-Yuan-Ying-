@@ -1165,27 +1165,10 @@ class FvpEngine implements IPlayerEngine {
       return;
     }
 
-    // 开始录制
+    // 开始录制：先用默认编码器验证
     try {
-      if (Platform.isIOS) {
-        // iOS：显式指定 VideoToolbox 硬件编码器
-        _controller!.record(to: path, format: 'h264_videotoolbox');
-        debugPrint('[FvpEngine] 录制启动（iOS / h264_videotoolbox）: $path');
-      } else if (Platform.isAndroid) {
-        // Android：优先尝试 MediaCodec 硬件编码器，失败回退默认
-        try {
-          _controller!.record(to: path, format: 'h264_mediacodec');
-          debugPrint('[FvpEngine] 录制启动（Android / h264_mediacodec）: $path');
-        } catch (e) {
-          debugPrint('[FvpEngine] h264_mediacodec 不可用，回退默认编码器: $e');
-          _controller!.record(to: path);
-          debugPrint('[FvpEngine] 录制启动（Android / 默认编码器）: $path');
-        }
-      } else {
-        // 桌面端：使用默认编码器（已验证正常）
-        _controller!.record(to: path);
-        debugPrint('[FvpEngine] 录制启动（默认编码器）: $path');
-      }
+      _controller!.record(to: path);
+      debugPrint('[FvpEngine] 录制启动（默认）: $path');
     } catch (e) {
       debugPrint('[FvpEngine] 录制启动失败: $e');
     }
