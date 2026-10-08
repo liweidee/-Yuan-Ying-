@@ -11,7 +11,9 @@ import 'package:yuanying/core/constants/storage_keys.dart';
 class MusicPlayer {
   // 暴露内部 AudioPlayer 给 AudioPlayerHandler 使用
   AudioPlayer get audio => _audio;
-  final AudioPlayer _audio = AudioPlayer();
+  final AudioPlayer _audio = AudioPlayer(
+    androidApplyAudioAttributes: false, // 阻止 just_audio 调用 setAndroidAudioAttributes
+  );
   
   Episode? current;
   bool isLoading = false;

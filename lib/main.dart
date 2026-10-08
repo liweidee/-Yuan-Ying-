@@ -157,7 +157,7 @@ void main() async {
   media_kit.MediaKit.ensureInitialized();
 
   JustAudioMediaKit.ensureInitialized(
-    android: true,
+    android: false,  // 改为 false，让 just_audio 使用其原生 Android 实现
     iOS: true,
     windows: true,
     linux: true,
