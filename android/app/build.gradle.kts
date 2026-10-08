@@ -23,22 +23,12 @@ android {
         versionCode = flutter.versionCode
         versionName = flutter.versionName
 
-        // ============================================================
-        // 限制 ABI：与 app/libnode/bin/ 下实际存在的目录一致
-        // libnode/bin/ 只有 arm64-v8a / armeabi-v7a / x86_64，
-        // 而 jniLibs/x86/ 存在 libquickjs_bridge.so，
-        // 若不限制，x86 构建会因找不到 libnode.so 而失败。
-        // ============================================================
-        ndk {
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
-        }
+        // 说明：ABI 限制由 flutter build --split-per-abi 提供，
+        // 这里不再添加 ndk.abiFilters，避免与其冲突。
 
         externalNativeBuild {
             cmake {
-                // 方式一：使用 add()
                 cppFlags.add("-std=c++14")
-                // 或方式二：使用 arguments（推荐）
-                // arguments.add("-DCMAKE_CXX_FLAGS=-std=c++14")
             }
         }
     }
