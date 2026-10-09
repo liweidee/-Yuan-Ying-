@@ -20,6 +20,7 @@ import 'package:yuanying/core/constants/storage_keys.dart';
 import 'package:yuanying/utils/toast_utils.dart';
 import 'package:yuanying/utils/storage.dart';
 import 'package:yuanying/core/constants/app_constants.dart';
+import 'package:yuanying/services/silence_keeper.dart';
 
 // ===== 音频文件后缀列表 =====
 const List<String> _audioExtensions = ['.mp3', '.m4a', '.aac', '.flac', '.wav', '.ogg', '.opus', '.wma', '.alac'];
@@ -609,20 +610,28 @@ class MusicPlayerController extends GetxController {
       _saveCurrentIndex(_currentVodId!, index);
     }
 
-    final fetcher = _urlFetcher;
-    if (fetcher != null) {
-      try {
-        final episode = playlist[index];
-        final playUrl = await fetcher(episode);
-        if (playUrl != null) {
-          await playWithUrl(playUrl, index: index);
-          return;
-        }
-      } catch (_) {}
-    }
+    // ===== 关键：切集前启动静音保活 =====
+    // 覆盖从"音频停止"到"新音频开始播放"的整个静音窗口
+    await SilenceKeeper.start();
 
-    // 兜底：走 UI 层回调（详情页还在栈中时可用）
-    onPlayCompleted?.call();
+    try {
+      final fetcher = _urlFetcher;
+      if (fetcher != null) {
+        try {
+          final episode = playlist[index];
+          final playUrl = await fetcher(episode);
+          if (playUrl != null) {
+            await playWithUrl(playUrl, index: index);
+            return;
+          }
+        } catch (_) {}
+      }
+      // 兜底：走 UI 层回调
+      onPlayCompleted?.call();
+    } finally {
+      // ===== 主音频已接管，停止保活 =====
+      await SilenceKeeper.stop();
+    }
   }
 
   Future<void> seek(Duration position) async {
@@ -718,45 +727,30 @@ class MusicPlayerController extends GetxController {
 
   // ===== 内部方法 =====
   Future<void> _handlePlayCompleted() async {
-    // 防抖保护：如果上一次还没处理完，直接忽略
     if (_handlingCompleted) return;
     _handlingCompleted = true;
 
     try {
-      // ===== 场景 1：定时"播放完当前曲目" =====
+      // 定时"播放完当前曲目"
       if (stopAfterCurrent.value) {
         stopAfterCurrent.value = false;
         timerMinutes.value = 0;
-
-        // 用 await 确保 stop 执行完成
-        try {
-          await _handler.player.stop();
-        } catch (_) {}
-
+        try { await _handler.player.stop(); } catch (_) {}
         playing.value = false;
         ToastUtils.show('当前曲目已播放完毕，已暂停');
-
-        // 500ms 后释放锁，防止异步事件重复触发
         await Future.delayed(const Duration(milliseconds: 500));
         return;
       }
 
-      // ===== 场景 2：正常切歌 =====
+      // 正常切歌：统一走 _playIndexWithFetcher，保活已在其中处理
       final nextIndex = _getNextIndex();
       if (nextIndex >= 0) {
-        currentIndex.value = nextIndex;
-        if (_currentVodId != null && _currentVodId!.isNotEmpty) {
-          _saveCurrentIndex(_currentVodId!, nextIndex);
-        }
-        onPlayCompleted?.call();
-
-        // 300ms 后释放
+        await _playIndexWithFetcher(nextIndex);
         await Future.delayed(const Duration(milliseconds: 300));
       } else {
         await _handler.pause();
         playing.value = false;
         ToastUtils.show('播放列表已结束');
-
         await Future.delayed(const Duration(milliseconds: 500));
       }
     } finally {

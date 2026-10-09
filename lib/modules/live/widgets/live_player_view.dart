@@ -74,12 +74,8 @@ class _LivePlayerViewState extends State<LivePlayerView> {
   @override
   Widget build(BuildContext context) {
     // ===== 读取刘海安全区 =====
-    // 移动端全屏不做 EnterNativeFullscreen，viewPadding 始终正常上报，
-    // 直接读即可。叠加到按钮位置做刘海避让。
-    final viewPadding = MediaQuery.viewPaddingOf(context);
-    final double leftSafe = viewPadding.left;
-    final double rightSafe = viewPadding.right;
-    final double bottomSafe = viewPadding.bottom;
+    // 底部安全区（非全屏时给控制栏底部留空）
+    final double bottomSafe = MediaQuery.viewPaddingOf(context).bottom;
 
     Widget playerContent = Container(
       color: Colors.black,
@@ -222,8 +218,6 @@ class _LivePlayerViewState extends State<LivePlayerView> {
           //   - 锁屏：显示"解锁"图标且常显
           //   - 非全屏：不显示
           //
-          // 安全区适配：叠加 viewPadding.left，
-          // iOS 横屏刘海在左侧时 16 + leftSafe 能正确避让。
           Obx(() {
             if (!ctrl.isFullScreen.value) return const SizedBox.shrink();
             final isLocked = ctrl.controlsLock.value;
@@ -231,11 +225,8 @@ class _LivePlayerViewState extends State<LivePlayerView> {
             if (!visible) return const SizedBox.shrink();
 
             return Positioned(
-              // right: 16 + rightSafe,
-              // iOS 移动端全屏横屏时刘海始终在右侧，
-              // 系统 viewPadding 在沉浸式全屏下可能上报 0，
-              // 因此直接硬编码 60pt 避让（覆盖 iPhone X~15 全部机型）
-              right: Platform.isIOS ? 60.0 : 16.0,
+              // 锁屏按钮：左侧垂直居中，无需避让刘海
+              left: 16,
               top: 0,
               bottom: 0,
               child: Center(
@@ -282,7 +273,10 @@ class _LivePlayerViewState extends State<LivePlayerView> {
             }
 
             return Positioned(
-              right: 16 + rightSafe,
+              // iOS 移动端全屏横屏时刘海始终在右侧，
+              // 系统 viewPadding 在沉浸式全屏下可能上报 0，
+              // 因此直接硬编码 60pt 避让（覆盖 iPhone X~15 全部机型）
+              right: Platform.isIOS ? 60.0 : 16.0,
               top: 0,
               bottom: 0,
               child: Center(

@@ -23,6 +23,7 @@ import UIKit
 
         setupNodeJSChannel(with: flutterViewController)
         setupEventChannel(with: flutterViewController)
+        setupSilenceKeeperChannel(with: flutterViewController)  // ← 新增这一行
 
         NotificationCenter.default.addObserver(
             self,
@@ -118,6 +119,28 @@ import UIKit
 
         eventChannel?.setStreamHandler(NodeEventStreamHandler.shared)
         NodeEventStreamHandler.shared.setAppDelegate(self)
+    }
+
+    private func setupSilenceKeeperChannel(with controller: FlutterViewController?) {
+        guard let controller = controller else { return }
+
+        let channel = FlutterMethodChannel(
+            name: "com.yuanying/silence_keeper",
+            binaryMessenger: controller.binaryMessenger
+        )
+
+        channel.setMethodCallHandler { (call, result) in
+            switch call.method {
+            case "startSilence":
+                SilenceKeeper.shared.start()
+                result(nil)
+            case "stopSilence":
+                SilenceKeeper.shared.stop()
+                result(nil)
+            default:
+                result(FlutterMethodNotImplemented)
+            }
+        }
     }
 
     @objc private func handleNodePortNotification(_ notification: Notification) {
