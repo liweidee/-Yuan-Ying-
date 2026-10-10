@@ -151,7 +151,7 @@ void main() async {
   final session = await AudioSession.instance;
   await session.configure(AudioSessionConfiguration(
     avAudioSessionCategory: AVAudioSessionCategory.playback,
-    avAudioSessionCategoryOptions: [],
+    avAudioSessionCategoryOptions: null,  // null 表示无额外选项
     avAudioSessionMode: AVAudioSessionMode.defaultMode,
     avAudioSessionRouteSharingPolicy: AVAudioSessionRouteSharingPolicy.defaultPolicy,
     avAudioSessionSetActiveOptions: AVAudioSessionSetActiveOptions.none,
