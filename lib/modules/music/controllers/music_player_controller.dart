@@ -92,6 +92,7 @@ class MusicPlayerController extends GetxController {
   final RxInt timerMinutes = 0.obs;            // 0=无定时，-1=播放完当前曲目
   final RxBool stopAfterCurrent = false.obs;
   Timer? _timer;
+  Timer? _pauseResumeTimer;
 
   // ===== 倍速 =====
   final RxDouble speed = 1.0.obs;
@@ -128,8 +129,28 @@ class MusicPlayerController extends GetxController {
     _handler.onSkipToPrevious = () => playPrev();
     _handler.onSkipToNext = () => playNext();
 
+    // ===== 统一监听播放状态变化 =====
+    // 无论暂停/播放来自哪里（系统控制栏、页面底部、详情页），
+    // 都会触发下面的逻辑，统一处理音频会话切换和 NodeJS 保活。
+    bool wasPlaying = false;
     _handler.player.playingStream.listen((isPlaying) {
       playing.value = isPlaying;
+
+      if (isPlaying && !wasPlaying) {
+        // 从暂停恢复播放：取消待恢复 timer，切回独占会话
+        _pauseResumeTimer?.cancel();
+        _pauseResumeTimer = null;
+        _prepareExclusiveAudioSession();
+      } else if (!isPlaying && wasPlaying) {
+        // 从播放变为暂停：2 秒后如果仍未恢复，启动 NodeJS 保活
+        _pauseResumeTimer?.cancel();
+        _pauseResumeTimer = Timer(const Duration(seconds: 2), () {
+          if (!playing.value) {
+            _restoreNodeKeepAlive();
+          }
+        });
+      }
+      wasPlaying = isPlaying;
     });
 
     // 监听位置变化以实现跳过片头片尾
@@ -569,41 +590,17 @@ class MusicPlayerController extends GetxController {
   }
 
   // ===== 播放控制 =====
-  // Future<void> togglePlay() async {
-  //   if (_handler.player.isPlaying) {
-  //     await _handler.pause();
-  //   } else {
-  //     await _handler.play();
-  //   }
-  // }
-
-  // Future<void> pause() async {
-  //   await _handler.pause();
-  //   // 用户主动暂停：尝试恢复 NodeJS 保活
-  //   await _restoreNodeKeepAlive();
-  // }
-
-  Timer? _pauseResumeTimer;
+  Future<void> togglePlay() async {
+    if (_handler.player.isPlaying) {
+      await _handler.pause();
+    } else {
+      await _handler.play();
+    }
+  }
 
   Future<void> pause() async {
     await _handler.pause();
-    // 5 秒后如果仍未恢复播放，尝试恢复 NodeJS 保活
-    _pauseResumeTimer?.cancel();
-    _pauseResumeTimer = Timer(const Duration(seconds: 5), () {
-      if (!playing.value) {
-        _restoreNodeKeepAlive();
-      }
-    });
-  }
-
-  Future<void> togglePlay() async {
-    if (_handler.player.isPlaying) {
-      await pause();
-    } else {
-      // 用户恢复播放：取消待恢复
-      _pauseResumeTimer?.cancel();
-      await _handler.play();
-    }
+    // 状态变化由 playingStream 统一处理，这里不再重复启动 timer
   }
 
   Future<void> playNext() async {
@@ -688,6 +685,10 @@ class MusicPlayerController extends GetxController {
   /// 内部切歌——统一路径
   Future<void> _playIndexWithFetcher(int index) async {
     if (index < 0 || index >= playlist.length) return;
+
+    // ===== 切歌是主动行为，不是暂停：取消待恢复 timer =====
+    _pauseResumeTimer?.cancel();
+    _pauseResumeTimer = null;
 
     // ===== 准备独占音频会话（保控制栏） =====
     await _prepareExclusiveAudioSession();
@@ -911,4 +912,11 @@ class MusicPlayerController extends GetxController {
   Duration get duration => _handler.player.duration;
   Stream<Duration> get positionStream => _handler.player.positionStream;
   String get currentSongName => currentEpisode?.name ?? '未选择歌曲';
+
+  /// 强制立即恢复保活（App 切到后台时调用）
+  Future<void> forceRestoreKeepAlive() async {
+    _pauseResumeTimer?.cancel();
+    _pauseResumeTimer = null;
+    await _restoreNodeKeepAlive();
+  }
 }

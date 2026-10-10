@@ -103,6 +103,19 @@ class _CustomHttpOverrides extends HttpOverrides {
 class _AppLifecycleObserver extends WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused) {
+      // 仅 iOS 需要：App 切到后台时，如果音乐已暂停，立即启动 NodeJS 保活。
+      // Android / 桌面端：NodeJS 保活机制与 iOS 不同，此处不干预。
+      if (Platform.isIOS) {
+        if (Get.isRegistered<MusicPlayerController>()) {
+          final controller = Get.find<MusicPlayerController>();
+          if (!controller.isPlaying) {
+            controller.forceRestoreKeepAlive();
+          }
+        }
+      }
+    }
+    
     if (state == AppLifecycleState.detached) {
       PythonRuntime.dispose();
 
