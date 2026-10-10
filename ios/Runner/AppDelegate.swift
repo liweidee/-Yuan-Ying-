@@ -106,7 +106,10 @@ import UIKit
             // 直接调用 SilenceKeeper，不经过 NodeJSManager，
             // 避免 ObjC ↔ Swift 桥接头文件的编译问题。
             case "startKeepAlive":
-                SilenceKeeper.shared.start(timeout: nil)  // 无超时，长期保活
+                let args = call.arguments as? [String: Any]
+                let timeout = args?["timeoutSeconds"] as? TimeInterval
+                // 统一使用 mixWithOthers 模式，不区分场景
+                SilenceKeeper.shared.start(timeout: timeout)
                 result(SilenceKeeper.shared.isRunning)
 
             case "stopKeepAlive":
@@ -145,8 +148,9 @@ import UIKit
                 // 读取可选的 timeoutSeconds 参数
                 // Dart 端传 null 时，args["timeoutSeconds"] 是 NSNull，
                 // 用 as? TimeInterval 会返回 nil，符合期望
-                let args = call.arguments as? [String: Any]
+               let args = call.arguments as? [String: Any]
                 let timeout = args?["timeoutSeconds"] as? TimeInterval
+                // 统一使用 mixWithOthers 模式，不区分场景
                 SilenceKeeper.shared.start(timeout: timeout)
                 result(SilenceKeeper.shared.isRunning)
             case "stopSilence":

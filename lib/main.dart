@@ -149,7 +149,19 @@ void main() async {
 
   // 配置 iOS 音频会话（Android 上也有益，但 iOS 上是必须的）
   final session = await AudioSession.instance;
-  await session.configure(const AudioSessionConfiguration.music());
+  await session.configure(AudioSessionConfiguration(
+    avAudioSessionCategory: AVAudioSessionCategory.playback,
+    avAudioSessionCategoryOptions: [],
+    avAudioSessionMode: AVAudioSessionMode.defaultMode,
+    avAudioSessionRouteSharingPolicy: AVAudioSessionRouteSharingPolicy.defaultPolicy,
+    avAudioSessionSetActiveOptions: AVAudioSessionSetActiveOptions.none,
+    androidAudioAttributes: const AndroidAudioAttributes(
+      contentType: AndroidAudioContentType.music,
+      usage: AndroidAudioUsage.media,
+    ),
+    androidAudioFocusGainType: AndroidAudioFocusGainType.gain,
+    androidWillPauseWhenDucked: true,
+  ));
 
   // ==========================================================================
   // 第四步：媒体播放器初始化

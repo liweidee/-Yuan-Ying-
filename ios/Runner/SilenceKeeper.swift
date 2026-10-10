@@ -40,11 +40,10 @@ class SilenceKeeper {
 
         let session = AVAudioSession.sharedInstance()
         do {
-            // 只在当前 category 不是 .playback 时才设置，避免覆盖主播放器的音频会话配置
-            if session.category != .playback {
-                try session.setCategory(.playback, options: [])
-            }
-            try session.setActive(true)
+            // 始终使用 mixWithOthers，确保所有保活场景（音乐/NodeJS）共存
+            // 参考：Mob.Background 后台保活使用 MixWithOthers
+            try session.setCategory(.playback, options: [.mixWithOthers])
+            try session.setActive(true, options: [])
         } catch {
             print("[SilenceKeeper] AVAudioSession 配置失败: \(error)")
             return
@@ -96,7 +95,15 @@ class SilenceKeeper {
             _silenceNode = nil
         }
         _isRunning = false
-        print("[SilenceKeeper] 保活引擎已停止")
+
+        // 关键修改：停止引擎后，重新激活音频会话，保持活跃状态
+        // 这可以防止系统在静音窗口内将音频焦点交还给其他应用（如喜马拉雅）
+        do {
+            try AVAudioSession.sharedInstance().setActive(true, options: [])
+            print("[SilenceKeeper] 保活引擎已停止，音频会话保持活跃")
+        } catch {
+            print("[SilenceKeeper] 重新激活音频会话失败: \(error)")
+        }
     }
 
     /// 调度兜底自动停止
