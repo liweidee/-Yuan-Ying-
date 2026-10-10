@@ -10,6 +10,7 @@ import 'package:flutter/foundation.dart';
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:yuanying/utils/platform_utils.dart';
 import 'package:yuanying/services/catvod_log_service.dart';
+import 'package:yuanying/modules/music/controllers/music_player_controller.dart';
 
 class NodeJSService extends GetxService with WidgetsBindingObserver {
   static const MethodChannel _channel = MethodChannel('com.tvbox/nodejs');
@@ -67,17 +68,44 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
     return '$_exeDir/nodejs/project/dist/index.js';
   }
 
-  /// 保活是否已启动过
-  ///
-  /// 一旦为 true，就不再停止，直到 App 关闭。
-  /// 防止多次调用 initialize() 时重复启动保活。
-  bool _keepAliveStarted = false;
-
   /// 桌面端保活/关闭状态（移动端不会访问）
   bool _isShuttingDown = false;                    // 应用是否正在关闭（用户主动退出）
   int _restartCount = 0;                           // 本会话已重启次数（只加不减，上限 1）
   static const int _maxRestartPerSession = 1;      // 本会话最多重启 1 次，结构上杜绝循环
   // ============ 桌面端字段结束 ============
+
+  /// 保活是否已启动过（iOS）
+  ///
+  /// 一旦为 true，就不再停止，直到 App 关闭。
+  /// 防止多次调用 initialize() 时重复启动保活。
+  bool _keepAliveStarted = false;
+
+  /// 保活待启动标志
+  ///
+  /// 场景：音乐正在播放时启动猫影视配置，NodeJS 服务需要启动，
+  /// 但 NodeJS 保活不能立即启动（会顶掉音乐的控制栏）。
+  /// 此时标记为"待启动"，等音乐停止后由 MusicPlayerController 触发启动。
+  bool _pendingKeepAlive = false;
+
+  /// 保活仅在 iOS 上生效
+  bool get _keepAliveSupported {
+    if (kIsWeb) return false;
+    return Platform.isIOS;
+  }
+
+  /// 检查音乐是否正在播放
+  ///
+  /// 音乐播放期间，主播放器本身就提供保活（且有独占音频会话，能保住控制栏），
+  /// NodeJS 保活不能启动，否则会顶掉控制栏。
+  bool _isMusicPlaying() {
+    try {
+      if (!Get.isRegistered<MusicPlayerController>()) return false;
+      final controller = Get.find<MusicPlayerController>();
+      return controller.isPlaying;
+    } catch (_) {
+      return false;
+    }
+  }
 
   String _spiderBaseUrl() => 'http://127.0.0.1:$_spiderPort';
   String _spiderPath() {
@@ -184,13 +212,26 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
   /// 幂等：已启动过则直接返回。
   /// 判断依据是"NodeJS 服务是否被启动过"，与当前配置类型无关。
   Future<void> _startNodeKeepAlive() async {
-    if (PlatformUtils.isDesktop) return;
+    if (!_keepAliveSupported) return;
     if (_keepAliveStarted) return;
+
+    // ===== 关键：音乐播放期间暂不启动 NodeJS 保活 =====
+    // 原因：NodeJS 保活使用 mixWithOthers（可混合）会话，
+    // 而音乐播放器使用独占会话（保持锁屏控制栏）。
+    // 如果此时启动 NodeJS 保活，会覆盖音频会话配置，控制栏被顶掉。
+    //
+    // 处理：标记为"待启动"，等音乐停止后由 MusicPlayerController 触发启动。
+    if (_isMusicPlaying()) {
+      _pendingKeepAlive = true;
+      _log('⏸ 音乐正在播放，NodeJS 保活延后启动');
+      return;
+    }
+
     try {
-      // 不再需要传递 mixWithOthers 参数，原生端统一处理
       final ok = await _channel.invokeMethod<bool>('startKeepAlive') ?? false;
       if (ok) {
         _keepAliveStarted = true;
+        _pendingKeepAlive = false;
         _log('✅ NodeJS 保活已启动');
       } else {
         _log('⚠️ NodeJS 保活启动返回 false');
@@ -202,7 +243,7 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
 
   /// 停止 NodeJS 后台保活（仅在 App 关闭时调用）
   Future<void> _stopNodeKeepAlive() async {
-    if (PlatformUtils.isDesktop) return;
+    if (!_keepAliveSupported) return;
     if (!_keepAliveStarted) return;
     try {
       await _channel.invokeMethod('stopKeepAlive');
@@ -217,19 +258,29 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
   ///
   /// 音乐播放本身就提供保活，无需 SilenceKeeper 干预。
   /// 返回是否真的暂停了（用于音乐结束后判断是否恢复）。
+  ///
+  /// ⚠️ 返回类型必须是 Future<bool>，不能是 Future<void>，
+  ///    因为方法体内有 `return true/false;`。
   Future<bool> pauseKeepAliveForMusic() async {
-    if (PlatformUtils.isDesktop) return false;
+    if (!_keepAliveSupported) return false;
     if (!_keepAliveStarted) return false;
     await _stopNodeKeepAlive();
     return true;
   }
 
-  /// 音乐队列结束后调用：恢复 NodeJS 保活
+  /// 音乐停止后调用：恢复 NodeJS 保活
+  ///
+  /// 场景：
+  /// 1. 音乐播放期间启动了猫影视配置，保活被延后 → 现在启动
+  /// 2. 音乐队列结束 → 重新启动保活
   Future<void> resumeKeepAliveAfterMusic() async {
-    if (PlatformUtils.isDesktop) return;
+    if (!_keepAliveSupported) return;
     if (_currentConfigType != 'catvod') return;
     if (_lastLoadedUrl == null || _lastLoadedUrl!.isEmpty) return;
-    if (_keepAliveStarted) return;  // 已在运行
+    if (_keepAliveStarted) return;
+
+    // 清掉待启动标志，真正启动保活
+    _pendingKeepAlive = false;
     await _startNodeKeepAlive();
   }
 

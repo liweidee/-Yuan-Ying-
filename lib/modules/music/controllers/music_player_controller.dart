@@ -569,16 +569,41 @@ class MusicPlayerController extends GetxController {
   }
 
   // ===== 播放控制 =====
-  Future<void> togglePlay() async {
-    if (_handler.player.isPlaying) {
-      await _handler.pause();
-    } else {
-      await _handler.play();
-    }
-  }
+  // Future<void> togglePlay() async {
+  //   if (_handler.player.isPlaying) {
+  //     await _handler.pause();
+  //   } else {
+  //     await _handler.play();
+  //   }
+  // }
+
+  // Future<void> pause() async {
+  //   await _handler.pause();
+  //   // 用户主动暂停：尝试恢复 NodeJS 保活
+  //   await _restoreNodeKeepAlive();
+  // }
+
+  Timer? _pauseResumeTimer;
 
   Future<void> pause() async {
     await _handler.pause();
+    // 5 秒后如果仍未恢复播放，尝试恢复 NodeJS 保活
+    _pauseResumeTimer?.cancel();
+    _pauseResumeTimer = Timer(const Duration(seconds: 5), () {
+      if (!playing.value) {
+        _restoreNodeKeepAlive();
+      }
+    });
+  }
+
+  Future<void> togglePlay() async {
+    if (_handler.player.isPlaying) {
+      await pause();
+    } else {
+      // 用户恢复播放：取消待恢复
+      _pauseResumeTimer?.cancel();
+      await _handler.play();
+    }
   }
 
   Future<void> playNext() async {
@@ -645,6 +670,19 @@ class MusicPlayerController extends GetxController {
         await nodeService.resumeKeepAliveAfterMusic();
       } catch (_) {}
     }
+  }
+
+  Future<void> closePlayer() async {
+    try {
+      await _handler.player.stop();
+    } catch (_) {}
+    playing.value = false;
+
+    try {
+      await SilenceKeeper.stop();   // Dart 封装，非 iOS 是 no-op
+    } catch (_) {}
+
+    await _restoreNodeKeepAlive();  // 内部已判断平台
   }
 
   /// 内部切歌——统一路径

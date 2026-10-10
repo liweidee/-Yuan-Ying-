@@ -126,9 +126,10 @@ class _LxMusicPageState extends State<LxMusicPage> {
             }
             return MusicPlayerView(
               cancelMargin: true,
-              onClose: () {
+              onClose: () async {
                 // 暂停播放 + 隐藏底条（保留队列）
-                controller.pause();
+                // controller.pause();
+                await controller.closePlayer();
                 LxPlayerHelper.hasPlayedInSession.value = false;
                 SmartDialog.showToast('已停止播放');
               },
