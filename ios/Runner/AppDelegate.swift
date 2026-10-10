@@ -23,7 +23,7 @@ import UIKit
 
         setupNodeJSChannel(with: flutterViewController)
         setupEventChannel(with: flutterViewController)
-        setupSilenceKeeperChannel(with: flutterViewController)  // ← 新增这一行
+        setupSilenceKeeperChannel(with: flutterViewController)
 
         NotificationCenter.default.addObserver(
             self,

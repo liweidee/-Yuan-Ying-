@@ -13,36 +13,40 @@ class SilenceKeeper {
     private var _isRunning = false
 
     private init() {
-        // 监听音频中断（来电、闹钟等），中断结束后自动恢复
+        // 使用闭包式监听，避免继承 NSObject 才能用 #selector 的限制
         NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleInterruption(_:)),
-            name: AVAudioSession.interruptionNotification,
-            object: AVAudioSession.sharedInstance()
-        )
+            forName: AVAudioSession.interruptionNotification,
+            object: AVAudioSession.sharedInstance(),
+            queue: .main
+        ) { [weak self] notification in
+            self?.handleInterruption(notification)
+        }
     }
 
-    /// 启动保活引擎
-    /// 幂等：重复调用不会产生副作用
+    /// 启动保活引擎（幂等）
     func start() {
         guard !_isRunning else { return }
 
         let session = AVAudioSession.sharedInstance()
         do {
-            // 使用 playback 类别 + mixWithOthers，避免打断用户正在播放的其他音频
-            // 注意：mixWithOthers 在此处是必要的，它能确保保活引擎与主播放器共存
-            try session.setCategory(.playback, options: [.mixWithOthers])
+            // 只在当前 category 不是 .playback 时才设置，避免覆盖主播放器的音频会话配置
+            // （主播放器由 audio_session 插件配置为 .playback，不能被改为 .ambient 等）
+            if session.category != .playback {
+                try session.setCategory(.playback, options: [.mixWithOthers])
+            }
             try session.setActive(true)
         } catch {
             print("[SilenceKeeper] AVAudioSession 配置失败: \(error)")
             return
         }
 
-        // 创建静音源节点：每次渲染回调时，将缓冲区全部填零
-        let node = AVAudioSourceNode { _, _, frameCount, audioBufferList -> OSStatus in
+        // 静音源节点：每次渲染回调时，把缓冲区全部填零
+        let node = AVAudioSourceNode { _, _, _, audioBufferList -> OSStatus in
             let ablPointer = UnsafeMutableAudioBufferListPointer(audioBufferList)
             for buffer in ablPointer {
-                memset(buffer.mData, 0, Int(buffer.mDataByteSize))
+                if let data = buffer.mData {
+                    memset(data, 0, Int(buffer.mDataByteSize))
+                }
             }
             return noErr
         }
@@ -61,8 +65,9 @@ class SilenceKeeper {
         }
     }
 
-    /// 停止保活引擎
-    /// 注意：不调用 session.setActive(false)，避免影响主播放器的音频会话
+    /// 停止保活引擎（幂等）
+    ///
+    /// 不调用 session.setActive(false)，避免影响主播放器仍在使用的音频会话。
     func stop() {
         guard _isRunning else { return }
 
@@ -75,8 +80,8 @@ class SilenceKeeper {
         print("[SilenceKeeper] 保活引擎已停止")
     }
 
-    /// 音频中断处理：中断结束后重新启动引擎
-    @objc private func handleInterruption(_ notification: Notification) {
+    /// 音频中断处理：中断结束后重新启动
+    private func handleInterruption(_ notification: Notification) {
         guard let userInfo = notification.userInfo,
               let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
               let type = AVAudioSession.InterruptionType(rawValue: typeValue) else {
@@ -84,7 +89,11 @@ class SilenceKeeper {
         }
 
         if type == .ended {
-            // 中断结束，重新启动保活
+            // 中断结束，重置标志并重新启动
+            if let node = _silenceNode {
+                _engine.detach(node)
+                _silenceNode = nil
+            }
             _isRunning = false
             start()
         }

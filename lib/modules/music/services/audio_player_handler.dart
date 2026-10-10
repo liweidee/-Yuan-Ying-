@@ -14,10 +14,15 @@ class AudioPlayerHandler extends BaseAudioHandler {
   Future<void> Function()? onSkipToNext;
   Future<void> Function()? onSkipToPrevious;
 
-  /// 缓存的元数据（封面、歌手、专辑）——用于 MediaItem 展示
   String? _coverUrl;
   String? _artist;
   String? _album;
+
+  /// 是否正在切歌
+  ///
+  /// 切歌期间主音频停止/加载，若无此标志，audio_service 会向 iOS 上报
+  /// playing=false，导致锁屏控制栏被系统移除。
+  bool isSwitchingTrack = false;
 
   double get _speed => player.audio.speed;
   Episode? get current => player.current;
@@ -52,7 +57,11 @@ class AudioPlayerHandler extends BaseAudioHandler {
     player.dispose();
   }
 
-  /// 更新元数据（封面、歌手、专辑）——由 MusicPlayerController 调用
+  /// 外部触发状态广播（由 MusicPlayerController 在切歌前后调用）
+  void notifyStateChanged() {
+    _broadcastState();
+  }
+
   void updateMetadata({String? cover, String? artist, String? album}) {
     bool changed = false;
     if (cover != null && cover != _coverUrl) {
@@ -92,7 +101,6 @@ class AudioPlayerHandler extends BaseAudioHandler {
   @override
   Future<void> seek(Duration position) => player.audio.seek(position);
 
-  /// 系统控制栏的上一首
   @override
   Future<void> skipToPrevious() async {
     if (onSkipToPrevious != null) {
@@ -103,7 +111,6 @@ class AudioPlayerHandler extends BaseAudioHandler {
     _updateMediaItem();
   }
 
-  /// 系统控制栏的下一首
   @override
   Future<void> skipToNext() async {
     if (onSkipToNext != null) {
@@ -137,6 +144,9 @@ class AudioPlayerHandler extends BaseAudioHandler {
   }
 
   void _broadcastState() {
+    // 切歌期间"假装"仍在播放，避免控制栏丢失
+    final bool effectivePlaying = isSwitchingTrack || player.audio.playing;
+
     final controls = [
       const MediaControl(
         action: MediaAction.skipToPrevious,
@@ -145,7 +155,9 @@ class AudioPlayerHandler extends BaseAudioHandler {
       ),
       MediaControl(
         action: MediaAction.playPause,
-        androidIcon: player.audio.playing ? "drawable/pause_circle" : "drawable/play_circle",
+        androidIcon: effectivePlaying
+            ? "drawable/pause_circle"
+            : "drawable/play_circle",
         label: "暂停/播放",
       ),
       const MediaControl(
@@ -155,12 +167,17 @@ class AudioPlayerHandler extends BaseAudioHandler {
       ),
     ];
 
-    final processingState = {
-      ProcessingState.loading: AudioProcessingState.loading,
-      ProcessingState.buffering: AudioProcessingState.buffering,
-      ProcessingState.ready: AudioProcessingState.ready,
-      ProcessingState.completed: AudioProcessingState.completed,
-    }[player.audio.processingState] ?? AudioProcessingState.ready;
+    AudioProcessingState processingState;
+    if (isSwitchingTrack) {
+      processingState = AudioProcessingState.buffering;
+    } else {
+      processingState = {
+        ProcessingState.loading: AudioProcessingState.loading,
+        ProcessingState.buffering: AudioProcessingState.buffering,
+        ProcessingState.ready: AudioProcessingState.ready,
+        ProcessingState.completed: AudioProcessingState.completed,
+      }[player.audio.processingState] ?? AudioProcessingState.ready;
+    }
 
     playbackState.add(playbackState.value.copyWith(
       controls: controls,
@@ -170,7 +187,7 @@ class AudioPlayerHandler extends BaseAudioHandler {
         MediaAction.seekBackward,
       },
       processingState: processingState,
-      playing: player.audio.playing,
+      playing: effectivePlaying,
       updatePosition: player.audio.position,
       bufferedPosition: player.audio.bufferedPosition,
       speed: _speed,
@@ -179,7 +196,6 @@ class AudioPlayerHandler extends BaseAudioHandler {
   }
 }
 
-/// 从 Episode + 元数据构造 MediaItem
 MediaItem episode2MediaItem(
   Episode episode, {
   String? coverUrl,

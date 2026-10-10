@@ -597,11 +597,12 @@ class MusicPlayerController extends GetxController {
     await _playIndexWithFetcher(prevIndex);
   }
 
-  /// 内部切歌——不依赖 UI 回调，优先走 URL 提供者
+  /// 内部切歌——统一路径
   ///
-  /// - 更新索引 + 保存进度
-  /// - 用注入的 urlFetcher 拉 URL（脱离 UI 生命周期）
-  /// - 失败时兜底走 onPlayCompleted（详情页还在栈中时可用）
+  /// 关键：切歌的整个静音窗口内：
+  /// 1. 启动 SilenceKeeper 保活，防止 iOS 因"无音频输出"而杀进程；
+  /// 2. 置 isSwitchingTrack = true，向 iOS 上报 playing=true + buffering，
+  ///    避免系统移除锁屏控制栏。
   Future<void> _playIndexWithFetcher(int index) async {
     if (index < 0 || index >= playlist.length) return;
 
@@ -610,9 +611,12 @@ class MusicPlayerController extends GetxController {
       _saveCurrentIndex(_currentVodId!, index);
     }
 
-    // ===== 关键：切集前启动静音保活 =====
-    // 覆盖从"音频停止"到"新音频开始播放"的整个静音窗口
+    // ===== 步骤 1：启动保活 =====
     await SilenceKeeper.start();
+
+    // ===== 步骤 2：标记切歌状态，立即广播 =====
+    _handler.isSwitchingTrack = true;
+    _handler.notifyStateChanged();
 
     try {
       final fetcher = _urlFetcher;
@@ -629,8 +633,10 @@ class MusicPlayerController extends GetxController {
       // 兜底：走 UI 层回调
       onPlayCompleted?.call();
     } finally {
-      // ===== 主音频已接管，停止保活 =====
+      // ===== 步骤 3：清除切歌状态 + 停止保活 =====
+      _handler.isSwitchingTrack = false;
       await SilenceKeeper.stop();
+      _handler.notifyStateChanged();
     }
   }
 
@@ -731,20 +737,23 @@ class MusicPlayerController extends GetxController {
     _handlingCompleted = true;
 
     try {
-      // 定时"播放完当前曲目"
+      // ===== 场景 1：定时"播放完当前曲目" =====
       if (stopAfterCurrent.value) {
         stopAfterCurrent.value = false;
         timerMinutes.value = 0;
-        try { await _handler.player.stop(); } catch (_) {}
+        try {
+          await _handler.player.stop();
+        } catch (_) {}
         playing.value = false;
         ToastUtils.show('当前曲目已播放完毕，已暂停');
         await Future.delayed(const Duration(milliseconds: 500));
         return;
       }
 
-      // 正常切歌：统一走 _playIndexWithFetcher，保活已在其中处理
+      // ===== 场景 2：正常切歌 =====
       final nextIndex = _getNextIndex();
       if (nextIndex >= 0) {
+        // 统一走 _playIndexWithFetcher：内部含保活 + 状态上报 + 索引更新
         await _playIndexWithFetcher(nextIndex);
         await Future.delayed(const Duration(milliseconds: 300));
       } else {
