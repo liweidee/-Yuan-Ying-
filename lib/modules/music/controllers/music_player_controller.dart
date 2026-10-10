@@ -611,8 +611,8 @@ class MusicPlayerController extends GetxController {
       _saveCurrentIndex(_currentVodId!, index);
     }
 
-    // ===== 步骤 1：启动保活 =====
-    await SilenceKeeper.start();
+    // ===== 步骤 1：启动保活（30 秒兜底） =====
+    await SilenceKeeper.start(timeout: const Duration(seconds: 30));
 
     // ===== 步骤 2：标记切歌状态，立即广播 =====
     _handler.isSwitchingTrack = true;

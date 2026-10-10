@@ -103,6 +103,14 @@ import UIKit
             case "getSourcePath":
                 result(NodeJSManager.shared().getDocumentsSourcePath())
 
+            case "startKeepAlive":
+                NodeJSManager.shared().startKeepAlive()
+                result(nil)
+
+            case "stopKeepAlive":
+                NodeJSManager.shared().stopKeepAlive()
+                result(nil)
+
             default:
                 result(FlutterMethodNotImplemented)
             }
@@ -132,8 +140,13 @@ import UIKit
         channel.setMethodCallHandler { (call, result) in
             switch call.method {
             case "startSilence":
-                SilenceKeeper.shared.start()
-                result(nil)
+                // 读取可选的 timeoutSeconds 参数
+                // Dart 端传 null 时，args["timeoutSeconds"] 是 NSNull，
+                // 用 as? TimeInterval 会返回 nil，符合期望
+                let args = call.arguments as? [String: Any]
+                let timeout = args?["timeoutSeconds"] as? TimeInterval
+                SilenceKeeper.shared.start(timeout: timeout)
+                result(SilenceKeeper.shared.isRunning)
             case "stopSilence":
                 SilenceKeeper.shared.stop()
                 result(nil)

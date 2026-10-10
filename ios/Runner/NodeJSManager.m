@@ -187,7 +187,8 @@
     NSError *error;
     [self.webServer startWithOptions:@{
         GCDWebServerOption_Port: @0,
-        GCDWebServerOption_BindToLocalhost: @YES
+        GCDWebServerOption_BindToLocalhost: @YES,
+        GCDWebServerOption_AutomaticallySuspendInBackground: @NO
     } error:&error];
 
     if (error) {
@@ -551,6 +552,16 @@
 
 - (int)getSpiderPort {
     return self.spiderPort;
+}
+
+- (void)startKeepAlive {
+    [NodeJSBridge.shared startKeepAlive];
+    NSLog(@"[NodeJSManager] 保活已启动");
+}
+
+- (void)stopKeepAlive {
+    [NodeJSBridge.shared stopKeepAlive];
+    NSLog(@"[NodeJSManager] 保活已停止");
 }
 
 @end

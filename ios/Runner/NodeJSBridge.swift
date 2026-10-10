@@ -16,4 +16,12 @@ import Foundation
     @objc func stopNodeJS() {
         NodeJSManager.shared().stopNodeJS()
     }
+
+    @objc func startKeepAlive() {
+        SilenceKeeper.shared.start(timeout: nil)  // 无超时，长期保活
+    }
+
+    @objc func stopKeepAlive() {
+        SilenceKeeper.shared.stop()
+    }
 }

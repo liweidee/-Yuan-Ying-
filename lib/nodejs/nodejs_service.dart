@@ -41,6 +41,12 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
   String _currentConfigType = 'tvbox'; // 当前配置类型
   void updateConfigType(String type) {  // 供外部更新配置类型
     _currentConfigType = type;
+
+    // 注意：切换配置不启动/不停止保活。
+    //
+    // 保活的生命周期 = NodeJS 服务的生命周期。
+    // 用户从猫影视切到其他配置后，NodeJS 服务仍在后台运行，
+    // 保活必须持续，否则服务被 iOS 杀死后无法在进程内恢复。
   }
   String? get lastLoadedUrl => _lastLoadedUrl;
   bool _isRestarting = false;
@@ -60,6 +66,12 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
     if (File(mainJs).existsSync()) return mainJs;
     return '$_exeDir/nodejs/project/dist/index.js';
   }
+
+  /// 保活是否已启动过
+  ///
+  /// 一旦为 true，就不再停止，直到 App 关闭。
+  /// 防止多次调用 initialize() 时重复启动保活。
+  bool _keepAliveStarted = false;
 
   /// 桌面端保活/关闭状态（移动端不会访问）
   bool _isShuttingDown = false;                    // 应用是否正在关闭（用户主动退出）
@@ -167,22 +179,52 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
     await reinitialize();
   }
 
+  /// 启动 NodeJS 后台保活（仅 iOS）
+  ///
+  /// 幂等：已启动过则直接返回。
+  /// 判断依据是"NodeJS 服务是否被启动过"，与当前配置类型无关。
+  Future<void> _startNodeKeepAlive() async {
+    if (PlatformUtils.isDesktop) return;
+    if (_keepAliveStarted) return;
+    try {
+      await _channel.invokeMethod('startKeepAlive');
+      _keepAliveStarted = true;
+      _log('✅ NodeJS 保活已启动');
+    } catch (e) {
+      _log('❌ NodeJS 保活启动失败: $e');
+    }
+  }
+
+  /// 停止 NodeJS 后台保活（仅在 App 关闭时调用）
+  Future<void> _stopNodeKeepAlive() async {
+    if (PlatformUtils.isDesktop) return;
+    if (!_keepAliveStarted) return;
+    try {
+      await _channel.invokeMethod('stopKeepAlive');
+      _keepAliveStarted = false;
+      _log('NodeJS 保活已停止');
+    } catch (e) {
+      _log('NodeJS 保活停止失败: $e');
+    }
+  }
+
   Future<void> initialize() async {
     if (_isInitialized) return;
-    // 如果端口还在，说明 Node.js 还在运行（stop 只清了 Dart 状态）
-    // 直接恢复 _isInitialized，不调用 startNodeJS，避免二次 node_start 闪退
-    // 桌面端额外确认进程句柄未丢失
+
+    // 快速恢复分支：端口还在，说明 NodeJS 还在运行
     if (_managementPort > 0 &&
         (!PlatformUtils.isDesktop || _nodeProcess != null)) {
       _isInitialized = true;
       if (!PlatformUtils.isDesktop) {
         _setupEventListener();
       }
+      // NodeJS 曾经启动过，保活必须已就绪（幂等保护）
+      await _startNodeKeepAlive();
       _log('initialize: restored from existing port $_managementPort');
       return;
     }
 
-    // 桌面端分发：进程句柄丢失或首次启动 → 走桌面端流程
+    // 桌面端分发
     if (PlatformUtils.isDesktop) {
       _managementPort = 0;
       _spiderPort = 0;
@@ -195,7 +237,17 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
       _managementPortCompleter = Completer<void>();
       final result = await _channel.invokeMethod('startNodeJS');
       _isInitialized = result == true;
+
       if (_isInitialized) {
+        // ===== 关键：startNodeJS 成功 → NodeJS 进程已启动 → 立即保活 =====
+        //
+        // 无论后续 ready 信号和 managementPort 是否就绪，保活都应当运行。
+        // 原因：
+        // 1. NodeJS 进程已在后台运行，iOS 可能随时挂起 App；
+        // 2. ready 信号等待窗口可能 10~20 秒，期间若无保活，进程可能被杀；
+        // 3. 一旦被杀，用户必须重启 App 才能恢复（node_start 只能调一次）。
+        await _startNodeKeepAlive();
+
         final readyTimeout = Timer(const Duration(seconds: 15), () {
           if (_readyCompleter != null && !_readyCompleter!.isCompleted) {
             _log('Warning: Node.js ready signal timeout, proceeding anyway');
@@ -204,8 +256,10 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
         });
         await _readyCompleter!.future;
         readyTimeout.cancel();
+
         final mgmtTimeout = Timer(const Duration(seconds: 15), () {
-          if (_managementPortCompleter != null && !_managementPortCompleter!.isCompleted) {
+          if (_managementPortCompleter != null &&
+              !_managementPortCompleter!.isCompleted) {
             _log('Warning: Management port timeout, proceeding anyway');
             _managementPortCompleter!.complete();
           }
@@ -213,13 +267,18 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
         await _managementPortCompleter!.future;
         mgmtTimeout.cancel();
       }
+
       if (_managementPort == 0) {
         _log('Node.js initialization completed but managementPort is 0, resetting state');
         _isInitialized = false;
+        // 注意：不清保活。
+        // startNodeJS 已经成功（Node 进程已在跑），保活有继续存在的意义。
+        // 下次调用 initialize() 时，快速恢复分支会重新识别端口。
       }
     } catch (e) {
       _log('Node.js initialization error: $e');
       _isInitialized = false;
+      // 注意：不清保活（理由同上）
     }
   }
 
@@ -675,6 +734,9 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
     // 保留 _managementPort、_spiderPort、_lastLoadedUrl
     // 切回猫影视时可用于探活和复用，避免重新加载源
     // 桌面端无 EventChannel；_nodeProcess 也保留（进程继续运行，便于快速复用）
+    //
+    // 注意：不停止保活。
+    // stop() 的语义是"只清 Dart 状态"，NodeJS 服务本身仍在运行。
     if (!PlatformUtils.isDesktop) {
       _eventSubscription?.cancel();
     }
@@ -684,7 +746,11 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
   /// 应用关闭时调用：真正停止 Node 子进程（区别于 stop() 只清 Dart 状态）
   /// 先设置 _isShuttingDown 后，exitCode 回调不会触发重启
   /// 未启动过 Node 时也安全：所有字段均为 null-safe 访问
+  /// 注意：shutdown() 在 iOS 上目前不会被调用（只有桌面端 _WindowListener.onWindowClose 触发）。但为了逻辑完备性，保活的停止入口就放在这里。如果未来 iOS 也有 App 关闭处理，这里已经就绪。
   Future<void> shutdown() async {
+    // 先停保活，防止后续任何步骤失败导致保活泄漏
+    await _stopNodeKeepAlive();
+
     if (!PlatformUtils.isDesktop) return;
     // 先设置标志，保证即使后续任何步骤失败，也不会触发重启
     _isShuttingDown = true;
