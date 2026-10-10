@@ -187,9 +187,13 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
     if (PlatformUtils.isDesktop) return;
     if (_keepAliveStarted) return;
     try {
-      await _channel.invokeMethod('startKeepAlive');
-      _keepAliveStarted = true;
-      _log('✅ NodeJS 保活已启动');
+      final ok = await _channel.invokeMethod<bool>('startKeepAlive') ?? false;
+      if (ok) {
+        _keepAliveStarted = true;
+        _log('✅ NodeJS 保活已启动');
+      } else {
+        _log('⚠️ NodeJS 保活启动返回 false（原生未成功启动）');
+      }
     } catch (e) {
       _log('❌ NodeJS 保活启动失败: $e');
     }
