@@ -103,13 +103,11 @@ import UIKit
             case "getSourcePath":
                 result(NodeJSManager.shared().getDocumentsSourcePath())
 
-            // 直接调用 SilenceKeeper，不经过 NodeJSManager，
-            // 避免 ObjC ↔ Swift 桥接头文件的编译问题。
             case "startKeepAlive":
                 let args = call.arguments as? [String: Any]
                 let timeout = args?["timeoutSeconds"] as? TimeInterval
-                // 统一使用 mixWithOthers 模式，不区分场景
-                SilenceKeeper.shared.start(timeout: timeout)
+                // NodeJS 保活使用混合模式
+                SilenceKeeper.shared.start(mode: .mixable, timeout: timeout)
                 result(SilenceKeeper.shared.isRunning)
 
             case "stopKeepAlive":
@@ -145,13 +143,10 @@ import UIKit
         channel.setMethodCallHandler { (call, result) in
             switch call.method {
             case "startSilence":
-                // 读取可选的 timeoutSeconds 参数
-                // Dart 端传 null 时，args["timeoutSeconds"] 是 NSNull，
-                // 用 as? TimeInterval 会返回 nil，符合期望
-               let args = call.arguments as? [String: Any]
+                let args = call.arguments as? [String: Any]
                 let timeout = args?["timeoutSeconds"] as? TimeInterval
-                // 统一使用 mixWithOthers 模式，不区分场景
-                SilenceKeeper.shared.start(timeout: timeout)
+                // 音乐保活使用独占模式（保持控制栏）
+                SilenceKeeper.shared.start(mode: .exclusive, timeout: timeout)
                 result(SilenceKeeper.shared.isRunning)
             case "stopSilence":
                 SilenceKeeper.shared.stop()

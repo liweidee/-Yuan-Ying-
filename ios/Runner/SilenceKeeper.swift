@@ -1,14 +1,14 @@
 import AVFoundation
 
+/// 保活模式
+enum SilenceMode {
+    /// 独占模式：无 mixWithOthers，用于音乐场景（保持控制栏）
+    case exclusive
+    /// 混合模式：有 mixWithOthers，用于 NodeJS 保活（不打扰其他 App）
+    case mixable
+}
+
 /// iOS 后台音频保活引擎
-///
-/// 通过 AVAudioSourceNode 实时生成全零 PCM 缓冲区，
-/// 让 AVAudioSession 持续处于"正在播放音频"的状态，
-/// 从而满足 iOS 后台音频模式的前提条件。
-///
-/// 使用方式：
-/// - 短时保活（切歌窗口）：`start(timeout: 30)`，30 秒后自动停止
-/// - 长期保活（后台服务）：`start()`，需手动调用 `stop()`
 class SilenceKeeper {
     static let shared = SilenceKeeper()
 
@@ -16,12 +16,12 @@ class SilenceKeeper {
     private var _silenceNode: AVAudioSourceNode?
     private var _isRunning = false
     private var _autoStopWorkItem: DispatchWorkItem?
+    private var _currentMode: SilenceMode = .exclusive
 
-    /// 供外部（MethodChannel）查询真实运行状态
     var isRunning: Bool { _isRunning }
+    var currentMode: SilenceMode { _currentMode }
 
     private init() {
-        // 使用闭包式监听，避免继承 NSObject 才能用 #selector 的限制
         NotificationCenter.default.addObserver(
             forName: AVAudioSession.interruptionNotification,
             object: AVAudioSession.sharedInstance(),
@@ -33,23 +33,30 @@ class SilenceKeeper {
 
     /// 启动保活引擎（幂等）
     ///
-    /// - Parameter timeout: 可选超时（秒）。传 nil 表示不超时，需手动 stop()。
-    ///                      用于兜底：防止调用方异常未调用 stop() 导致引擎长期泄漏。
-    func start(timeout: TimeInterval? = nil) {
-        guard !_isRunning else { return }
+    /// - Parameters:
+    ///   - mode: 独占或混合模式。默认独占。
+    ///   - timeout: 可选超时（秒）。传 nil 表示不超时，需手动 stop()。
+    func start(mode: SilenceMode = .exclusive, timeout: TimeInterval? = nil) {
+        // 已在运行：如果模式一致，幂等返回；否则切换到新模式
+        if _isRunning {
+            if _currentMode == mode {
+                return
+            }
+            _stopInternal()
+        }
+        _currentMode = mode
 
         let session = AVAudioSession.sharedInstance()
         do {
-            // 始终使用 mixWithOthers，确保所有保活场景（音乐/NodeJS）共存
-            // 参考：Mob.Background 后台保活使用 MixWithOthers
-            try session.setCategory(.playback, options: [.mixWithOthers])
+            let options: AVAudioSession.CategoryOptions =
+                (mode == .mixable) ? [.mixWithOthers] : []
+            try session.setCategory(.playback, options: options)
             try session.setActive(true, options: [])
         } catch {
             print("[SilenceKeeper] AVAudioSession 配置失败: \(error)")
             return
         }
 
-        // 静音源节点：每次渲染回调时，把缓冲区全部填零
         let node = AVAudioSourceNode { _, _, _, audioBufferList -> OSStatus in
             let ablPointer = UnsafeMutableAudioBufferListPointer(audioBufferList)
             for buffer in ablPointer {
@@ -67,9 +74,9 @@ class SilenceKeeper {
             try _engine.start()
             _silenceNode = node
             _isRunning = true
-            print("[SilenceKeeper] 保活引擎已启动 (timeout=\(timeout.map { "\($0)s" } ?? "无"))")
+            let modeStr = (mode == .exclusive) ? "独占" : "混合"
+            print("[SilenceKeeper] 保活引擎已启动 (模式=\(modeStr), timeout=\(timeout.map { "\($0)s" } ?? "无"))")
 
-            // 仅在明确传入 timeout 时才调度自动停止
             if let timeout = timeout {
                 _scheduleAutoStop(after: timeout)
             }
@@ -80,33 +87,23 @@ class SilenceKeeper {
     }
 
     /// 停止保活引擎（幂等）
-    ///
-    /// 不调用 session.setActive(false)，避免影响主播放器仍在使用的音频会话。
     func stop() {
-        // 取消兜底 Timer
         _autoStopWorkItem?.cancel()
         _autoStopWorkItem = nil
-
         guard _isRunning else { return }
+        _stopInternal()
+        print("[SilenceKeeper] 保活引擎已停止")
+    }
 
+    private func _stopInternal() {
         _engine.stop()
         if let node = _silenceNode {
             _engine.detach(node)
             _silenceNode = nil
         }
         _isRunning = false
-
-        // 关键修改：停止引擎后，重新激活音频会话，保持活跃状态
-        // 这可以防止系统在静音窗口内将音频焦点交还给其他应用（如喜马拉雅）
-        do {
-            try AVAudioSession.sharedInstance().setActive(true, options: [])
-            print("[SilenceKeeper] 保活引擎已停止，音频会话保持活跃")
-        } catch {
-            print("[SilenceKeeper] 重新激活音频会话失败: \(error)")
-        }
     }
 
-    /// 调度兜底自动停止
     private func _scheduleAutoStop(after seconds: TimeInterval) {
         _autoStopWorkItem?.cancel()
         let workItem = DispatchWorkItem { [weak self] in
@@ -120,22 +117,16 @@ class SilenceKeeper {
         DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: workItem)
     }
 
-    /// 音频中断处理：中断结束后重新启动
     private func handleInterruption(_ notification: Notification) {
         guard let userInfo = notification.userInfo,
               let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
               let type = AVAudioSession.InterruptionType(rawValue: typeValue) else {
             return
         }
-
         if type == .ended {
-            // 中断结束，重置标志并重新启动（不超时，由调用方后续处理）
-            if let node = _silenceNode {
-                _engine.detach(node)
-                _silenceNode = nil
-            }
-            _isRunning = false
-            start()  // 中断恢复时不带 timeout，避免恢复后再被计时停掉
+            let preservedMode = _currentMode
+            _stopInternal()
+            start(mode: preservedMode)
         }
     }
 }

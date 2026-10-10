@@ -213,6 +213,26 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
     }
   }
 
+  /// 音乐播放开始前调用：暂停 NodeJS 保活
+  ///
+  /// 音乐播放本身就提供保活，无需 SilenceKeeper 干预。
+  /// 返回是否真的暂停了（用于音乐结束后判断是否恢复）。
+  Future<bool> pauseKeepAliveForMusic() async {
+    if (PlatformUtils.isDesktop) return false;
+    if (!_keepAliveStarted) return false;
+    await _stopNodeKeepAlive();
+    return true;
+  }
+
+  /// 音乐队列结束后调用：恢复 NodeJS 保活
+  Future<void> resumeKeepAliveAfterMusic() async {
+    if (PlatformUtils.isDesktop) return;
+    if (_currentConfigType != 'catvod') return;
+    if (_lastLoadedUrl == null || _lastLoadedUrl!.isEmpty) return;
+    if (_keepAliveStarted) return;  // 已在运行
+    await _startNodeKeepAlive();
+  }
+
   Future<void> initialize() async {
     if (_isInitialized) return;
 

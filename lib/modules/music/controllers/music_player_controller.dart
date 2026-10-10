@@ -21,6 +21,8 @@ import 'package:yuanying/utils/toast_utils.dart';
 import 'package:yuanying/utils/storage.dart';
 import 'package:yuanying/core/constants/app_constants.dart';
 import 'package:yuanying/services/silence_keeper.dart';
+import 'package:audio_session/audio_session.dart';
+import 'package:yuanying/nodejs/nodejs_service.dart';
 
 // ===== 音频文件后缀列表 =====
 const List<String> _audioExtensions = ['.mp3', '.m4a', '.aac', '.flac', '.wav', '.ogg', '.opus', '.wma', '.alac'];
@@ -597,24 +599,69 @@ class MusicPlayerController extends GetxController {
     await _playIndexWithFetcher(prevIndex);
   }
 
-  /// 内部切歌——统一路径
+  /// 为音乐播放准备独占音频会话
   ///
-  /// 关键：切歌的整个静音窗口内：
-  /// 1. 启动 SilenceKeeper 保活，防止 iOS 因"无音频输出"而杀进程；
-  /// 2. 置 isSwitchingTrack = true，向 iOS 上报 playing=true + buffering，
-  ///    避免系统移除锁屏控制栏。
+  /// 步骤：
+  /// 1. 暂停 NodeJS 保活（如果正在运行）
+  /// 2. 通过 audio_session 插件将音频会话配置为独占模式
+  ///    （让 audio_service 可以显示锁屏控制栏）
+  Future<void> _prepareExclusiveAudioSession() async {
+    // 1. 暂停 NodeJS 保活
+    if (Get.isRegistered<NodeJSService>()) {
+      try {
+        final nodeService = Get.find<NodeJSService>();
+        await nodeService.pauseKeepAliveForMusic();
+      } catch (_) {}
+    }
+    // 2. 停止任何正在运行的静默保活引擎
+    await SilenceKeeper.stop();
+
+    // 3. 重新配置音频会话为独占模式
+    try {
+      final session = await AudioSession.instance;
+      await session.configure(const AudioSessionConfiguration(
+        avAudioSessionCategory: AVAudioSessionCategory.playback,
+        avAudioSessionCategoryOptions: null,
+        avAudioSessionMode: AVAudioSessionMode.defaultMode,
+        avAudioSessionRouteSharingPolicy: AVAudioSessionRouteSharingPolicy.defaultPolicy,
+        avAudioSessionSetActiveOptions: AVAudioSessionSetActiveOptions.none,
+        androidAudioAttributes: AndroidAudioAttributes(
+          contentType: AndroidAudioContentType.music,
+          usage: AndroidAudioUsage.media,
+        ),
+        androidAudioFocusGainType: AndroidAudioFocusGainType.gain,
+        androidWillPauseWhenDucked: true,
+      ));
+    } catch (e) {
+      debugPrint('[MusicPlayer] 配置独占音频会话失败: $e');
+    }
+  }
+
+  /// 恢复 NodeJS 保活（音乐队列结束时调用）
+  Future<void> _restoreNodeKeepAlive() async {
+    if (Get.isRegistered<NodeJSService>()) {
+      try {
+        final nodeService = Get.find<NodeJSService>();
+        await nodeService.resumeKeepAliveAfterMusic();
+      } catch (_) {}
+    }
+  }
+
+  /// 内部切歌——统一路径
   Future<void> _playIndexWithFetcher(int index) async {
     if (index < 0 || index >= playlist.length) return;
+
+    // ===== 准备独占音频会话（保控制栏） =====
+    await _prepareExclusiveAudioSession();
 
     currentIndex.value = index;
     if (_currentVodId != null && _currentVodId!.isNotEmpty) {
       _saveCurrentIndex(_currentVodId!, index);
     }
 
-    // ===== 步骤 1：启动保活（30 秒兜底） =====
+    // 启动保活（独占模式，覆盖静音窗口）
     await SilenceKeeper.start(timeout: const Duration(seconds: 30));
 
-    // ===== 步骤 2：标记切歌状态，立即广播 =====
     _handler.isSwitchingTrack = true;
     _handler.notifyStateChanged();
 
@@ -630,10 +677,8 @@ class MusicPlayerController extends GetxController {
           }
         } catch (_) {}
       }
-      // 兜底：走 UI 层回调
       onPlayCompleted?.call();
     } finally {
-      // ===== 步骤 3：清除切歌状态 + 停止保活 =====
       _handler.isSwitchingTrack = false;
       await SilenceKeeper.stop();
       _handler.notifyStateChanged();
@@ -737,7 +782,7 @@ class MusicPlayerController extends GetxController {
     _handlingCompleted = true;
 
     try {
-      // ===== 场景 1：定时"播放完当前曲目" =====
+      // 场景 1：定时"播放完当前曲目"
       if (stopAfterCurrent.value) {
         stopAfterCurrent.value = false;
         timerMinutes.value = 0;
@@ -746,20 +791,23 @@ class MusicPlayerController extends GetxController {
         } catch (_) {}
         playing.value = false;
         ToastUtils.show('当前曲目已播放完毕，已暂停');
+        // 恢复 NodeJS 保活
+        await _restoreNodeKeepAlive();
         await Future.delayed(const Duration(milliseconds: 500));
         return;
       }
 
-      // ===== 场景 2：正常切歌 =====
+      // 场景 2：正常切歌
       final nextIndex = _getNextIndex();
       if (nextIndex >= 0) {
-        // 统一走 _playIndexWithFetcher：内部含保活 + 状态上报 + 索引更新
         await _playIndexWithFetcher(nextIndex);
         await Future.delayed(const Duration(milliseconds: 300));
       } else {
         await _handler.pause();
         playing.value = false;
         ToastUtils.show('播放列表已结束');
+        // 队列结束，恢复 NodeJS 保活
+        await _restoreNodeKeepAlive();
         await Future.delayed(const Duration(milliseconds: 500));
       }
     } finally {
