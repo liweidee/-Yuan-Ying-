@@ -103,12 +103,14 @@ import UIKit
             case "getSourcePath":
                 result(NodeJSManager.shared().getDocumentsSourcePath())
 
+            // 直接调用 SilenceKeeper，不经过 NodeJSManager，
+            // 避免 ObjC ↔ Swift 桥接头文件的编译问题。
             case "startKeepAlive":
-                NodeJSManager.shared().startKeepAlive()
-                result(nil)
+                SilenceKeeper.shared.start(timeout: nil)  // 无超时，长期保活
+                result(SilenceKeeper.shared.isRunning)
 
             case "stopKeepAlive":
-                NodeJSManager.shared().stopKeepAlive()
+                SilenceKeeper.shared.stop()
                 result(nil)
 
             default:

@@ -23,10 +23,4 @@
 
 - (NSString *)getDocumentsSourcePath;
 
-/// 启动 NodeJS 保活（通过 SilenceKeeper 维持音频会话）
-- (void)startKeepAlive;
-
-/// 停止 NodeJS 保活
-- (void)stopKeepAlive;
-
 @end
