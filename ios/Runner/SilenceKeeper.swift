@@ -32,7 +32,7 @@ class SilenceKeeper {
             // 只在当前 category 不是 .playback 时才设置，避免覆盖主播放器的音频会话配置
             // （主播放器由 audio_session 插件配置为 .playback，不能被改为 .ambient 等）
             if session.category != .playback {
-                try session.setCategory(.playback, options: [.mixWithOthers])
+                try session.setCategory(.playback, options: [])
             }
             try session.setActive(true)
         } catch {

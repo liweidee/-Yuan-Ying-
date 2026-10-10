@@ -167,8 +167,10 @@ class AudioPlayerHandler extends BaseAudioHandler {
       ),
     ];
 
+    // 在 _broadcastState 方法中
     AudioProcessingState processingState;
     if (isSwitchingTrack) {
+      // 切歌期间，明确告知系统正在缓冲，而非停止
       processingState = AudioProcessingState.buffering;
     } else {
       processingState = {
