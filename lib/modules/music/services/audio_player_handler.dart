@@ -36,7 +36,10 @@ class AudioPlayerHandler extends BaseAudioHandler {
     _subscriptions.add(player.audio.playbackEventStream.listen((event) {
       _audioEvent = event;
     }));
-    _subscriptions.add(player.audio.playerStateStream.listen((state) {
+    // 监听 playingStream 而非 playerStateStream
+    // playingStream 的触发时机在 player.audio.playing 更新之后，
+    // 确保 _broadcastState 读到的是真实的播放状态。
+    _subscriptions.add(player.audio.playingStream.listen((isPlaying) {
       _broadcastState();
     }));
     _updateMediaItem();
@@ -90,12 +93,14 @@ class AudioPlayerHandler extends BaseAudioHandler {
       await player.audio.play();
     }
     _updatePosition();
+    _broadcastState();   // 主动广播，确保控制栏立即收到 playing=false
   }
 
   @override
   Future<void> pause() async {
     await player.audio.pause();
     _updatePosition();
+    _broadcastState();   // 主动广播，确保控制栏立即收到 playing=false
   }
 
   @override
