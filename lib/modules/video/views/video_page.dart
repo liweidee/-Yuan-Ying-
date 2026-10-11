@@ -23,6 +23,8 @@ import 'package:extended_nested_scroll_view/extended_nested_scroll_view.dart';
 import 'package:yuanying/common/widgets/flutter/pop_scope.dart';
 import 'package:yuanying/common/assets.dart';
 import 'package:yuanying/plugin/pl_player/player_pref.dart';
+import 'package:yuanying/modules/music/controllers/music_player_controller.dart';
+import 'package:yuanying/services/silence_keeper.dart';
 
 class DetailPage extends CommonSlidePage {
   const DetailPage({super.key, super.enableSlide = true});
@@ -52,21 +54,41 @@ class _DetailPageState extends State<DetailPage>
 
   @override
   void initState() {
-    super.initState();
+      super.initState();
 
-    final args = Get.arguments as Map?;
-    _controllerTag = args?['_controllerTag'] as String? ??
-        'detail_${DateTime.now().millisecondsSinceEpoch}';
+      // ===== 主动停止音乐播放，让视频独占音频会话 =====
+      _stopMusicForVideo();
 
-    if (Get.isRegistered<DetailController>(tag: _controllerTag)) {
-      controller = Get.find<DetailController>(tag: _controllerTag);
-    } else {
-      controller = Get.put(DetailController(tag: _controllerTag), tag: _controllerTag);
-    }
+      final args = Get.arguments as Map?;
+      _controllerTag = args?['_controllerTag'] as String? ??
+          'detail_${DateTime.now().millisecondsSinceEpoch}';
 
-    if (SettingPref.removeSafeArea) {
-      hideSystemBar();
-    }
+      if (Get.isRegistered<DetailController>(tag: _controllerTag)) {
+        controller = Get.find<DetailController>(tag: _controllerTag);
+      } else {
+        controller = Get.put(DetailController(tag: _controllerTag), tag: _controllerTag);
+      }
+
+      if (SettingPref.removeSafeArea) {
+        hideSystemBar();
+      }
+  }
+
+  /// 视频播放前停止音乐，让视频抢占音频会话
+  Future<void> _stopMusicForVideo() async {
+      // 1. 停止音乐播放器
+      if (Get.isRegistered<MusicPlayerController>()) {
+          try {
+              final musicController = Get.find<MusicPlayerController>();
+              if (musicController.isPlaying) {
+                  await musicController.pause();
+              }
+          } catch (_) {}
+      }
+      // 2. 停止静音保活引擎
+      try {
+          await SilenceKeeper.stop();
+      } catch (_) {}
   }
 
   @override

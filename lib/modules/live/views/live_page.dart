@@ -9,6 +9,8 @@ import 'package:yuanying/modules/live/widgets/live_channel_list.dart';
 import 'package:yuanying/plugin/pl_player/player_pref.dart';
 import 'package:yuanying/modules/live/widgets/live_channel_info_bar.dart';
 import 'package:yuanying/modules/live/widgets/live_epg_timeline.dart';
+import 'package:yuanying/modules/music/controllers/music_player_controller.dart';
+import 'package:yuanying/services/silence_keeper.dart';
 
 class LivePage extends StatefulWidget {
   const LivePage({super.key});
@@ -24,6 +26,10 @@ class _LivePageState extends State<LivePage> {
   @override
   void initState() {
     super.initState();
+
+    // ===== 主动停止音乐播放，让直播独占音频会话 =====
+    _stopMusicForLive();
+
     if (!Get.isRegistered<LiveController>(tag: 'live')) {
       Get.put(LiveController(), tag: 'live', permanent: true);
     }
@@ -43,6 +49,23 @@ class _LivePageState extends State<LivePage> {
         controller.refreshChannels(showLoading: true);
       }
     });
+  }
+
+  /// 直播播放前停止音乐，让直播抢占音频会话
+  Future<void> _stopMusicForLive() async {
+      // 1. 停止音乐播放器
+      if (Get.isRegistered<MusicPlayerController>()) {
+          try {
+              final musicController = Get.find<MusicPlayerController>();
+              if (musicController.isPlaying) {
+                  await musicController.pause();
+              }
+          } catch (_) {}
+      }
+      // 2. 停止静音保活引擎
+      try {
+          await SilenceKeeper.stop();
+      } catch (_) {}
   }
 
   @override

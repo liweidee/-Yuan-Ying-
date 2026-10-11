@@ -144,56 +144,57 @@ class AudioPlayerHandler extends BaseAudioHandler {
   }
 
   void _broadcastState() {
-    // 切歌期间"假装"仍在播放，避免控制栏丢失
-    final bool effectivePlaying = isSwitchingTrack || player.audio.playing;
+    // 移除 isSwitchingTrack 对 playing 的强制干预
+    // playing 严格反映播放器的真实状态，避免控制栏按钮闪烁
+    final bool effectivePlaying = player.audio.playing;
 
     final controls = [
-      const MediaControl(
-        action: MediaAction.skipToPrevious,
-        androidIcon: "drawable/skip_previous",
-        label: "上一曲",
-      ),
-      MediaControl(
-        action: MediaAction.playPause,
-        androidIcon: effectivePlaying
-            ? "drawable/pause_circle"
-            : "drawable/play_circle",
-        label: "暂停/播放",
-      ),
-      const MediaControl(
-        action: MediaAction.skipToNext,
-        androidIcon: "drawable/skip_next",
-        label: "下一曲",
-      ),
+        const MediaControl(
+            action: MediaAction.skipToPrevious,
+            androidIcon: "drawable/skip_previous",
+            label: "上一曲",
+        ),
+        MediaControl(
+            action: MediaAction.playPause,
+            androidIcon: effectivePlaying
+                ? "drawable/pause_circle"
+                : "drawable/play_circle",
+            label: "暂停/播放",
+        ),
+        const MediaControl(
+            action: MediaAction.skipToNext,
+            androidIcon: "drawable/skip_next",
+            label: "下一曲",
+        ),
     ];
 
-    // 在 _broadcastState 方法中
+    // processingState 保留 isSwitchingTrack 逻辑：
+    // 切歌期间上报 buffering，让 iOS 认为 App 仍在活跃，保持控制栏
     AudioProcessingState processingState;
     if (isSwitchingTrack) {
-      // 切歌期间，明确告知系统正在缓冲，而非停止
-      processingState = AudioProcessingState.buffering;
+        processingState = AudioProcessingState.buffering;
     } else {
-      processingState = {
-        ProcessingState.loading: AudioProcessingState.loading,
-        ProcessingState.buffering: AudioProcessingState.buffering,
-        ProcessingState.ready: AudioProcessingState.ready,
-        ProcessingState.completed: AudioProcessingState.completed,
-      }[player.audio.processingState] ?? AudioProcessingState.ready;
+        processingState = {
+            ProcessingState.loading: AudioProcessingState.loading,
+            ProcessingState.buffering: AudioProcessingState.buffering,
+            ProcessingState.ready: AudioProcessingState.ready,
+            ProcessingState.completed: AudioProcessingState.completed,
+        }[player.audio.processingState] ?? AudioProcessingState.ready;
     }
 
     playbackState.add(playbackState.value.copyWith(
-      controls: controls,
-      systemActions: const {
-        MediaAction.seek,
-        MediaAction.seekForward,
-        MediaAction.seekBackward,
-      },
-      processingState: processingState,
-      playing: effectivePlaying,
-      updatePosition: player.audio.position,
-      bufferedPosition: player.audio.bufferedPosition,
-      speed: _speed,
-      queueIndex: _audioEvent.currentIndex,
+        controls: controls,
+        systemActions: const {
+            MediaAction.seek,
+            MediaAction.seekForward,
+            MediaAction.seekBackward,
+        },
+        processingState: processingState,
+        playing: effectivePlaying,  // ← 使用真实播放状态
+        updatePosition: player.audio.position,
+        bufferedPosition: player.audio.bufferedPosition,
+        speed: _speed,
+        queueIndex: _audioEvent.currentIndex,
     ));
   }
 }
