@@ -187,8 +187,7 @@
     NSError *error;
     [self.webServer startWithOptions:@{
         GCDWebServerOption_Port: @0,
-        GCDWebServerOption_BindToLocalhost: @YES,
-        GCDWebServerOption_AutomaticallySuspendInBackground: @NO
+        GCDWebServerOption_BindToLocalhost: @YES
     } error:&error];
 
     if (error) {

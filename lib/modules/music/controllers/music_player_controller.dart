@@ -21,8 +21,6 @@ import 'package:yuanying/utils/toast_utils.dart';
 import 'package:yuanying/utils/storage.dart';
 import 'package:yuanying/core/constants/app_constants.dart';
 import 'package:yuanying/services/silence_keeper.dart';
-import 'package:audio_session/audio_session.dart';
-import 'package:yuanying/nodejs/nodejs_service.dart';
 
 // ===== 音频文件后缀列表 =====
 const List<String> _audioExtensions = ['.mp3', '.m4a', '.aac', '.flac', '.wav', '.ogg', '.opus', '.wma', '.alac'];
@@ -68,8 +66,6 @@ class MusicPlayerController extends GetxController {
   final RxInt favoriteVersion = 0.obs;
 
   // ===== 渠道标记 =====
-  // 't4'（默认，通用） / 'lx'（洛雪）
-  // 只在 _addToHistory / 收藏逻辑里区分，其它透明
   final RxString currentChannel = 't4'.obs;
 
   bool get isLxChannel => currentChannel.value == 'lx';
@@ -89,16 +85,21 @@ class MusicPlayerController extends GetxController {
   String? get currentVodId => _currentVodId;
 
   // ===== 定时器相关 =====
-  final RxInt timerMinutes = 0.obs;            // 0=无定时，-1=播放完当前曲目
+  final RxInt timerMinutes = 0.obs;
   final RxBool stopAfterCurrent = false.obs;
   Timer? _timer;
+
+  /// 暂停后延时启动静音保活的 timer
+  ///
+  /// 用户暂停音乐时，2 秒后如果仍未恢复播放，启动静音保活，
+  /// 填补无音频输出的空窗期，保持控制栏不丢失。
   Timer? _pauseResumeTimer;
 
   // ===== 倍速 =====
   final RxDouble speed = 1.0.obs;
   final List<double> speedOptions = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
 
-  // ===== 跳过片头片尾（仅当前会话有效） =====
+  // ===== 跳过片头片尾 =====
   final RxInt skipStartDuration = 0.obs;
   final RxInt skipEndDuration = 0.obs;
 
@@ -110,9 +111,6 @@ class MusicPlayerController extends GetxController {
   VoidCallback? onPlayCompleted;
 
   /// URL 提供者——由 setPlaylist 的调用方注入
-  ///
-  /// 作用：让切歌（含锁屏/通知栏切歌）不再依赖 UI 层回调。
-  /// 即使详情页被销毁，只要队列还在，就能拉取新歌 URL。
   Future<PlayUrl?> Function(Episode episode)? _urlFetcher;
 
   /// 防抖锁——防止 onPlayCompleted 被短时间内重复触发
@@ -129,24 +127,30 @@ class MusicPlayerController extends GetxController {
     _handler.onSkipToPrevious = () => playPrev();
     _handler.onSkipToNext = () => playNext();
 
-    // ===== 统一监听播放状态变化 =====
-    // 无论暂停/播放来自哪里（系统控制栏、页面底部、详情页），
-    // 都会触发下面的逻辑，统一处理音频会话切换和 NodeJS 保活。
+    // ===== 统一监听播放状态变化，驱动静音保活 =====
+    //
+    // 播放中：主播放器占用音频会话，无需静音保活，SilenceKeeper 停止。
+    // 暂停中：主播放器释放音频 I/O，静音保活接管，保证控制栏不丢失。
+    // 切歌窗口：playingStream 会经历 true→false→true，
+    //          短暂停止时会触发 2 秒 timer，若期间恢复播放则 timer 被取消。
+    //
+    // 这样，任何来源的暂停/恢复（页面底部、系统控制栏、定时器、自动切歌）
+    // 都会被统一处理。
     bool wasPlaying = false;
     _handler.player.playingStream.listen((isPlaying) {
       playing.value = isPlaying;
 
       if (isPlaying && !wasPlaying) {
-        // 从暂停恢复播放：取消待恢复 timer，切回独占会话
+        // 从暂停恢复播放：取消待恢复 timer，停止静音保活
         _pauseResumeTimer?.cancel();
         _pauseResumeTimer = null;
-        _prepareExclusiveAudioSession();
+        SilenceKeeper.stop();
       } else if (!isPlaying && wasPlaying) {
-        // 从播放变为暂停：2 秒后如果仍未恢复，启动 NodeJS 保活
+        // 从播放变为暂停：2 秒后如果仍未恢复，启动静音保活
         _pauseResumeTimer?.cancel();
         _pauseResumeTimer = Timer(const Duration(seconds: 2), () {
           if (!playing.value) {
-            _restoreNodeKeepAlive();
+            SilenceKeeper.start();
           }
         });
       }
@@ -162,6 +166,7 @@ class MusicPlayerController extends GetxController {
   @override
   void onClose() {
     _cancelTimer();
+    _pauseResumeTimer?.cancel();
     _handler.disposeHandler();
     super.onClose();
   }
@@ -180,10 +185,8 @@ class MusicPlayerController extends GetxController {
   }) {
     if (episodes.isEmpty) return;
 
-    // 注入 URL 提供者（用于脱离 UI 生命周期的切歌）
     _urlFetcher = urlFetcher;
 
-    // ===== 重置跳过片头片尾（新播放列表生命周期） =====
     skipStartDuration.value = 0;
     skipEndDuration.value = 0;
 
@@ -205,7 +208,6 @@ class MusicPlayerController extends GetxController {
     if (author != null) this.author.value = author;
     if (album != null) albumName.value = album;
 
-    // 同步到 AudioPlayerHandler，让锁屏/通知栏能显示封面、歌手、专辑
     _handler.updateMetadata(
       cover: cover,
       artist: author,
@@ -226,7 +228,6 @@ class MusicPlayerController extends GetxController {
     final episode = currentEpisode;
     if (episode == null) return;
 
-    // 洛雪渠道：跳过通用历史（洛雪历史由 LxPlayerHelper 写 LxStorage）
     if (isLxChannel) return;
 
     final sourceManager = Get.find<SourceManager>();
@@ -249,7 +250,7 @@ class MusicPlayerController extends GetxController {
       'api_url': apiUrl,
       'site_key': site?['key']?.toString() ?? '',
       'config_key': sourceManager.currentConfigKey.value,
-      'progress': '',  // 音乐无进度
+      'progress': '',
       'watchTime': DateTime.now().millisecondsSinceEpoch,
       'detail_type': DetailType.audio,
     };
@@ -278,7 +279,6 @@ class MusicPlayerController extends GetxController {
     final targetIndex = index ?? currentIndex.value;
     if (targetIndex < 0 || targetIndex >= playlist.length) return;
 
-    // 渠道保护：非洛雪时置回 t4，避免洛雪播放后残留标记
     if (!isLxChannel) {
       currentChannel.value = 't4';
     }
@@ -342,7 +342,6 @@ class MusicPlayerController extends GetxController {
       );
       _addToHistory();
       _handler.current = episode;
-      // 应用当前倍速
       await _handler.player.audio.setSpeed(speed.value);
     } catch (e) {
       if (e.toString().contains('PlayerInterruptedException')) {
@@ -590,17 +589,17 @@ class MusicPlayerController extends GetxController {
   }
 
   // ===== 播放控制 =====
+  Future<void> pause() async {
+    // 暂停逻辑完全由 playingStream 统一处理（2 秒后启动静音保活）
+    await _handler.pause();
+  }
+
   Future<void> togglePlay() async {
     if (_handler.player.isPlaying) {
       await _handler.pause();
     } else {
       await _handler.play();
     }
-  }
-
-  Future<void> pause() async {
-    await _handler.pause();
-    // 状态变化由 playingStream 统一处理，这里不再重复启动 timer
   }
 
   Future<void> playNext() async {
@@ -621,84 +620,37 @@ class MusicPlayerController extends GetxController {
     await _playIndexWithFetcher(prevIndex);
   }
 
-  /// 为音乐播放准备独占音频会话
+  /// 用户主动关闭播放条
   ///
-  /// 步骤：
-  /// 1. 暂停 NodeJS 保活（如果正在运行）
-  /// 2. 通过 audio_session 插件将音频会话配置为独占模式
-  ///    （让 audio_service 可以显示锁屏控制栏）
-  Future<void> _prepareExclusiveAudioSession() async {
-    // 1. 暂停 NodeJS 保活
-    if (Get.isRegistered<NodeJSService>()) {
-      try {
-        final nodeService = Get.find<NodeJSService>();
-        await nodeService.pauseKeepAliveForMusic();
-      } catch (_) {}
-    }
-    // 2. 停止任何正在运行的静默保活引擎
-    await SilenceKeeper.stop();
-
-    // 3. 重新配置音频会话为独占模式
-    try {
-      final session = await AudioSession.instance;
-      await session.configure(const AudioSessionConfiguration(
-        avAudioSessionCategory: AVAudioSessionCategory.playback,
-        avAudioSessionCategoryOptions: null,
-        avAudioSessionMode: AVAudioSessionMode.defaultMode,
-        avAudioSessionRouteSharingPolicy: AVAudioSessionRouteSharingPolicy.defaultPolicy,
-        avAudioSessionSetActiveOptions: AVAudioSessionSetActiveOptions.none,
-        androidAudioAttributes: AndroidAudioAttributes(
-          contentType: AndroidAudioContentType.music,
-          usage: AndroidAudioUsage.media,
-        ),
-        androidAudioFocusGainType: AndroidAudioFocusGainType.gain,
-        androidWillPauseWhenDucked: true,
-      ));
-    } catch (e) {
-      debugPrint('[MusicPlayer] 配置独占音频会话失败: $e');
-    }
-  }
-
-  /// 恢复 NodeJS 保活（音乐队列结束时调用）
-  Future<void> _restoreNodeKeepAlive() async {
-    if (Get.isRegistered<NodeJSService>()) {
-      try {
-        final nodeService = Get.find<NodeJSService>();
-        await nodeService.resumeKeepAliveAfterMusic();
-      } catch (_) {}
-    }
-  }
-
+  /// 停止音乐播放，但通过 SilenceKeeper 保持音频会话活跃，
+  /// 让锁屏控制栏保留，用户可从锁屏快速恢复播放。
   Future<void> closePlayer() async {
     try {
       await _handler.player.stop();
     } catch (_) {}
     playing.value = false;
 
-    try {
-      await SilenceKeeper.stop();   // Dart 封装，非 iOS 是 no-op
-    } catch (_) {}
-
-    await _restoreNodeKeepAlive();  // 内部已判断平台
+    // 立即启动静音保活（不等 2 秒 timer，避免用户立即切后台被挂起）
+    _pauseResumeTimer?.cancel();
+    _pauseResumeTimer = null;
+    await SilenceKeeper.start();
   }
 
   /// 内部切歌——统一路径
   Future<void> _playIndexWithFetcher(int index) async {
     if (index < 0 || index >= playlist.length) return;
 
-    // ===== 切歌是主动行为，不是暂停：取消待恢复 timer =====
+    // 切歌是主动行为，取消待恢复 timer
     _pauseResumeTimer?.cancel();
     _pauseResumeTimer = null;
-
-    // ===== 准备独占音频会话（保控制栏） =====
-    await _prepareExclusiveAudioSession();
 
     currentIndex.value = index;
     if (_currentVodId != null && _currentVodId!.isNotEmpty) {
       _saveCurrentIndex(_currentVodId!, index);
     }
 
-    // 启动保活（独占模式，覆盖静音窗口）
+    // 主动启动静音保活（独占模式，覆盖整个切歌静音窗口）
+    // 新曲开始后由 playingStream 自动停止
     await SilenceKeeper.start(timeout: const Duration(seconds: 30));
 
     _handler.isSwitchingTrack = true;
@@ -716,10 +668,13 @@ class MusicPlayerController extends GetxController {
           }
         } catch (_) {}
       }
+      // 兜底：走 UI 层回调
       onPlayCompleted?.call();
     } finally {
       _handler.isSwitchingTrack = false;
-      await SilenceKeeper.stop();
+      // 注意：不在这里 stop SilenceKeeper。
+      // 若新曲开始播放，playingStream 会触发并停止它；
+      // 若切歌失败（无新曲），保活的 30 秒 timeout 会自动兜底停止。
       _handler.notifyStateChanged();
     }
   }
@@ -830,8 +785,7 @@ class MusicPlayerController extends GetxController {
         } catch (_) {}
         playing.value = false;
         ToastUtils.show('当前曲目已播放完毕，已暂停');
-        // 恢复 NodeJS 保活
-        await _restoreNodeKeepAlive();
+        // playingStream 会触发暂停逻辑，2 秒后启动静音保活
         await Future.delayed(const Duration(milliseconds: 500));
         return;
       }
@@ -845,8 +799,7 @@ class MusicPlayerController extends GetxController {
         await _handler.pause();
         playing.value = false;
         ToastUtils.show('播放列表已结束');
-        // 队列结束，恢复 NodeJS 保活
-        await _restoreNodeKeepAlive();
+        // playingStream 会触发暂停逻辑，2 秒后启动静音保活
         await Future.delayed(const Duration(milliseconds: 500));
       }
     } finally {
@@ -912,11 +865,4 @@ class MusicPlayerController extends GetxController {
   Duration get duration => _handler.player.duration;
   Stream<Duration> get positionStream => _handler.player.positionStream;
   String get currentSongName => currentEpisode?.name ?? '未选择歌曲';
-
-  /// 强制立即恢复保活（App 切到后台时调用）
-  Future<void> forceRestoreKeepAlive() async {
-    _pauseResumeTimer?.cancel();
-    _pauseResumeTimer = null;
-    await _restoreNodeKeepAlive();
-  }
 }

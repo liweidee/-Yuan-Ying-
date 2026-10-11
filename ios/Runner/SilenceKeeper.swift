@@ -1,14 +1,12 @@
 import AVFoundation
 
-/// 保活模式
-enum SilenceMode {
-    /// 独占模式：无 mixWithOthers，用于音乐场景（保持控制栏）
-    case exclusive
-    /// 混合模式：有 mixWithOthers，用于 NodeJS 保活（不打扰其他 App）
-    case mixable
-}
-
 /// iOS 后台音频保活引擎
+///
+/// 通过 AVAudioSourceNode 实时生成全零 PCM 缓冲区，
+/// 让 AVAudioSession 持续处于"正在播放音频"的状态，
+/// 从而满足 iOS 后台音频模式的前提条件。
+///
+/// 使用独占模式（无 mixWithOthers），保证锁屏控制栏全程保持。
 class SilenceKeeper {
     static let shared = SilenceKeeper()
 
@@ -16,10 +14,9 @@ class SilenceKeeper {
     private var _silenceNode: AVAudioSourceNode?
     private var _isRunning = false
     private var _autoStopWorkItem: DispatchWorkItem?
-    private var _currentMode: SilenceMode = .exclusive
 
+    /// 供外部（MethodChannel）查询真实运行状态
     var isRunning: Bool { _isRunning }
-    var currentMode: SilenceMode { _currentMode }
 
     private init() {
         NotificationCenter.default.addObserver(
@@ -33,24 +30,14 @@ class SilenceKeeper {
 
     /// 启动保活引擎（幂等）
     ///
-    /// - Parameters:
-    ///   - mode: 独占或混合模式。默认独占。
-    ///   - timeout: 可选超时（秒）。传 nil 表示不超时，需手动 stop()。
-    func start(mode: SilenceMode = .exclusive, timeout: TimeInterval? = nil) {
-        // 已在运行：如果模式一致，幂等返回；否则切换到新模式
-        if _isRunning {
-            if _currentMode == mode {
-                return
-            }
-            _stopInternal()
-        }
-        _currentMode = mode
+    /// - Parameter timeout: 可选超时（秒）。传 nil 表示不超时，需手动 stop()。
+    func start(timeout: TimeInterval? = nil) {
+        guard !_isRunning else { return }
 
         let session = AVAudioSession.sharedInstance()
         do {
-            let options: AVAudioSession.CategoryOptions =
-                (mode == .mixable) ? [.mixWithOthers] : []
-            try session.setCategory(.playback, options: options)
+            // 独占模式：无 mixWithOthers，保持锁屏控制栏
+            try session.setCategory(.playback, options: [])
             try session.setActive(true, options: [])
         } catch {
             print("[SilenceKeeper] AVAudioSession 配置失败: \(error)")
@@ -74,8 +61,7 @@ class SilenceKeeper {
             try _engine.start()
             _silenceNode = node
             _isRunning = true
-            let modeStr = (mode == .exclusive) ? "独占" : "混合"
-            print("[SilenceKeeper] 保活引擎已启动 (模式=\(modeStr), timeout=\(timeout.map { "\($0)s" } ?? "无"))")
+            print("[SilenceKeeper] 保活引擎已启动 (timeout=\(timeout.map { "\($0)s" } ?? "无"))")
 
             if let timeout = timeout {
                 _scheduleAutoStop(after: timeout)
@@ -90,18 +76,16 @@ class SilenceKeeper {
     func stop() {
         _autoStopWorkItem?.cancel()
         _autoStopWorkItem = nil
-        guard _isRunning else { return }
-        _stopInternal()
-        print("[SilenceKeeper] 保活引擎已停止")
-    }
 
-    private func _stopInternal() {
+        guard _isRunning else { return }
+
         _engine.stop()
         if let node = _silenceNode {
             _engine.detach(node)
             _silenceNode = nil
         }
         _isRunning = false
+        print("[SilenceKeeper] 保活引擎已停止")
     }
 
     private func _scheduleAutoStop(after seconds: TimeInterval) {
@@ -123,10 +107,14 @@ class SilenceKeeper {
               let type = AVAudioSession.InterruptionType(rawValue: typeValue) else {
             return
         }
+
         if type == .ended {
-            let preservedMode = _currentMode
-            _stopInternal()
-            start(mode: preservedMode)
+            if let node = _silenceNode {
+                _engine.detach(node)
+                _silenceNode = nil
+            }
+            _isRunning = false
+            start()
         }
     }
 }

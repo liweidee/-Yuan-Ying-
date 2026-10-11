@@ -103,17 +103,6 @@ import UIKit
             case "getSourcePath":
                 result(NodeJSManager.shared().getDocumentsSourcePath())
 
-            case "startKeepAlive":
-                let args = call.arguments as? [String: Any]
-                let timeout = args?["timeoutSeconds"] as? TimeInterval
-                // NodeJS 保活使用混合模式
-                SilenceKeeper.shared.start(mode: .mixable, timeout: timeout)
-                result(SilenceKeeper.shared.isRunning)
-
-            case "stopKeepAlive":
-                SilenceKeeper.shared.stop()
-                result(nil)
-
             default:
                 result(FlutterMethodNotImplemented)
             }
@@ -145,8 +134,7 @@ import UIKit
             case "startSilence":
                 let args = call.arguments as? [String: Any]
                 let timeout = args?["timeoutSeconds"] as? TimeInterval
-                // 音乐保活使用独占模式（保持控制栏）
-                SilenceKeeper.shared.start(mode: .exclusive, timeout: timeout)
+                SilenceKeeper.shared.start(timeout: timeout)
                 result(SilenceKeeper.shared.isRunning)
             case "stopSilence":
                 SilenceKeeper.shared.stop()

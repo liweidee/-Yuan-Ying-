@@ -4,12 +4,12 @@ import 'package:flutter/services.dart';
 
 /// iOS 后台音频保活控制器
 ///
-/// - start() 使用独占模式（保持锁屏控制栏）
-/// - 通过 audio_session 插件控制音频会话配置
+/// 仅 iOS 生效；其他平台 start/stop 为 no-op。
 class SilenceKeeper {
   SilenceKeeper._();
 
   static const _channel = MethodChannel('com.yuanying/silence_keeper');
+
   static bool _isRunning = false;
 
   static bool get isRunning => _isRunning;
@@ -19,19 +19,20 @@ class SilenceKeeper {
     return Platform.isIOS;
   }
 
-  static Future<bool> start({Duration? timeout}) async {
-    if (!_supported) return false;
-    if (_isRunning) return true;
+  /// 启动保活
+  ///
+  /// [timeout] 为 null 时不超时，需手动 stop()。
+  static Future<void> start({Duration? timeout}) async {
+    if (!_supported) return;
+    if (_isRunning) return;
     try {
       final ok = await _channel.invokeMethod<bool>('startSilence', {
         'timeoutSeconds': timeout?.inSeconds,
       }) ?? false;
       _isRunning = ok;
-      return ok;
     } catch (e) {
       _isRunning = false;
       debugPrint('[SilenceKeeper] start failed: $e');
-      return false;
     }
   }
 

@@ -76,6 +76,8 @@ import 'package:yuanying/services/media_proxy/media_proxy_server.dart';
 
 import 'package:yuanying/modules/download/services/cache_service.dart';
 
+import 'package:yuanying/services/silence_keeper.dart';
+
 // ============================================================================
 // 全局变量
 // ============================================================================
@@ -104,13 +106,13 @@ class _AppLifecycleObserver extends WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused) {
-      // 仅 iOS 需要：App 切到后台时，如果音乐已暂停，立即启动 NodeJS 保活。
-      // Android / 桌面端：NodeJS 保活机制与 iOS 不同，此处不干预。
+      // 仅 iOS：App 切到后台时，如果音乐已暂停，
+      // 立即启动静音保活，避免 2 秒 timer 在后台不触发导致被杀。
       if (Platform.isIOS) {
         if (Get.isRegistered<MusicPlayerController>()) {
           final controller = Get.find<MusicPlayerController>();
           if (!controller.isPlaying) {
-            controller.forceRestoreKeepAlive();
+            SilenceKeeper.start();
           }
         }
       }
