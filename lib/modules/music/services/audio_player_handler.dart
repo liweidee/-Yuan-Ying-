@@ -88,13 +88,19 @@ class AudioPlayerHandler extends BaseAudioHandler {
 
   @override
   Future<void> play({Episode? music, String? url, Map<String, String>? headers}) async {
-    if (music != null) {
-      await player.play(music: music, url: url, headers: headers);
-    } else {
-      if (player.current == null) return;
-      await player.audio.play();
-    }
-    _updatePosition();
+      if (music != null) {
+        // 先设置 current 并刷新 mediaItem，再启动播放。
+        // 避免 playingStream 先触发广播时 mediaItem 仍为 null，
+        // 导致 Android MediaSession 收到 "playing=true + 无元数据" 而拒绝创建通知。
+        player.current = music;
+        _updateMediaItem();
+
+        await player.play(music: music, url: url, headers: headers);
+      } else {
+        if (player.current == null) return;
+        await player.audio.play();
+      }
+      _updatePosition();
   }
 
   @override
@@ -153,26 +159,13 @@ class AudioPlayerHandler extends BaseAudioHandler {
     // playing 严格反映播放器的真实状态，避免控制栏按钮闪烁
     final bool effectivePlaying = player.audio.playing;
 
-    final controls = [
-        const MediaControl(
-            action: MediaAction.skipToPrevious,
-            androidIcon: "drawable/skip_previous",
-            label: "上一曲",
-        ),
-        MediaControl(
-            action: MediaAction.playPause,
-            androidIcon: effectivePlaying
-                ? "drawable/pause_circle"
-                : "drawable/play_circle",
-            label: "暂停/播放",
-        ),
-        const MediaControl(
-            action: MediaAction.skipToNext,
-            androidIcon: "drawable/skip_next",
-            label: "下一曲",
-        ),
+    // 使用 audio_service 预置的常量，自带默认 Android 图标
+    final List<MediaControl> controls = [
+      MediaControl.skipToPrevious, // 使用默认图标
+      effectivePlaying ? MediaControl.pause : MediaControl.play,
+      MediaControl.skipToNext,
     ];
-
+    
     // processingState 保留 isSwitchingTrack 逻辑：
     // 切歌期间上报 buffering，让 iOS 认为 App 仍在活跃，保持控制栏
     AudioProcessingState processingState;

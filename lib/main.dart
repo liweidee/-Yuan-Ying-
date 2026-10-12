@@ -387,8 +387,8 @@ void main() async {
     config: const AudioServiceConfig(
       androidNotificationChannelId: 'com.yuanying.music.channel',
       androidNotificationChannelName: '音乐播放',
-      androidNotificationOngoing: true,
-      androidStopForegroundOnPause: true,
+      androidNotificationOngoing: false,
+      androidStopForegroundOnPause: false,   // 暂停时通知栏依然常驻
       androidNotificationIcon: 'mipmap/ic_launcher',
     ),
   );
