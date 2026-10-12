@@ -2,6 +2,8 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:get/get.dart';
 import 'package:yuanying/core/constants/storage_keys.dart';
 import 'package:yuanying/utils/storage_manager.dart';
+import 'package:yuanying/modules/music/controllers/music_player_controller.dart';
+import 'package:yuanying/services/silence_keeper.dart';
 
 class NovelTtsService extends GetxService {
   final FlutterTts _tts = FlutterTts();
@@ -90,6 +92,10 @@ class NovelTtsService extends GetxService {
     void Function(int index)? onChunk,
   }) async {
     await _init();
+
+    // 主动停止音乐播放，避免 TTS 与音乐同时播放
+    await _stopMusicForTts();
+
     for (int i = 0; i < chunks.length; i++) {
       if (isCancelled()) break;
       onChunk?.call(i);
@@ -99,6 +105,25 @@ class NovelTtsService extends GetxService {
         break;
       }
     }
+  }
+
+  /// TTS 开始前停止音乐
+  ///
+  /// 跨平台通用：Android/iOS/桌面端都需要避免 TTS 与音乐混合。
+  Future<void> _stopMusicForTts() async {
+      // 1. 停止音乐播放器
+      if (Get.isRegistered<MusicPlayerController>()) {
+          try {
+              final musicController = Get.find<MusicPlayerController>();
+              if (musicController.isPlaying) {
+                  await musicController.pause();
+              }
+          } catch (_) {}
+      }
+      // 2. 停止 iOS 静音保活引擎（Dart 封装已在非 iOS 平台 no-op）
+      try {
+          await SilenceKeeper.stop();
+      } catch (_) {}
   }
 
   Future<void> stop() async {
