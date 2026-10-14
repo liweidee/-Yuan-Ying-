@@ -1,3 +1,4 @@
+import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:yuanying/core/constants/storage_keys.dart';
@@ -5,9 +6,38 @@ import 'package:yuanying/utils/storage.dart';
 import 'package:yuanying/plugin/pl_player/models/external_player_type.dart';
 
 /// 播放器内核类型
+///
+/// - mediaKit:    MPV（libmpv），桌面 + 移动
+/// - fvp:         MDK（libmdk），桌面 + 移动
+/// - videoPlayer: 官方 video_player，仅移动端
+///   - Android:   ExoPlayer
+///   - iOS:       AVPlayer
 enum PlayerEngineType {
-  mediaKit,  // 0: 默认 media_kit
-  fvp,       // 1: FVP
+  mediaKit,
+  fvp,
+  videoPlayer,
+}
+
+extension PlayerEngineTypeExt on PlayerEngineType {
+  /// 内核显示名称
+  String get displayName {
+    switch (this) {
+      case PlayerEngineType.mediaKit:  return 'MPV';
+      case PlayerEngineType.fvp:       return 'MDK';
+      case PlayerEngineType.videoPlayer:
+        if (Platform.isAndroid) return 'ExoPlayer';
+        if (Platform.isIOS)     return 'AVPlayer';
+        return 'VideoPlayer';
+    }
+  }
+
+  /// 当前平台是否可选
+  bool get isAvailableOnCurrentPlatform {
+    if (this == PlayerEngineType.videoPlayer) {
+      return Platform.isAndroid || Platform.isIOS;
+    }
+    return true;
+  }
 }
 
 /// 播放器独立配置类

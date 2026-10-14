@@ -8,7 +8,8 @@ import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:get/get.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:media_kit/media_kit.dart' as media_kit;
-import 'package:fvp/fvp.dart' as fvp;
+// import 'package:fvp/fvp.dart' as fvp;
+import 'package:yuanying/core/mdk_init.dart';
 import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:window_manager/window_manager.dart';
@@ -192,38 +193,58 @@ void main() async {
   );
 
   if (!kIsWeb) {
-    fvp.registerWith(options: {
-      /// 全平台接管核心
-      /// 不设置或置空时，FVP 会自动无缝接管全部 5+1 个移动与桌面端平台。
-      // 'platforms': ['windows', 'macos', 'linux', 'android', 'ios'], 
+    // fvp.registerWith(options: {
+    //   /// 全平台接管核心
+    //   /// 不设置或置空时，FVP 会自动无缝接管全部 5+1 个移动与桌面端平台。
+    //   // 'platforms': ['windows', 'macos', 'linux', 'android', 'ios'], 
 
-      /// ============================================================
-      /// 关于硬解链（video.decoders）—— 故意不再手动指定
-      /// ============================================================
-      /// 曾经的做法：手动返回 ['D3D11', 'NVDEC', ...] 之类的列表，
-      ///              试图覆盖各平台的最优硬解。
-      ///
-      /// 为什么改回不设置：
-      ///   1. fvp 内部默认就会启用硬件解码（Hardware decoders are enabled by default），
-      ///      并根据平台/GPU 自动选择最优解码器；
-      ///   2. 官方在 0.3.0 版本已专门修复了 Android 模拟器黑屏问题，
-      ///      内部会检测模拟器并自动强制使用软解；
-      ///   3. 手动指定静态列表，反而会绕过官方的动态自适应逻辑，
-      ///      可能导致模拟器黑屏、跳帧、重复帧等异常。
-      ///
-      /// 参考实现见文件底部的 _getGlobalOptimalDecoders()（未使用）。
-      // 'video.decoders': _getGlobalOptimalDecoders(),
+    //   /// ============================================================
+    //   /// 关于硬解链（video.decoders）—— 故意不再手动指定
+    //   /// ============================================================
+    //   /// 曾经的做法：手动返回 ['D3D11', 'NVDEC', ...] 之类的列表，
+    //   ///              试图覆盖各平台的最优硬解。
+    //   ///
+    //   /// 为什么改回不设置：
+    //   ///   1. fvp 内部默认就会启用硬件解码（Hardware decoders are enabled by default），
+    //   ///      并根据平台/GPU 自动选择最优解码器；
+    //   ///   2. 官方在 0.3.0 版本已专门修复了 Android 模拟器黑屏问题，
+    //   ///      内部会检测模拟器并自动强制使用软解；
+    //   ///   3. 手动指定静态列表，反而会绕过官方的动态自适应逻辑，
+    //   ///      可能导致模拟器黑屏、跳帧、重复帧等异常。
+    //   ///
+    //   /// 参考实现见文件底部的 _getGlobalOptimalDecoders()（未使用）。
+    //   // 'video.decoders': _getGlobalOptimalDecoders(),
 
-      /// 极速寻帧优化
-      /// 默认为 false（即精确寻帧，但高码率视频拖动进度条会卡顿）。
-      /// 设置为 true 后，开启关键帧快速寻帧，进度条瞬间响应，体验极佳。
-      'fastSeek': true, 
+    //   /// 极速寻帧优化
+    //   /// 默认为 false（即精确寻帧，但高码率视频拖动进度条会卡顿）。
+    //   /// 设置为 true 后，开启关键帧快速寻帧，进度条瞬间响应，体验极佳。
+    //   'fastSeek': true, 
 
-      /// 网络流低延迟优化
-      /// 专为直播流、RTMP/RTSP、监控等网络视频流设计。
-      /// 显著降低首帧加载时间，若只做本地点播可将此行注释。
-      'lowLatency': 1, 
-    });
+    //   /// 网络流低延迟优化
+    //   /// 专为直播流、RTMP/RTSP、监控等网络视频流设计。
+    //   /// 显著降低首帧加载时间，若只做本地点播可将此行注释。
+    //   'lowLatency': 1, 
+    // });
+
+    // ============================================================
+    // MDK 全局初始化
+    // ------------------------------------------------------------
+    // 之前调用 fvp.registerWith()，它会抢占
+    // VideoPlayerPlatform.instance，导致官方 video_player 插件失效。
+    //
+    // 本项目现在有三个引擎的规划：
+    //   1. media_kit   —— 直接使用，不受影响
+    //   2. fvp         —— 改用 libmdk 原生接口（FvpEngine）
+    //   3. video_player —— 将来接入，需要官方 VideoPlayerPlatform.instance
+    //
+    // 因此不再调用 fvp.registerWith()，改为手动初始化 MDK。
+    // 这样 VideoPlayerPlatform.instance 始终保持官方实现，
+    // 为将来的 video_player 内核让路。
+    //
+    // fastSeek / lowLatency / video.decoders 等参数不再通过 registerWith 传，
+    // 由 FvpEngine 内部用 player.setProperty / setBufferRange 直接控制。
+    // ============================================================
+    initMdk();
   }
 
   // ==========================================================================

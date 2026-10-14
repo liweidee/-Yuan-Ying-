@@ -10,6 +10,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'engine/i_player_engine.dart';
 import 'engine/media_kit_engine.dart';
 import 'engine/fvp_engine.dart';
+import 'engine/video_player_engine.dart';
 import 'models/data_source.dart';
 import 'models/data_status.dart';
 import 'models/play_status.dart';
@@ -78,10 +79,14 @@ class PlPlayerController {
   }
 
   IPlayerEngine _createEngine(PlayerEngineType type) {
-    if (type == PlayerEngineType.fvp) {
-      return FvpEngine();
-    } else {
-      return MediaKitEngine();
+    switch (type) {
+      case PlayerEngineType.fvp:
+        return FvpEngine();
+      case PlayerEngineType.videoPlayer:
+        return VideoPlayerEngine();
+      case PlayerEngineType.mediaKit:
+      default:
+        return MediaKitEngine();
     }
   }
 
@@ -629,6 +634,13 @@ class PlPlayerController {
   bool get supportsScreenshot => _ensureEngine().supportsScreenshot;
   bool get supportsPictureInPicture => _ensureEngine().supportsPictureInPicture;
   bool get supportsBufferProgress => _ensureEngine().supportsBufferProgress;
+  bool get supportsRecording => _ensureEngine().supportsRecording;
+  bool get supportsExternalSubtitle => _ensureEngine().supportsExternalSubtitle;
+  bool get supportsSubtitleExport => _ensureEngine().supportsSubtitleExport;
+  bool get supportsOnlyPlayAudio => _ensureEngine().supportsOnlyPlayAudio;
+  bool get supportsHardwareDecodingSetting =>
+      _ensureEngine().supportsHardwareDecodingSetting;
+  bool get supportsExternalAudio => _ensureEngine().supportsExternalAudio;
 
   // ============================================================
   // 26. 透传：额外方法

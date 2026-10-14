@@ -336,6 +336,24 @@ abstract class IPlayerEngine {
   bool get supportsBufferProgress;
   bool get enableTapDm;
 
+  /// 是否支持录制
+  bool get supportsRecording;
+
+  /// 是否支持加载外挂字幕
+  bool get supportsExternalSubtitle;
+
+  /// 是否支持导出字幕（Flutter 层能读到字幕内容）
+  bool get supportsSubtitleExport;
+
+  /// 是否支持"听视频 / 后台播放"开关
+  bool get supportsOnlyPlayAudio;
+
+  /// 是否暴露"硬解模式"设置项
+  bool get supportsHardwareDecodingSetting;
+
+  /// 是否支持加载外部音频
+  bool get supportsExternalAudio;
+
   // ============================================================
   // 23. 切换画质 / 双击处理
   // ============================================================

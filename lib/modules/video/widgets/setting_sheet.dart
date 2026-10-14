@@ -153,8 +153,8 @@ class _SettingSheetState extends State<SettingSheet> {
           onTap: _showQualityDialog,
         ),
 
-      // ===== 解码格式 =====
-      if (!isFvpEngine)
+      // ===== 硬解模式（仅 media_kit）=====
+      if (playerController.supportsHardwareDecodingSetting)
         _buildSettingItem(
           icon: Icons.memory,
           title: '硬解模式',
@@ -187,7 +187,7 @@ class _SettingSheetState extends State<SettingSheet> {
       ),
 
       // ===== 音轨选择 =====
-      if (controller.audioTracks.isNotEmpty)
+      if (playerController.supportsAudioTrack && controller.audioTracks.isNotEmpty)
         _buildSettingItem(
           icon: Icons.audiotrack,
           title: '音轨选择',
@@ -195,8 +195,8 @@ class _SettingSheetState extends State<SettingSheet> {
           onTap: _showAudioTrackDialog,
         ),
 
-      // ===== 视轨选择（FVP 不支持切换，仅 MPV 显示）=====
-      if (PlayerPref.playerEngine != PlayerEngineType.fvp &&
+      // ===== 视轨选择（仅 MPV 支持）=====
+      if (playerController.supportsVideoTrack &&
           controller.videoTracks.isNotEmpty)
         _buildSettingItem(
           icon: Icons.videocam,
@@ -206,7 +206,8 @@ class _SettingSheetState extends State<SettingSheet> {
         ),
 
       // ===== 字幕轨道 =====
-      if (controller.subtitleTracks.isNotEmpty)
+      if (playerController.supportsEmbeddedSubtitle &&
+          controller.subtitleTracks.isNotEmpty)
         _buildSettingItem(
           icon: Icons.closed_caption,
           title: '字幕轨道',
@@ -232,34 +233,22 @@ class _SettingSheetState extends State<SettingSheet> {
         onTap: _showSubtitleSettings,
       ),
 
-      // ===== 翻译当前字幕（仅 media_kit 内核）=====
-      // if (!isFvpEngine)
-      //   _buildSettingItem(
-      //     icon: Icons.translate,
-      //     title: '翻译当前字幕',
-      //     subtitle: controller.isTranslating
-      //         ? '翻译中 ${controller.translationProgress.value?.done ?? 0}'
-      //             '/${controller.translationProgress.value?.total ?? 0}'
-      //         : '使用在线翻译服务翻译当前字幕',
-      //     onTap: () {
-      //       Navigator.pop(context);
-      //       controller.translateCurrentSubtitle();
-      //     },
-      //   ),
-      Obx(() {
-        final p = controller.translationProgress.value;
-        return _buildSettingItem(
-          icon: Icons.translate,
-          title: '翻译当前字幕',
-          subtitle: p != null
-              ? '翻译中 ${p.done}/${p.total}'
-              : '使用在线翻译服务翻译当前字幕',
-          onTap: () {
-            Navigator.pop(context);
-            controller.translateCurrentSubtitle();
-          },
-        );
-      }),
+      // ===== 翻译当前字幕=====
+      if (playerController.supportsExternalSubtitle)
+        Obx(() {
+          final p = controller.translationProgress.value;
+          return _buildSettingItem(
+            icon: Icons.translate,
+            title: '翻译当前字幕',
+            subtitle: p != null
+                ? '翻译中 ${p.done}/${p.total}'
+                : '使用在线翻译服务翻译当前字幕',
+            onTap: () {
+              Navigator.pop(context);
+              controller.translateCurrentSubtitle();
+            },
+          );
+        }),
 
       const SizedBox(height: 4),
 
@@ -311,7 +300,7 @@ class _SettingSheetState extends State<SettingSheet> {
       ),
 
       // ===== 外部音频（FVP 专属，视频无音轨时显示）=====
-      if (PlayerPref.playerEngine == PlayerEngineType.fvp &&
+      if (playerController.supportsExternalAudio &&
           controller.audioTracks.isEmpty)
         _buildSettingItem(
           icon: Icons.audiotrack,
@@ -320,17 +309,17 @@ class _SettingSheetState extends State<SettingSheet> {
           onTap: _showExternalAudioDialog,
         ),
 
-      // ===== 加载字幕 =====
-      // if (!isFvpEngine)
-      _buildSettingItem(
-        icon: Icons.file_open_outlined,
-        title: '加载字幕',
-        subtitle: '加载本地字幕文件',
-        onTap: _loadSubtitle,
-      ),
+      // ===== 加载字幕（video_player 不支持外挂，隐藏入口）=====
+      if (playerController.supportsExternalSubtitle)
+        _buildSettingItem(
+          icon: Icons.file_open_outlined,
+          title: '加载字幕',
+          subtitle: '加载本地字幕文件',
+          onTap: _loadSubtitle,
+        ),
 
-      // ===== 保存字幕 =====
-      if (!isFvpEngine)
+      // ===== 保存字幕（仅 media_kit）=====
+      if (playerController.supportsSubtitleExport)
         _buildSettingItem(
           icon: Icons.download_outlined,
           title: '保存字幕',
@@ -459,7 +448,7 @@ class _SettingSheetState extends State<SettingSheet> {
               },
             ),
             const SizedBox(width: 10),
-            if (!isFvpEngine) ...[
+            if (playerController.supportsOnlyPlayAudio) ...[
               _buildActionChip(
                 icon: Icons.headphones,
                 label: '听视频',

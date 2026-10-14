@@ -1519,6 +1519,24 @@ class MediaKitEngine implements IPlayerEngine {
   @override
   bool get supportsBufferProgress => true;
 
+  @override
+  bool get supportsRecording => false;
+
+  @override
+  bool get supportsExternalSubtitle => true;
+
+  @override
+  bool get supportsSubtitleExport => true;
+
+  @override
+  bool get supportsOnlyPlayAudio => true;
+
+  @override
+  bool get supportsHardwareDecodingSetting => true;
+
+  @override
+  bool get supportsExternalAudio => false;
+
   // ============================================================
   // 6. 附加方法
   // ============================================================
