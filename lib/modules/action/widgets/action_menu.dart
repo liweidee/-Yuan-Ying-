@@ -8,6 +8,7 @@ import '../models/action_config.dart';
 import '../models/button_type.dart';
 import '../models/action_type.dart';
 import 'action_renderer.dart';
+import 'action_button_bar.dart';
 
 class MenuAction extends StatefulWidget {
   const MenuAction({
@@ -203,12 +204,6 @@ class _MenuActionState extends State<MenuAction> {
     });
   }
 
-  void _removeSelection(MenuOptionConfig option) {
-    setState(() {
-      _selectedOptions.removeWhere((selected) => selected.optionValue == option.optionValue);
-    });
-  }
-
   void _onSearchChanged(String value) {
     setState(() {
       _searchKeyword = value;
@@ -324,8 +319,6 @@ class _MenuActionState extends State<MenuAction> {
             _buildOptionList(context),
             if (_isMultiSelect && _filteredOptions.isNotEmpty)
               _buildQuickActions(context),
-            if (_isMultiSelect && _selectedOptions.isNotEmpty)
-              _buildSelectedItems(context),
             if (widget.config.timeout > 0 && _timeLeft > 0) _buildTimeout(context),
             _buildButtons(context),
           ],
@@ -455,7 +448,7 @@ class _MenuActionState extends State<MenuAction> {
         builder: (context, constraints) {
           // 获取可用宽度（减去内边距）
           final availableWidth = constraints.maxWidth;
-          
+
           // 计算列数：
           // 1. 如果用户配置了 column > 1，使用用户配置
           // 2. 否则根据宽度自动计算（每个选项至少 120px，最多 4 列）
@@ -466,9 +459,9 @@ class _MenuActionState extends State<MenuAction> {
           } else {
             // 自动计算：每个选项至少 120px 宽
             final autoColumns = (availableWidth / 120).floor();
-            maxColumns = autoColumns.clamp(2, 4);  // 至少 2 列，最多 4 列
+            maxColumns = autoColumns.clamp(2, 4); // 至少 2 列，最多 4 列
           }
-          
+
           // 计算每项宽度
           final spacing = 8.0;
           final totalSpacing = (maxColumns - 1) * spacing;
@@ -604,90 +597,6 @@ class _MenuActionState extends State<MenuAction> {
     );
   }
 
-  Widget _buildSelectedItems(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-
-    if (_selectedOptions.isEmpty) {
-      return const SizedBox.shrink();
-    }
-
-    return Container(
-      margin: const EdgeInsets.only(top: 8),
-      padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(
-        color: colorScheme.primaryContainer.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: colorScheme.primary.withValues(alpha: 0.2),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            children: [
-              Text(
-                '已选择项目',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: colorScheme.onSurface,
-                ),
-              ),
-              const Spacer(),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(
-                  color: colorScheme.primary,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  '${_selectedOptions.length}',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: colorScheme.onPrimary,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          // 限制最大高度 60px（约 2 行），超出可滚动
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxHeight: 60),
-            child: SingleChildScrollView(
-              physics: const BouncingScrollPhysics(),
-              child: Wrap(
-                spacing: 4,
-                runSpacing: 4,
-                children: _selectedOptions.map((option) {
-                  return Chip(
-                    label: Text(
-                      option.name,
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: colorScheme.onSurface,
-                      ),
-                    ),
-                    onDeleted: () => _removeSelection(option),
-                    deleteIcon: Icon(Icons.close, size: 14, color: colorScheme.outline),
-                    backgroundColor: colorScheme.surfaceContainerHighest,
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    labelPadding: const EdgeInsets.symmetric(horizontal: 4),
-                    visualDensity: VisualDensity.compact,
-                  );
-                }).toList(),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildTimeout(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
@@ -733,44 +642,12 @@ class _MenuActionState extends State<MenuAction> {
   }
 
   Widget _buildButtons(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-
-    final children = <Widget>[];
-
-    if (_showCancelButton) {
-      children.add(
-        TextButton(
-          onPressed: _handleCancel,
-          child: const Text('取消'),
-        ),
-      );
-    }
-
-    if (_showOkButton) {
-      children.add(
-        ElevatedButton(
-          onPressed: _isValid ? _handleSubmit : null,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: _isValid ? colorScheme.primary : colorScheme.outline,
-            foregroundColor: _isValid ? colorScheme.onPrimary : colorScheme.onSurface,
-          ),
-          child: const Text('确定'),
-        ),
-      );
-    }
-
-    if (children.isEmpty) {
-      return const SizedBox.shrink();
-    }
-
-    return Container(
-      margin: const EdgeInsets.only(top: 16),
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.end,
-        children: children,
-      ),
+    return ActionButtonBar(
+      showCancel: _showCancelButton,
+      showOk: _showOkButton,
+      okEnabled: _isValid,
+      onCancel: _handleCancel,
+      onOk: _handleSubmit,
     );
   }
 }

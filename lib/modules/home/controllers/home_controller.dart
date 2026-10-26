@@ -215,6 +215,36 @@ class HomeController extends GetxController with GetTickerProviderStateMixin {
     _loadHomeData();
   }
 
+  /// 切源失败：清空数据 + 直接进入错误视图，不发请求。
+  ///
+  /// 与 onSiteChanged 的清理逻辑保持一致，区别仅在于：
+  /// onSiteChanged 会发起 _loadHomeData()，此方法直接置 isHomeError。
+  ///
+  /// 关键：++_homeLoadId 让飞行中的旧请求失效，避免旧源的
+  /// fetchHome / fetchCate 回调覆盖本次错误状态。
+  void onSiteChangedFailure(String error) {
+    ++_homeLoadId;
+
+    for (var ctrl in _categoryControllers.values) {
+      ctrl.dispose();
+    }
+    _categoryControllers.clear();
+    _recommendList.clear();
+    categories.clear();
+    currentCategory.value = null;
+    selectedMainCategory.value = null;
+    filters.clear();
+    hasFilter.value = false;
+    errorMsg.value = '${_truncateError(error)}';
+
+    _tabController?.dispose();
+    _tabController = null;
+
+    isSwitchingSource.value = false;
+    isHomeLoading.value = false;
+    isHomeError.value = true;
+  }
+
   // ===== 加载首页数据 =====
   Future<void> _loadHomeData() async {
     // 捕获本次请求版本号
@@ -269,8 +299,8 @@ class HomeController extends GetxController with GetTickerProviderStateMixin {
 
       if (categories.isEmpty) {
         isHomeError.value = true;
-        errorMsg.value = '暂无分类数据';
-        // 【删除】isHomeLoading.value = false; 交由 finally 统一处理
+        errorMsg.value = '加载失败：暂无分类数据';
+        // 交由 finally 统一处理
         return;
       }
 

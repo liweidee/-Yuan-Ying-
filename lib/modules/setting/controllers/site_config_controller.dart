@@ -1,5 +1,8 @@
+// lib/modules/setting/controllers/site_config_controller.dart
+
 import 'package:get/get.dart';
 import 'package:collection/collection.dart';
+import 'package:yuanying/core/constants/storage_keys.dart';
 import 'package:yuanying/t4/models/site.dart';
 import 'package:yuanying/t4/services/source_manager.dart';
 import 'package:yuanying/utils/storage.dart';
@@ -14,11 +17,39 @@ class SiteConfigController extends GetxController {
   @override
   void onInit() {
     super.onInit();
+    _ensureManualConfigExists();
     loadSites();
+  }
+
+  /// 确保手动源配置存在（一条固定记录）
+  void _ensureManualConfigExists() {
+    final list = GStorage.getCustomSites();
+    final has = list.any((s) => s['key']?.toString() == SettingBoxKey.manualConfigKey);
+    if (!has) {
+      GStorage.addCustomSite({
+        'key': SettingBoxKey.manualConfigKey,
+        'name': '手动源',
+        'api': 'manual',
+        'searchable': 0,
+        'filterable': 0,
+        'quickSearch': 0,
+        'lang': 'manual',
+        'type': '3',
+        '_source': 'manual',
+        'configType': 'tvbox',
+      });
+    }
   }
 
   void loadSites() {
     final customConfigs = GStorage.getCustomSites().map((s) => Site.fromJson(s)).toList();
+    // 手动源排最前
+    customConfigs.sort((a, b) {
+      final am = a.isManualConfig ? 0 : 1;
+      final bm = b.isManualConfig ? 0 : 1;
+      if (am != bm) return am.compareTo(bm);
+      return 0;
+    });
     sites.clear();
     sites.addAll(customConfigs);
 
@@ -37,23 +68,16 @@ class SiteConfigController extends GetxController {
     if (!sites.any((s) => s.key == key)) return;
 
     final targetSite = sites.firstWhere((s) => s.key == key);
-    // if (PlatformUtils.isDesktop && targetSite.isCatVodConfig) {
-    //   SmartDialog.showToast('猫影视配置仅支持移动端');
-    //   return;
-    // }
 
-    // 1. 立即更新选中状态（同步）
     currentSiteKey.value = key;
     GStorage.setSetting('selected_config_key', key);
-    
-    // 2. 立即刷新 UI 列表（同步），高亮秒变
     loadSites();
 
-    // 3. 异步执行配置加载（不阻塞 UI）
     final site = sites.firstWhere((s) => s.key == key);
 
-    if (site.isLocalConfig) {
-      // 本地缓存配置
+    if (site.isManualConfig) {
+      await sourceManager.switchToManualConfig();
+    } else if (site.isLocalConfig) {
       final packageKey = site.configPackageKey!;
       final package = GStorage.getConfigPackage(packageKey);
       if (package != null) {
@@ -69,10 +93,8 @@ class SiteConfigController extends GetxController {
         print('本地配置包不存在: $packageKey');
       }
     } else if (site.isLocalFile) {
-      // 本地文件配置
       await sourceManager.loadFileConfig(site.api, siteKey: key);
     } else {
-      // 远端配置
       await sourceManager.switchConfig(key);
     }
 
@@ -83,13 +105,30 @@ class SiteConfigController extends GetxController {
     loadSites();
   }
 
+  // ===== 手动源配置：重命名 =====
+  void renameManualConfig(String name) {
+    final index = sites.indexWhere((s) => s.isManualConfig);
+    if (index < 0) return;
+    final site = sites[index];
+    final updated = Site(
+      key: site.key,
+      name: name,
+      api: 'manual',
+      searchable: 0,
+      filterable: 0,
+      quickSearch: 0,
+      lang: 'manual',
+      type: '3',
+      source: 'manual',
+      configType: 'tvbox',
+    );
+    sites[index] = updated;
+    GStorage.updateCustomSite(site.key, updated.toJson());
+    loadSites();
+  }
+
   // ===== 手动添加远端配置 =====
   void addSite(String name, String api, {String configType = 'tvbox'}) {
-    // if (PlatformUtils.isDesktop && configType == 'catvod') {
-    //   SmartDialog.showToast('桌面端不支持猫影视配置');
-    //   return;
-    // }
-
     final key = _generateKey(name);
     final newSite = Site(
       key: key,
@@ -116,14 +155,7 @@ class SiteConfigController extends GetxController {
     }
   }
 
-  // ===== 本地缓存配置（手动输入/剪切板导入） =====
   void addLocalConfig(String name, String fileName, Map<String, dynamic> configPackage, {String configType = 'tvbox'}) {
-    // ===== 桌面端拦截 =====
-    // if (PlatformUtils.isDesktop && configType == 'catvod') {
-    //   SmartDialog.showToast('桌面端不支持猫影视配置');
-    //   return;
-    // }
-
     final key = _generateKey(name);
     final packageKey = 'package_${DateTime.now().millisecondsSinceEpoch}_$key';
 
@@ -155,7 +187,6 @@ class SiteConfigController extends GetxController {
     }
   }
 
-  // ===== 本地文件配置（只存路径） =====
   void addLocalFileSite(String name, String filePath) {
     final key = _generateKey(name);
     final newSite = Site(
@@ -190,7 +221,7 @@ class SiteConfigController extends GetxController {
       final updatedSite = Site(
         key: key,
         name: name,
-        api: site.isLocalConfig ? site.api : api,
+        api: site.isLocalConfig || site.isManualConfig ? site.api : api,
         searchable: site.searchable,
         filterable: site.filterable,
         quickSearch: site.quickSearch,
@@ -205,7 +236,7 @@ class SiteConfigController extends GetxController {
       );
       sites[index] = updatedSite;
       GStorage.updateCustomSite(key, updatedSite.toJson());
-      if (!site.isLocalConfig && !site.isLocalFile) {
+      if (!site.isLocalConfig && !site.isLocalFile && !site.isManualConfig) {
         sourceManager.switchConfig(key);
       }
     }
@@ -213,7 +244,14 @@ class SiteConfigController extends GetxController {
 
   Future<void> deleteSite(String key) async {
     final site = sites.firstWhereOrNull((s) => s.key == key);
-    if (site != null && site.isLocalConfig && site.configPackageKey != null) {
+    if (site == null) return;
+    // 手动源配置不可删除
+    if (site.isManualConfig) {
+      SmartDialog.showToast('手动源配置不可删除');
+      return;
+    }
+
+    if (site.isLocalConfig && site.configPackageKey != null) {
       GStorage.deleteConfigPackage(site.configPackageKey!);
     }
 
@@ -222,13 +260,10 @@ class SiteConfigController extends GetxController {
 
     if (currentSiteKey.value == key) {
       if (sites.isNotEmpty) {
-        // 还有剩余配置，切换到第一个
         await switchSite(sites.first.key);
       } else {
-        // 没有配置了，清空选中状态并重置 SourceManager
         currentSiteKey.value = '';
         GStorage.deleteSetting('selected_config_key');
-        // 关键：重新加载配置，让 SourceManager 清空所有源列表
         await sourceManager.loadConfig();
       }
     }

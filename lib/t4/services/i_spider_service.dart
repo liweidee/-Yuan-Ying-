@@ -11,7 +11,11 @@ abstract class ISpiderService {
   Future<Map<String, dynamic>> fetchCate(String cateId, int page, {String? ext});
   Future<Map<String, dynamic>> search(String wd, int page, {int quick});
   Future<VideoDetail?> getDetail({required String vodId, required String pwd});
-  Future<PlayUrl?> getPlayUrl({required String playParams, required String flag, required String pwd});
+  Future<PlayUrl?> getPlayUrl({
+    required String playParams,
+    required String flag,
+    required String pwd,
+  });
 
   // T4ApiService 额外暴露的方法，SearchResultController 等会用到
   Future<Map<String, dynamic>> fetchDetail(String ids);

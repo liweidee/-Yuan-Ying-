@@ -3,22 +3,16 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
-import 'package:get/get.dart';
 
 import '../models/action_config.dart';
 import '../models/button_type.dart';
+import 'action_button_bar.dart';
 
 /// 网页视图 Action
 /// 严格对应 DrPlayer 的 WebViewAction.vue
 ///
-/// 功能：
-/// - 加载 URL
-/// - 地址栏（显示/输入）
-/// - 导航按钮（后退/前进/刷新）
-/// - 加载进度条
-/// - 全屏模式
-/// - 状态栏显示
-/// - 超时自动关闭
+/// 注意：当前 ActionRenderer 对 webview 类型会直接跳转全屏 WebviewPage，
+/// 本组件保留为备选实现，逻辑与原来保持一致。
 class WebViewAction extends StatefulWidget {
   const WebViewAction({
     super.key,
@@ -264,17 +258,10 @@ class _WebViewActionState extends State<WebViewAction> {
     widget.onClose?.call();
   }
 
-  void _handleClose() {
-    widget.onClose?.call();
-  }
-
   // ===== 构建方法 =====
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -302,19 +289,19 @@ class _WebViewActionState extends State<WebViewAction> {
       child: Row(
         children: [
           IconButton(
-            icon: Icon(Icons.arrow_back, size: 20),
+            icon: const Icon(Icons.arrow_back, size: 20),
             onPressed: _canGoBack ? _goBack : null,
             padding: const EdgeInsets.all(4),
             constraints: const BoxConstraints(),
           ),
           IconButton(
-            icon: Icon(Icons.arrow_forward, size: 20),
+            icon: const Icon(Icons.arrow_forward, size: 20),
             onPressed: _canGoForward ? _goForward : null,
             padding: const EdgeInsets.all(4),
             constraints: const BoxConstraints(),
           ),
           IconButton(
-            icon: Icon(Icons.refresh, size: 20),
+            icon: const Icon(Icons.refresh, size: 20),
             onPressed: _reload,
             padding: const EdgeInsets.all(4),
             constraints: const BoxConstraints(),
@@ -363,8 +350,7 @@ class _WebViewActionState extends State<WebViewAction> {
   }
 
   Widget _buildProgress(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+    final colorScheme = Theme.of(context).colorScheme;
 
     return Container(
       height: 2,
@@ -581,44 +567,13 @@ class _WebViewActionState extends State<WebViewAction> {
   }
 
   Widget _buildButtons(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-
-    final children = <Widget>[];
-
-    if (_showCancelButton) {
-      children.add(
-        TextButton(
-          onPressed: _handleCancel,
-          child: Text(widget.config.cancelText ?? '取消'),
-        ),
-      );
-    }
-
-    if (_showOkButton) {
-      children.add(
-        ElevatedButton(
-          onPressed: _handleOk,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: colorScheme.primary,
-            foregroundColor: colorScheme.onPrimary,
-          ),
-          child: Text(widget.config.okText ?? '确定'),
-        ),
-      );
-    }
-
-    if (children.isEmpty) {
-      return const SizedBox.shrink();
-    }
-
-    return Container(
-      margin: const EdgeInsets.only(top: 8),
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.end,
-        children: children,
-      ),
+    return ActionButtonBar(
+      showCancel: _showCancelButton,
+      showOk: _showOkButton,
+      cancelText: widget.config.cancelText ?? '取消',
+      okText: widget.config.okText ?? '确定',
+      onCancel: _handleCancel,
+      onOk: _handleOk,
     );
   }
 }

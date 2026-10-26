@@ -1,6 +1,23 @@
+// drpy3 专用 Service（qjs_ultra 版，worker isolate 架构）
+//
+// 设计要点：
+// - 主 isolate（UI 线程）只负责 SendPort 通信，不碰引擎、不碰 Dio、不碰 HttpServer
+// - worker isolate 内跑完整 drpy3 runtime：QuickJS 引擎、emscripten wasm3 解密、
+//   HttpServer 代理、Dio 请求、分片缓存、inflight 去重
+// - UI 线程永远不会因为 wasm3 同步解密而阻塞
+//
+// 已知环境要求：
+// - qjs_ultra 引擎内置 console 对象，console.stdout 必须由宿主通过
+//   setConsoleSink 注册，否则 emscripten 胶水调用 console 即抛
+//   "When invoke console stuff,you should be set a stdout of platform to
+//   console.stdout."
+// - worker 里 HttpServer.bind 的端口是进程级共享的，主 isolate 播放器可直接访问
+
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show gzip, HttpServer;
+import 'dart:io'
+    show File, gzip, HttpServer, HttpRequest, InternetAddress, Platform;
+import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
@@ -8,1091 +25,228 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:get/get.dart';
 import 'package:qjs_ultra/qjs_ultra.dart';
-import 'package:shelf/shelf.dart' as shelf;
-import 'package:shelf/shelf_io.dart' as shelf_io;
 
 import 'package:yuanying/t4/models/play_url.dart';
 import 'package:yuanying/t4/models/video_detail.dart';
 import 'package:yuanying/t4/services/i_spider_service.dart';
-import 'package:yuanying/services/debug_log_service.dart';
 import 'package:yuanying/utils/qjs_platform_helper.dart';
 
-class _Drpy3ModuleLoader implements JsModuleLoader {
-  final Map<String, String> _sources;
-  _Drpy3ModuleLoader(this._sources);
-
-  String _normalize(String name) {
-    var n = name;
-    if (n.startsWith('./')) n = n.substring(2);
-    while (n.startsWith('../')) n = n.substring(3);
-    final q = n.indexOf('?');
-    if (q >= 0) n = n.substring(0, q);
-    return n;
-  }
-
-  @override
-  Uint8List? getModuleBytecode(String name) => null;
-
-  @override
-  String? getModuleSource(String name) => _sources[_normalize(name)];
-
-  @override
-  String normalizeName(String base, String name) => _normalize(name);
-}
-
+// ============================================================
+// 主 isolate：只做通信
+// ============================================================
 class QjsDrpy3Service implements ISpiderService {
-  QuickjsEngine? _engine;
-  _Drpy3ModuleLoader? _moduleLoader;
+  Isolate? _isolate;
+  SendPort? _workerSendPort;
+  ReceivePort? _responsePort;
+  StreamSubscription? _responseSub;
+  ReceivePort? _exitPort;
+  StreamSubscription? _exitSub;
 
-  bool _ready = false;
-  bool _initializing = false;
+  final Map<int, Completer<dynamic>> _pending = {};
+  int _nextId = 1;
+
+  bool _workerReady = false;
+  bool _initInFlight = false;
+  Completer<bool>? _readyCompleter;
   final isReady = false.obs;
 
   String? _currentKey;
   String? _pendingExt;
   String? _pendingApiUrl;
   String? _pendingSiteKey;
-  String? _currentSourceBase;
-
-  int _siteVersion = 0;
-  Completer<void>? _siteReady;
-
-  HttpServer? _proxyServer;
-  int _proxyPort = 0;
-
-  final Map<String, Uint8List> _assetCache = {};
-
-  final Dio _dio = Dio(BaseOptions(
-    connectTimeout: const Duration(seconds: 30),
-    receiveTimeout: const Duration(seconds: 60),
-    validateStatus: (_) => true,
-    responseType: ResponseType.bytes,
-  ));
-
-  static const _assetPublicDir = 'assets/js/lib/';
-  static const _assetDir = 'assets/js/lib/drpy3/';
-  static const _officialFiles = <String>[
-    'drpy3-globals-capture.js',
-    'drpy-core-lite.min.js',
-    // 'drpy-core-qjs.min.js',
-    'drpy3-peer.js',
-    'drpy3.esm.min.js',
-  ];
-  static const _entryModule = 'drpy3.esm.min.js';
-  // cheerio.min.js 放在 drpy3 子目录
-  static const _cheerioFileName = 'cheerio.min.js';
 
   @override
   String? get currentKey => _currentKey;
-  bool get isRunning => _ready;
+  bool get isRunning => _workerReady;
+
+  static const _bundleAsset = 'assets/js/lib/drpy3/drpy3-qjs.bundle.js';
 
   // ============================================================
-  // 初始化
+  // worker 生命周期
   // ============================================================
-  Future<bool> ensureInitialized() async {
-    if (_ready) return true;
-    if (_initializing) {
-      while (_initializing) {
-        await Future.delayed(const Duration(milliseconds: 100));
+  Future<bool> _ensureWorker() async {
+    if (_workerReady) return true;
+    if (_initInFlight) return _readyCompleter!.future;
+    _initInFlight = true;
+    _readyCompleter = Completer<bool>();
+
+    try {
+      if (!QjsPlatformHelper.isSupported) {
+        debugPrint('[QjsDrpy3] 当前平台不支持 qjs_ultra');
+        _readyCompleter!.complete(false);
+        _readyCompleter = null;
+        _initInFlight = false;
+        return false;
       }
-      return _ready;
-    }
-    _initializing = true;
-    try {
-      return await init();
-    } finally {
-      _initializing = false;
-    }
-  }
+      final libPath = QjsPlatformHelper.libPath;
+      final bundleCode = await rootBundle.loadString(_bundleAsset);
 
-  Future<bool> init() async {
-    if (_ready) return true;
+      _responsePort = ReceivePort();
+      _responseSub = _responsePort!.listen(_onWorkerMessage);
+      _exitPort = ReceivePort();
+      _exitSub = _exitPort!.listen(_onWorkerExit);
 
-    if (!QjsPlatformHelper.isSupported) {
-      debugPrint('[QjsDrpy3] 当前平台不支持 qjs_ultra');
-      return false;
-    }
-
-    try {
-      _engine = QuickjsEngine.createWith(
-        const JsEngineConfig(
-          stackSize: 1 * 1024 * 1024,
-          memoryLimit: 64 * 1024 * 1024,
-          timeoutMs: 10 * 1000,
-        ),
-        libPath: QjsPlatformHelper.libPath,
+      _isolate = await Isolate.spawn(
+        _drpy3WorkerMain,
+        <String, dynamic>{
+          'mainPort': _responsePort!.sendPort,
+          'libPath': libPath,
+          'bundleCode': bundleCode,
+        },
+        debugName: 'drpy3-worker',
+        errorsAreFatal: false,
+        onExit: _exitPort!.sendPort,
+        onError: _exitPort!.sendPort,
       );
-      debugPrint('[QjsDrpy3] 引擎创建成功');
-
-      _engine!.installTimers();
-      _injectConsole();
-      _injectBrowserShim();
-
-      // ===== 加载 cheerio.min.js（手动改过 export 的普通脚本）=====
-      await _loadCheerio();
-
-      await _injectBase64Helper();
-      await _startProxyServer();
-      _registerHostFunctions();
-
-      // ===== 加载官方 4 个 ESM 模块 =====
-      await _loadOfficialModules();
-
-      // ===== 用 __full_cheerio__ 实现 pdfh/pdfa/pd/pdfl =====
-      await _injectHtmlParser();
-
-      await _injectHostEnv();
-      await _createRuntime();
-
-      if (_pendingApiUrl != null && _pendingSiteKey != null) {
-        final url = _pendingApiUrl!;
-        final key = _pendingSiteKey!;
-        final ext = _pendingExt;
-        _pendingApiUrl = null;
-        _pendingSiteKey = null;
-        _pendingExt = null;
-        await _loadSource(_siteVersion, url, key, ext: ext);
-      }
-
-      _ready = true;
-      isReady.value = true;
-      debugPrint('[QjsDrpy3] 初始化完成');
-      return true;
     } catch (e, st) {
-      debugPrint('[QjsDrpy3] 初始化失败: $e\n$st');
+      debugPrint('[QjsDrpy3] worker 创建失败: $e\n$st');
+      _readyCompleter!.complete(false);
+      _readyCompleter = null;
+      _initInFlight = false;
       return false;
     }
+    return _readyCompleter!.future;
   }
 
-  // ============================================================
-  // 浏览器/Node 垫片（cheerio 可能用到）
-  // ============================================================
-  void _injectBrowserShim() {
-    _engine!.evaluate(r'''
-      if (typeof globalThis.window === 'undefined') globalThis.window = globalThis;
-      if (typeof globalThis.self === 'undefined') globalThis.self = globalThis;
-      if (typeof globalThis.navigator === 'undefined') {
-        globalThis.navigator = {
-          userAgent: 'Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36',
-          platform: 'drpy', language: 'zh-CN',
-        };
+  /// 兼容外部显式初始化调用（source_manager 等）。
+  /// 语义：确保 worker isolate 已创建且 drpy3 bundle 装载完成。
+  Future<bool> ensureInitialized() => _ensureWorker();
+
+  void _onWorkerMessage(dynamic msg) {
+    if (msg is! Map) return;
+    final type = msg['type'];
+    if (type == 'ready') {
+      _workerSendPort = msg['port'] as SendPort;
+      return;
+    }
+    if (type == 'initDone') {
+      final ok = msg['ok'] == true;
+      _initInFlight = false;
+      if (ok) {
+        _workerReady = true;
+        isReady.value = true;
+        _readyCompleter?.complete(true);
+        _readyCompleter = null;
+        unawaited(_applyPending());
+      } else {
+        _readyCompleter?.complete(false);
+        _readyCompleter = null;
       }
-      if (typeof globalThis.location === 'undefined') {
-        globalThis.location = {
-          href: 'file:///drpy3/', protocol: 'file:',
-          host: 'localhost', hostname: 'localhost',
-          origin: 'file://', pathname: '/', search: '', hash: '',
-        };
-      }
-      if (typeof globalThis.document === 'undefined') {
-        globalThis.document = {
-          createElement: function() {
-            return { style: {}, setAttribute: function(){},
-                     appendChild: function(){}, innerHTML: '' };
-          },
-          currentScript: { src: '' },
-          addEventListener: function(){}, removeEventListener: function(){},
-          getElementsByTagName: function() { return []; },
-          querySelector: function() { return null; },
-          querySelectorAll: function() { return []; },
-          body: { appendChild: function(){}, removeChild: function(){} },
-          head: { appendChild: function(){}, removeChild: function(){} },
-        };
-      }
-      if (typeof globalThis.XMLHttpRequest === 'undefined') {
-        globalThis.XMLHttpRequest = function() {
-          this.open = function(){}; this.send = function(){};
-          this.setRequestHeader = function(){}; this.addEventListener = function(){};
-          this.readyState = 0; this.status = 0; this.responseText = '';
-        };
-      }
-      if (typeof globalThis.setImmediate === 'undefined') {
-        globalThis.setImmediate = function(fn) { return setTimeout(fn, 0); };
-      }
-      if (typeof globalThis.Buffer === 'undefined') {
-        globalThis.Buffer = {
-          from: function(data) {
-            if (typeof data === 'string') return new TextEncoder().encode(data);
-            return data;
-          },
-          isBuffer: function() { return false; },
-          concat: function(arr) {
-            var total = 0;
-            for (var i = 0; i < arr.length; i++) total += arr[i].length;
-            var out = new Uint8Array(total), off = 0;
-            for (var i = 0; i < arr.length; i++) {
-              out.set(arr[i], off); off += arr[i].length;
-            }
-            return out;
-          },
-        };
-      }
-      if (typeof globalThis.process === 'undefined') {
-        globalThis.process = { env: {}, platform: 'drpy', version: 'v18.0.0' };
-      }
-    ''');
+      return;
+    }
+    final id = msg['id'];
+    if (id is! int) return;
+    final completer = _pending.remove(id);
+    if (completer == null || completer.isCompleted) return;
+    if (msg.containsKey('error')) {
+      completer.completeError(msg['error']);
+    } else {
+      completer.complete(msg['result']);
+    }
   }
 
-  // ============================================================
-  // 加载 cheerio.min.js（手动改过，末尾无 export）
-  // ============================================================
-  Future<void> _loadCheerio() async {
+  void _onWorkerExit(dynamic msg) {
+    debugPrint('[QjsDrpy3] worker 退出/异常: $msg');
+    _workerReady = false;
+    isReady.value = false;
+    _workerSendPort = null;
+    for (final c in _pending.values) {
+      if (!c.isCompleted) c.completeError('worker exited: $msg');
+    }
+    _pending.clear();
+    _responseSub?.cancel();
+    _exitSub?.cancel();
+    _responsePort?.close();
+    _exitPort?.close();
+    _responseSub = null;
+    _exitSub = null;
+    _responsePort = null;
+    _exitPort = null;
+    _isolate = null;
+    _initInFlight = false;
+    _readyCompleter?.complete(false);
+    _readyCompleter = null;
+  }
+
+  Future<void> _applyPending() async {
+    if (_pendingApiUrl == null || _pendingSiteKey == null) return;
+    final apiUrl = _pendingApiUrl!;
+    final siteKey = _pendingSiteKey!;
+    final ext = _pendingExt;
+    _pendingApiUrl = null;
+    _pendingSiteKey = null;
+    _pendingExt = null;
     try {
-      final cheerioJs = await rootBundle.loadString('$_assetPublicDir$_cheerioFileName');
-      debugPrint('[QjsDrpy3] 加载 cheerio.min.js (${cheerioJs.length} chars)');
-      _engine!.evaluate(cheerioJs);
-
-      final check = await _engine!.evaluateAsync(r'''
-        JSON.stringify({
-          exists: typeof globalThis.__full_cheerio__ !== 'undefined',
-          hasLoad: !!(globalThis.__full_cheerio__
-                      && typeof globalThis.__full_cheerio__.load === 'function'),
-          hasJp: !!(globalThis.__full_cheerio__
-                    && typeof globalThis.__full_cheerio__.jp === 'function'),
-          hasJinja2: !!(globalThis.__full_cheerio__
-                        && typeof globalThis.__full_cheerio__.jinja2 === 'function'),
-        })
-      ''');
-      debugPrint('[QjsDrpy3] cheerio 加载结果: $check');
-      if (check is String) {
-        final p = jsonDecode(check) as Map<String, dynamic>;
-        if (p['hasLoad'] != true) {
-          throw Exception('cheerio.load 不可用: $check');
-        }
-      }
-    } catch (e, st) {
-      debugPrint('[QjsDrpy3] ❌ cheerio.min.js 加载失败: $e\n$st');
-      rethrow;
-    }
-  }
-
-  // ============================================================
-  // 加载官方 dist 4 个 ESM 模块
-  // ============================================================
-  Future<void> _loadOfficialModules() async {
-    final sources = <String, String>{};
-    for (final name in _officialFiles) {
-      sources[name] = await rootBundle.loadString('$_assetDir$name');
-      debugPrint('[QjsDrpy3] 已读取 $name (${sources[name]!.length} chars)');
-    }
-
-    _moduleLoader = _Drpy3ModuleLoader(sources);
-    _engine!.setModuleLoader(_moduleLoader!);
-    debugPrint('[QjsDrpy3] 模块加载器已设置');
-
-    final r = await _engine!.evaluateAsync('''
-      (async () => {
-        const m = await import('$_entryModule');
-        globalThis.DRPY3 = m;
-        return JSON.stringify({
-          hasRuntime: typeof m.Runtime === 'function',
-          hasDefineSource: typeof m.defineSource === 'function',
-          hasExpose: typeof m.exposeRuntimeGlobals === 'function',
-          version: m.VERSION || '',
-        });
-      })()
-    ''');
-    debugPrint('[QjsDrpy3] 官方模块加载结果: $r');
-
-    if (r is String) {
-      final parsed = jsonDecode(r) as Map<String, dynamic>;
-      if (parsed['hasRuntime'] != true) {
-        throw Exception('DRPY3.Runtime 未就绪: $r');
-      }
-    }
-  }
-
-  // ============================================================
-  // 用 __full_cheerio__ 实现 pdfh/pdfa/pd/pdfl
-  // 完全照抄官方 htmlParser.js 的逻辑
-  // ============================================================
-  Future<void> _injectHtmlParser() async {
-    final r = await _engine!.evaluateAsync(r'''
-      (function() {
-        var cheerio = globalThis.__full_cheerio__;
-        if (!cheerio || typeof cheerio.load !== 'function') {
-          return JSON.stringify({ ok: false, reason: 'no __full_cheerio__' });
-        }
-
-        var NOADD_INDEX = ':eq|:lt|:gt|:first|:last|:not|:even|:odd|:has|:contains|:matches|:empty|^body$|^#';
-        var URLJOIN_ATTR = '(url|src|href|-original|-src|-play|-url|style)$|^(data-|url-|src-)';
-        var SPECIAL_URL = '^(ftp|magnet|thunder|ws):';
-
-        function test(text, string) {
-          try { return new RegExp(text, 'mi').test(string); } catch (e) { return false; }
-        }
-        function contains(text, match) {
-          return String(text).indexOf(match) !== -1;
-        }
-        function urljoin(from, to) {
-          try {
-            var resolvedUrl = new URL(to, new URL(from, 'resolve://'));
-            if (resolvedUrl.protocol === 'resolve:') {
-              return resolvedUrl.pathname + resolvedUrl.search + resolvedUrl.hash;
-            }
-            return resolvedUrl.href;
-          } catch (e) { return (from || '') + (to || ''); }
-        }
-
-        function parseHikerToJq(parse, first) {
-          if (contains(parse, '&&')) {
-            var parses = parse.split('&&');
-            var new_parses = [];
-            for (var i = 0; i < parses.length; i++) {
-              var ps_list = parses[i].split(' ');
-              var ps = ps_list[ps_list.length - 1];
-              if (!test(NOADD_INDEX, ps)) {
-                if (!first && i >= parses.length - 1) {
-                  new_parses.push(parses[i]);
-                } else {
-                  new_parses.push(parses[i] + ':eq(0)');
-                }
-              } else {
-                new_parses.push(parses[i]);
-              }
-            }
-            parse = new_parses.join(' ');
-          } else {
-            var ps_list2 = parse.split(' ');
-            var ps2 = ps_list2[ps_list2.length - 1];
-            if (!test(NOADD_INDEX, ps2) && first) parse = parse + ':eq(0)';
-          }
-          return parse;
-        }
-
-        function getParseInfo(nparse) {
-          var excludes = [];
-          var nparse_index = 0;
-          var nparse_rule = nparse;
-          if (contains(nparse, ':eq')) {
-            nparse_rule = nparse.split(':eq')[0];
-            var nparse_pos = nparse.split(':eq')[1];
-            if (contains(nparse_rule, '--')) {
-              excludes = nparse_rule.split('--').slice(1);
-              nparse_rule = nparse_rule.split('--')[0];
-            } else if (contains(nparse_pos, '--')) {
-              excludes = nparse_pos.split('--').slice(1);
-              nparse_pos = nparse_pos.split('--')[0];
-            }
-            try {
-              nparse_index = parseInt(nparse_pos.split('(')[1].split(')')[0], 10);
-            } catch (e) {}
-          } else if (contains(nparse, '--')) {
-            nparse_rule = nparse.split('--')[0];
-            excludes = nparse.split('--').slice(1);
-          }
-          return { nparse_rule: nparse_rule, nparse_index: nparse_index, excludes: excludes };
-        }
-
-        function reorderAdjacentLtAndGt(selector) {
-          var adjacentPattern = /:gt\((\d+)\):lt\((\d+)\)/;
-          var match;
-          while ((match = adjacentPattern.exec(selector)) !== null) {
-            var replacement = ':lt(' + match[2] + '):gt(' + match[1] + ')';
-            selector = selector.substring(0, match.index) + replacement
-                     + selector.substring(match.index + match[0].length);
-            adjacentPattern.lastIndex = match.index;
-          }
-          return selector;
-        }
-
-        function parseOneRule(doc, nparse, ret) {
-          var info = getParseInfo(nparse);
-          var nparse_rule = reorderAdjacentLtAndGt(info.nparse_rule);
-          if (!ret) ret = doc(nparse_rule);
-          else ret = ret.find(nparse_rule);
-          if (contains(nparse, ':eq')) ret = ret.eq(info.nparse_index);
-          if (info.excludes.length > 0 && ret) {
-            try {
-              ret = ret.clone();
-              for (var i = 0; i < info.excludes.length; i++) {
-                ret.find(info.excludes[i]).remove();
-              }
-            } catch (e) {}
-          }
-          return ret;
-        }
-
-        function parseText(text) {
-          if (text == null) return '';
-          text = String(text).replace(/[\s]+/gm, '\n');
-          text = text.replace(/\n+/g, '\n').replace(/^\s+/, '');
-          text = text.replace(/\n/g, ' ');
-          return text;
-        }
-
-        globalThis.pdfa = function(html, parse) {
-          if (!html || !parse) return [];
-          parse = parseHikerToJq(parse, false);
-          var doc = cheerio.load(html);
-          var parses = parse.split(' ');
-          var ret = null;
-          for (var i = 0; i < parses.length; i++) {
-            ret = parseOneRule(doc, parses[i], ret);
-            if (!ret) return [];
-          }
-          var arr = [];
-          try { arr = (ret && ret.toArray) ? ret.toArray() : []; } catch (e) { arr = []; }
-          var res = [];
-          for (var j = 0; j < arr.length; j++) {
-            try { var h = doc.html(arr[j]); if (h) res.push(h); } catch (e) {}
-          }
-          return res;
-        };
-
-        globalThis.pdfh = function(html, parse, baseUrl) {
-          if (!html || !parse) return '';
-          var doc = cheerio.load(html);
-          if (parse === 'body&&Text' || parse === 'Text') {
-            return parseText(doc.text());
-          } else if (parse === 'body&&Html' || parse === 'Html') {
-            return doc.html();
-          }
-          var option;
-          if (contains(parse, '&&')) {
-            var parts = parse.split('&&');
-            option = parts.pop();
-            parse = parts.join('&&');
-          }
-          parse = parseHikerToJq(parse, true);
-          var parses = parse.split(' ');
-          var ret = null;
-          for (var i = 0; i < parses.length; i++) {
-            ret = parseOneRule(doc, parses[i], ret);
-            if (!ret) return '';
-          }
-          if (option) {
-            if (option === 'Text') {
-              ret = ret ? parseText(ret.text()) : '';
-            } else if (option === 'Html') {
-              ret = ret ? ret.html() : '';
-            } else {
-              var originalRet = ret.clone();
-              var options = option.split('||');
-              for (var k = 0; k < options.length; k++) {
-                var opt = options[k];
-                ret = originalRet ? (originalRet.attr(opt) || '') : '';
-                if (contains(opt.toLowerCase(), 'style') && contains(ret, 'url(')) {
-                  try {
-                    ret = ret.match(/url\((.*?)\)/)[1];
-                    ret = ret.replace(/^['"]|['"]$/g, '');
-                  } catch (e) {}
-                }
-                if (ret && baseUrl) {
-                  var needAdd = test(URLJOIN_ATTR, opt) && !test(SPECIAL_URL, ret);
-                  if (needAdd) {
-                    ret = ret.indexOf('http') >= 0
-                      ? ret.slice(ret.indexOf('http'))
-                      : urljoin(baseUrl, ret);
-                  }
-                }
-                if (ret) break;
-              }
-            }
-          } else {
-            ret = String(ret);
-          }
-          return ret;
-        };
-
-        globalThis.pd = function(html, parse, baseUrl) {
-          return globalThis.pdfh(html, parse, baseUrl || '');
-        };
-
-        globalThis.pdfl = function(html, parse, listText, listUrl, myUrl) {
-          if (!html || !parse) return [];
-          parse = parseHikerToJq(parse, false);
-          var doc = cheerio.load(html);
-          var parses = parse.split(' ');
-          var ret = null;
-          for (var i = 0; i < parses.length; i++) {
-            ret = parseOneRule(doc, parses[i], ret);
-            if (!ret) return [];
-          }
-          var new_list = [];
-          try {
-            ret.each(function(_, element) {
-              try {
-                var h = doc.html(element);
-                var title = globalThis.pdfh(h, listText);
-                var url = globalThis.pd(h, listUrl, myUrl);
-                new_list.push(title + '$' + url);
-              } catch (e) {}
-            });
-          } catch (e) {}
-          return new_list;
-        };
-
-        if (typeof globalThis.jsp === 'undefined') {
-          globalThis.jsp = { pdfh: globalThis.pdfh, pdfa: globalThis.pdfa, pd: globalThis.pd };
-        }
-
-        return JSON.stringify({
-          ok: true,
-          hasPdfh: typeof globalThis.pdfh === 'function',
-          hasPdfa: typeof globalThis.pdfa === 'function',
-          hasPd: typeof globalThis.pd === 'function',
-          hasPdfl: typeof globalThis.pdfl === 'function',
-        });
-      })()
-    ''');
-    debugPrint('[QjsDrpy3] _injectHtmlParser: $r');
-    if (r is String) {
-      final parsed = jsonDecode(r) as Map<String, dynamic>;
-      if (parsed['ok'] != true) {
-        throw Exception('pdfh 注入失败: $r');
-      }
-    }
-  }
-
-  // ============================================================
-  // console 注入
-  // ============================================================
-  void _injectConsole() {
-    _engine!.evaluate(r'''
-      (function() {
-        var nativeLog = (typeof console !== 'undefined'
-                         && typeof console.log === 'function') ? console.log : null;
-        if (typeof globalThis.console === 'undefined') globalThis.console = {};
-
-        var safeLog = function() {
-          try {
-            var args = Array.prototype.slice.call(arguments);
-            var msg = args.map(String).join(' ');
-            if (nativeLog) {
-              try { nativeLog.call(console, msg); return; } catch (_) {}
-            }
-            if (typeof globalThis.print === 'function') {
-              try { globalThis.print(msg); return; } catch (_) {}
-            }
-          } catch (_) {}
-        };
-
-        console.log = safeLog;
-        console.error = safeLog;
-        console.warn = safeLog;
-        console.info = safeLog;
-        console.debug = safeLog;
-        console.stdout = { write: function(s) { safeLog(String(s)); } };
-        console.stderr = { write: function(s) { safeLog(String(s)); } };
-      })();
-    ''');
-    debugPrint('[QjsDrpy3] console 已就绪（强制健壮版）');
-  }
-
-  // ============================================================
-  // base64 助手
-  // ============================================================
-  Future<void> _injectBase64Helper() async {
-    await _engine!.evaluateAsync(r'''
-      globalThis.__to_base64 = function(data) {
-        var u8 = null;
-        if (data instanceof Uint8Array) u8 = data;
-        else if (data instanceof ArrayBuffer) u8 = new Uint8Array(data);
-        else if (data && data.buffer instanceof ArrayBuffer
-                 && typeof data.byteLength === 'number')
-          u8 = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
-        else if (Array.isArray(data)) u8 = new Uint8Array(data);
-        else return '';
-        if (typeof Buffer !== 'undefined' && typeof Buffer.from === 'function') {
-          try { return Buffer.from(u8.buffer, u8.byteOffset, u8.byteLength).toString('base64'); } catch (_) {}
-        }
-        var bin = '', len = u8.length, CH = 0x8000;
-        for (var i = 0; i < len; i += CH) {
-          var e = Math.min(i + CH, len);
-          for (var j = i; j < e; j++) bin += String.fromCharCode(u8[j]);
-        }
-        return btoa(bin);
-      };
-      globalThis.__from_base64 = function(b64) {
-        try {
-          var bin = atob(b64), len = bin.length, u8 = new Uint8Array(len);
-          for (var i = 0; i < len; i++) u8[i] = bin.charCodeAt(i);
-          return u8;
-        } catch (e1) {
-          try {
-            if (typeof Buffer !== 'undefined') {
-              var buf = Buffer.from(b64, 'base64');
-              return new Uint8Array(buf);
-            }
-          } catch (e2) {}
-          throw new Error('base64 解码失败: ' + (e1 && e1.message || e1));
-        }
-      };
-    ''');
-  }
-
-  // ============================================================
-  // 宿主函数
-  // ============================================================
-  void _registerHostFunctions() {
-    _engine!.registerAsyncFunction('req', (args) async {
-      try {
-        final url = args[0] as String;
-        final opts = (args.length > 1 && args[1] is Map)
-            ? (args[1] as Map).cast<String, dynamic>()
-            : <String, dynamic>{};
-        return await _doDioRequest(url, opts);
-      } catch (e) {
-        debugPrint('[QjsDrpy3] req 失败: $e');
-        return {'status': 500, 'content': '', 'headers': <String, String>{}};
-      }
-    });
-
-    _engine!.registerAsyncFunction('loadAsset', (args) async {
-      final rawPath = args[0] as String;
-      try {
-        final bytes = await _loadAsset(rawPath);
-        return base64Encode(bytes);
-      } catch (e, st) {
-        debugPrint('[QjsDrpy3] loadAsset 失败: $e\n$st');
-        return '';
-      }
-    });
-    debugPrint('[QjsDrpy3] 宿主函数已注册');
-  }
-
-  // ============================================================
-  // 桥接器
-  // ============================================================
-  Future<void> _injectHostEnv() async {
-    await _engine!.evaluateAsync(r'''
-      globalThis.__host_req = async function(url, optionsJson) {
-        var opts = {};
-        if (typeof optionsJson === 'string' && optionsJson.length > 0) {
-          try { opts = JSON.parse(optionsJson); } catch (_) {}
-        } else if (optionsJson && typeof optionsJson === 'object') {
-          opts = optionsJson;
-        }
-        var resp = await req(url, opts);
-        if (resp && (resp.buffer === 1 || resp.buffer === 2)
-            && typeof resp.content === 'string') {
-          try {
-            if (resp.buffer === 1) resp.content = globalThis.__from_base64(resp.content);
-          } catch (e) { console.log('[__host_req] base64 解码失败:', e); }
-        }
-        return resp;
-      };
-      globalThis.__host_loadAsset = async function(path) {
-        var b64 = await loadAsset(path);
-        if (typeof b64 !== 'string' || b64.length === 0)
-          throw new Error('loadAsset 空返回: ' + path);
-        return globalThis.__from_base64(b64);
-      };
-    ''');
-  }
-
-  // ============================================================
-  // 构造 Runtime
-  // ============================================================
-  Future<void> _createRuntime() async {
-    final proxyUrl = 'http://127.0.0.1:$_proxyPort/proxy?do=js';
-    await _engine!.evaluateAsync('''
-      (async () => {
-        if (typeof DRPY3 === 'undefined' || !DRPY3.Runtime)
-          throw new Error('DRPY3.Runtime 未就绪');
-        if (typeof globalThis.pdfh !== 'function')
-          throw new Error('pdfh 未注入');
-        globalThis.__rt = new DRPY3.Runtime({
-          req:      globalThis.__host_req,
-          pdfh:     globalThis.pdfh,
-          pdfa:     globalThis.pdfa,
-          pd:       globalThis.pd,
-          pdfl:     globalThis.pdfl,
-          loadAsset: globalThis.__host_loadAsset,
-          log:      function() {
-            try {
-              var a = Array.prototype.slice.call(arguments).map(String);
-              console.log('[drpy3]', a.join(' '));
-            } catch (_) {}
-          },
-          getProxy: function(isPublic) { return ${jsonEncode(proxyUrl)}; },
-          engine:  'qjs_ultra',
-          version: '1.0.0',
-        });
-        if (typeof DRPY3.exposeRuntimeGlobals === 'function') {
-          try { DRPY3.exposeRuntimeGlobals(globalThis.__rt); } catch (e) {
-            console.log('[createRuntime] exposeRuntimeGlobals 失败:', e);
-          }
-        }
-        return true;
-      })()
-    ''');
-    debugPrint('[QjsDrpy3] Runtime 构造完成');
-  }
-
-  // ============================================================
-  // 代理服务器
-  // ============================================================
-  Future<void> _startProxyServer() async {
-    if (_proxyServer != null) return;
-    final handler = shelf.Pipeline().addHandler((shelf.Request request) async {
-      if (request.url.path != 'proxy') return shelf.Response.notFound('Not Found');
-      try {
-        final params = request.url.queryParameters;
-        debugPrint('[QjsDrpy3][proxy] do=${params['do']}, '
-            '_type=${params['_type']}, url=${_shortUrl(params['url'] ?? '')}');
-        final result = await _callJsProxy(params);
-        return await _handleProxyResult(result, request);
-      } catch (e, st) {
-        debugPrint('[QjsDrpy3][proxy] 异常: $e\n$st');
-        return shelf.Response.internalServerError(body: 'Proxy error: $e');
-      }
-    });
-    _proxyServer = await shelf_io.serve(handler, '127.0.0.1', 0);
-    _proxyPort = _proxyServer!.port;
-    debugPrint('[QjsDrpy3][proxy] 已启动: http://127.0.0.1:$_proxyPort/proxy');
-  }
-
-  String _shortUrl(String u) {
-    if (u.length <= 80) return u;
-    return '${u.substring(0, 80)}...(${u.length})';
-  }
-
-  Future<List<dynamic>> _callJsProxy(Map<String, String> params) async {
-    if (!_ready || _engine == null) return [500, 'text/plain', 'not ready'];
-    final paramsJson = jsonEncode(params);
-    try {
-      final jsonStr = await _engine!.evaluateAsync('''
-        (async () => {
-          let r;
-          try {
-            if (!globalThis.__src)
-              return JSON.stringify({ s: 500, t: 'text/plain', c: 'no src', h: {}, b: null });
-            r = await globalThis.__src.proxy($paramsJson);
-          } catch (innerErr) {
-            var name = (innerErr && innerErr.name) || 'UnknownError';
-            var msg  = (innerErr && innerErr.message) || String(innerErr);
-            return JSON.stringify({ s: 500, t: 'text/plain',
-              c: 'proxy_inner [' + name + '] ' + msg, h: {}, b: null });
-          }
-          let status, ct, content, headers, toBytes;
-          if (Array.isArray(r)) {
-            status = typeof r[0] === 'number' ? r[0] : 404;
-            ct = typeof r[1] === 'string' ? r[1] : 'application/octet-stream';
-            content = r[2];
-            headers = (r[3] && typeof r[3] === 'object') ? r[3] : {};
-            toBytes = r[4];
-          } else return JSON.stringify({ s: 404, t: 'text/plain', c: 'Not Found', h: {}, b: null });
-          let cs = '', fb = toBytes;
-          if (content == null) cs = '';
-          else if (typeof content === 'string') cs = content;
-          else if (content instanceof Uint8Array || content instanceof ArrayBuffer
-                   || (content && content.buffer instanceof ArrayBuffer
-                       && typeof content.byteLength === 'number')
-                   || Array.isArray(content)) {
-            cs = globalThis.__to_base64(content);
-            fb = 1;
-          } else cs = String(content);
-          return JSON.stringify({ s: status, t: ct, c: cs, h: headers, b: fb });
-        })()
-      ''');
-      if (jsonStr is! String) return [500, 'text/plain', 'not string'];
-      final p = jsonDecode(jsonStr) as Map<String, dynamic>;
-      final st = (p['s'] as num?)?.toInt() ?? 404;
-      final ct = p['t']?.toString() ?? 'text/plain';
-      final c = p['c']?.toString() ?? '';
-      final h = (p['h'] as Map?)?.cast<String, dynamic>() ?? {};
-      final b = p['b'];
-      debugPrint('[QjsDrpy3][proxy] s=$st, t=$ct, c.len=${c.length}, b=$b');
-      if (st >= 400) debugPrint('[QjsDrpy3][proxy] ⚠️ $c');
-      return [st, ct, c, h, b];
+      await _call('loadSource', [apiUrl, siteKey, ext]);
     } catch (e) {
-      debugPrint('[QjsDrpy3][proxy] $e');
-      return [500, 'text/plain', 'err: $e'];
+      debugPrint('[QjsDrpy3] 延迟 loadSource 失败: $e');
     }
   }
 
-  Future<shelf.Response> _handleProxyResult(
-      List<dynamic> result, shelf.Request request) async {
-    if (result.length < 3) {
-      return shelf.Response.internalServerError(body: 'invalid');
+  Future<dynamic> _call(String method, List<dynamic> args,
+      {Duration? timeout}) async {
+    if (!await _ensureWorker()) {
+      throw StateError('worker not ready');
     }
-    final status = (result[0] as num?)?.toInt() ?? 404;
-    final ct = result[1]?.toString() ?? 'application/octet-stream';
-    final content = result[2];
-    final extra = result.length > 3 && result[3] is Map
-        ? Map<String, String>.from((result[3] as Map).map(
-            (k, v) => MapEntry(k.toString(), v.toString())))
-        : <String, String>{};
-    final toBytes = result.length > 4 ? result[4] : null;
-    final headers = <String, String>{
-      'content-type': ct, 'access-control-allow-origin': '*', ...extra,
-    };
-    if (toBytes == 1 && content is String) {
-      try { return shelf.Response(status, body: base64Decode(content), headers: headers); }
-      catch (e) {
-        return shelf.Response.internalServerError(body: 'b64 decode failed');
-      }
-    }
-    if (toBytes == 2 && content is String) {
-      headers['location'] = content;
-      return shelf.Response(302, headers: headers);
-    }
-    if (toBytes == 3 && content is String) {
-      try {
-        final rq = <String, String>{};
-        final range = request.headers['range'];
-        if (range != null) rq['range'] = range;
-        final resp = await _dio.get(content, options: Options(
-            responseType: ResponseType.stream, headers: rq,
-            validateStatus: (_) => true));
-        final sh = <String, String>{
-          ...headers, 'content-type': resp.headers.value('content-type') ?? ct,
-        };
-        final cr = resp.headers.value('content-range');
-        if (cr != null) sh['content-range'] = cr;
-        final ar = resp.headers.value('accept-ranges');
-        if (ar != null) sh['accept-ranges'] = ar;
-        return shelf.Response(resp.statusCode ?? 200,
-            body: (resp.data as ResponseBody).stream, headers: sh);
-      } catch (e) {
-        return shelf.Response.internalServerError(body: 'pipe failed: $e');
-      }
-    }
-    return shelf.Response(status,
-        body: content is String ? content : content.toString(), headers: headers);
+    final id = _nextId++;
+    final completer = Completer<dynamic>();
+    _pending[id] = completer;
+    _workerSendPort!.send({'id': id, 'method': method, 'args': args});
+    return completer.future.timeout(
+      timeout ?? const Duration(seconds: 180),
+      onTimeout: () {
+        _pending.remove(id);
+        throw TimeoutException('worker $method timeout');
+      },
+    );
   }
 
-  Future<Map<String, dynamic>> _doDioRequest(
-      String url, Map<String, dynamic> opts) async {
-    final method = (opts['method'] ?? 'GET').toString().toUpperCase();
-    final headers = <String, String>{};
-    ((opts['headers'] as Map?) ?? {}).forEach((k, v) {
-      if (v == null) return;
-      final ks = k.toString();
-      final lk = ks.toLowerCase();
-      if (lk == 'host' || lk == 'connection') return;
-      headers[ks] = v is List ? v.join(', ') : v.toString();
-    });
-    if (!headers.keys.any((k) => k.toLowerCase() == 'user-agent')) {
-      headers['User-Agent'] = 'Mozilla/5.0 (Linux; Android 11; Pixel 5) '
-          'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.91 Mobile Safari/537.36';
-    }
-    dynamic body = opts['body'];
-    if (opts['data'] != null) {
-      body = jsonEncode(opts['data']);
-      headers.putIfAbsent('Content-Type', () => 'application/json');
-    }
-    final bufferType = opts['buffer'];
-    try {
-      final resp = await _dio.request(url, options: Options(
-          method: method, headers: headers, responseType: ResponseType.bytes,
-          followRedirects: true, maxRedirects: 5, validateStatus: (_) => true),
-          data: body);
-      final bytes = (resp.data as List).cast<int>();
-      final content = (bufferType == 1 || bufferType == 2)
-          ? base64Encode(bytes) : utf8.decode(bytes, allowMalformed: true);
-      final rh = <String, String>{};
-      resp.headers.forEach((k, v) { if (v.isNotEmpty) rh[k] = v.first; });
-      rh['access-control-allow-origin'] = '*';
-      return {
-        'status': resp.statusCode ?? 200,
-        'content': content,
-        'headers': rh,
-        if (bufferType != null) 'buffer': bufferType,
-      };
-    } catch (e) {
-      debugPrint('[QjsDrpy3][req] $e');
-      rethrow;
-    }
-  }
-
-  Future<Uint8List> _loadAsset(String rawPath) async {
-    final cached = _assetCache[rawPath];
-    if (cached != null) return cached;
-
-    String url = rawPath;
-    if (!rawPath.startsWith('http://') && !rawPath.startsWith('https://')) {
-      final base = _currentSourceBase;
-      if (base == null || base.isEmpty) {
-        throw Exception('无 base URL: $rawPath');
-      }
-      final bu = Uri.parse(base);
-      final r = bu.resolve(rawPath);
-      url = (bu.hasQuery && !rawPath.contains('?'))
-          ? r.replace(query: bu.query).toString()
-          : r.toString();
-    }
-    final resp = await _dio.get<List<int>>(url,
-        options: Options(responseType: ResponseType.bytes));
-    if (resp.statusCode != 200) {
-      throw Exception('loadAsset HTTP ${resp.statusCode}: $url');
-    }
-    final bytes = Uint8List.fromList(resp.data ?? <int>[]);
-    final isSource = (rawPath == _currentSourceBase);
-    if (!isSource && (
-        rawPath.endsWith('.js') || rawPath.endsWith('.mjs')
-        || rawPath.endsWith('.cjs') || rawPath.endsWith('.wasm')
-        || rawPath.contains('wasm') || rawPath.contains('worker'))) {
-      _assetCache[rawPath] = bytes;
-    }
-    return bytes;
+  Map<String, dynamic> _asMap(dynamic r) {
+    if (r == null) return {};
+    if (r is Map) return r.cast<String, dynamic>();
+    return {'success': false, 'error': 'unexpected: $r'};
   }
 
   // ============================================================
-  // 源加载
+  // ISpiderService
   // ============================================================
   @override
   void setBaseUrl(String url) {}
 
   @override
   void switchSite(String apiUrl, String siteKey, {dynamic ext}) {
-    _siteVersion++;
-    _siteReady = Completer<void>();
-    final version = _siteVersion;
-    debugPrint('[QjsDrpy3] switchSite(v=$version): $siteKey');
     _currentKey = siteKey;
     _pendingExt = ext is String ? ext : (ext?.toString() ?? '');
-    if (!_ready) {
+    if (!_workerReady) {
       _pendingApiUrl = apiUrl;
       _pendingSiteKey = siteKey;
-      unawaited(ensureInitialized());
+      unawaited(_ensureWorker());
       return;
     }
-    unawaited(_loadSource(version, apiUrl, siteKey, ext: _pendingExt));
-  }
-
-  Future<void> _loadSource(int version, String apiUrl, String siteKey,
-      {dynamic ext}) async {
-    if (!await ensureInitialized()) { _completeSiteReady(version); return; }
-    if (_engine == null) { _completeSiteReady(version); return; }
-    try {
-      _assetCache.clear();
-      final extStr = ext is String ? ext : (ext?.toString() ?? '');
-      String? sourceUrl;
-      String? inlineCode;
-      if (extStr.isNotEmpty) {
-        if (extStr.startsWith('http')) sourceUrl = extStr;
-        else if (extStr.contains('export default') ||
-            extStr.contains('defineSource') || extStr.startsWith('{')) {
-          inlineCode = extStr;
-        }
-      }
-      if (sourceUrl == null && inlineCode == null && apiUrl.isNotEmpty) {
-        sourceUrl = apiUrl;
-      }
-      if (sourceUrl == null && inlineCode == null) {
-        _completeSiteReady(version);
-        return;
-      }
-      String code;
-      if (inlineCode != null) {
-        code = inlineCode;
-        _currentSourceBase = null;
-      } else {
-        final resp = await _dio.get<List<int>>(sourceUrl!,
-            options: Options(responseType: ResponseType.bytes));
-        code = utf8.decode((resp.data ?? []), allowMalformed: true);
-        _currentSourceBase = sourceUrl;
-        debugPrint('[QjsDrpy3] 源下载完成: ${code.length} chars, '
-            'base=$_currentSourceBase');
-      }
-      final trimmed = code.trimLeft();
-      if (trimmed.startsWith('H4sI')) {
-        try {
-          final cleaned = code.replaceAll(RegExp(r'\s'), '');
-          code = utf8.decode(gzip.decode(base64Decode(cleaned)),
-              allowMalformed: true);
-        } catch (e) { debugPrint('[QjsDrpy3] b64+gzip 失败: $e'); }
-      }
-      final codeJson = jsonEncode(code);
-      final keyJson = jsonEncode(siteKey);
-      final pathJson = jsonEncode(sourceUrl ?? '');
-      final extJson = jsonEncode(extStr);
-      await _engine!.evaluateAsync('''
-        (async () => {
-          globalThis.__src = await globalThis.__rt.load($codeJson,
-            { key: $keyJson, path: $pathJson });
-          if (typeof globalThis.__src.init === 'function')
-            await globalThis.__src.init($extJson);
-          return true;
-        })()
-      ''');
-      final ok = await _engine!.evaluateAsync(
-          'typeof globalThis.__src !== "undefined" && globalThis.__src !== null');
-      debugPrint('[QjsDrpy3] 源加载${ok == true ? "成功" : "失败"}: $siteKey');
-    } catch (e, st) {
-      debugPrint('[QjsDrpy3] 源加载异常: $e\n$st');
-    } finally {
-      _completeSiteReady(version);
-    }
-  }
-
-  void _completeSiteReady(int version) {
-    if (version != _siteVersion) return;
-    final c = _siteReady;
-    if (c != null && !c.isCompleted) c.complete();
-  }
-
-  // ============================================================
-  // 业务入口
-  // ============================================================
-  Future<Map<String, dynamic>> _callSource(
-      String fn, List<dynamic> args) async {
-    final ready = _siteReady;
-    if (ready != null && !ready.isCompleted) {
-      try { await ready.future.timeout(const Duration(seconds: 90)); } catch (_) {}
-    }
-    if (!_ready) {
-      final ok = await ensureInitialized();
-      if (!ok) return {'success': false, 'error': 'not ready'};
-    }
-    if (_engine == null) return {'success': false, 'error': 'runtime null'};
-    final argsJson = jsonEncode(args);
-    try {
-      final result = await _engine!.evaluateAsync('''
-        (async () => {
-          try {
-            if (!globalThis.__src)
-              return { success: false, error: '__src not loaded yet' };
-            const args = $argsJson;
-            const r = await globalThis.__src.$fn(...args);
-            return r || {};
-          } catch (e) {
-            return { success: false, error: String((e && e.message) || e) };
-          }
-        })()
-      ''');
-      if (result is Map) return _normalizeUrls(result.cast<String, dynamic>());
-      return {'success': false, 'error': 'unexpected'};
-    } catch (e) {
-      return {'success': false, 'error': e.toString()};
-    }
-  }
-
-  Map<String, dynamic> _normalizeUrls(Map<String, dynamic> result) {
-    final list = result['list'];
-    if (list is List) {
-      for (final item in list) {
-        if (item is! Map) continue;
-        final pic = item['vod_pic'];
-        if (pic is String && pic.isNotEmpty && pic.startsWith('//')) {
-          item['vod_pic'] = 'https:$pic';
-        }
-      }
-    }
-    return result;
+    unawaited(_call('loadSource', [apiUrl, siteKey, _pendingExt]));
   }
 
   @override
-  Future<Map<String, dynamic>> fetchHome({int filter = 1}) =>
-      _callSource('home', [filter]);
+  Future<Map<String, dynamic>> fetchHome({int filter = 1}) async {
+    return _asMap(await _call('fetchHome', [filter]));
+  }
 
   @override
   Future<Map<String, dynamic>> fetchCate(String cateId, int page,
-          {String? ext}) =>
-      _callSource('category', [cateId, page, false, {}]);
+      {String? ext}) async {
+    return _asMap(await _call('fetchCate', [cateId, page, ext]));
+  }
 
   @override
   Future<Map<String, dynamic>> search(String wd, int page,
-          {int quick = 0}) =>
-      _callSource('search', [wd, quick == 1, page]);
+      {int quick = 0}) async {
+    return _asMap(await _call('search', [wd, page, quick]));
+  }
 
   @override
   Future<VideoDetail?> getDetail(
       {required String vodId, required String pwd}) async {
-    final map = await _callSource('detail', [vodId]);
+    final map = _asMap(await _call('getDetail', [vodId, pwd]));
     final list = map['list'];
     if (list is! List || list.isEmpty) return null;
     final data = (list[0] as Map).cast<String, dynamic>();
@@ -1106,8 +260,9 @@ class QjsDrpy3Service implements ISpiderService {
   }
 
   @override
-  Future<Map<String, dynamic>> fetchDetail(String ids) =>
-      _callSource('detail', [ids]);
+  Future<Map<String, dynamic>> fetchDetail(String ids) async {
+    return _asMap(await _call('fetchDetail', [ids]));
+  }
 
   @override
   Future<PlayUrl?> getPlayUrl({
@@ -1115,11 +270,11 @@ class QjsDrpy3Service implements ISpiderService {
     required String flag,
     required String pwd,
   }) async {
-    final map = await _callSource('play', [flag, playParams, []]);
+    final map = _asMap(await _call('getPlayUrl', [playParams, flag, pwd]));
     if (map['data'] is Map) {
       return PlayUrl.fromJson((map['data'] as Map).cast<String, dynamic>());
     }
-    if (map['parse'] != null || map['url'] != null) {
+    if (map['parse'] != null || map['url'] != null || map['urls'] != null) {
       return PlayUrl.fromJson(map);
     }
     return null;
@@ -1127,8 +282,9 @@ class QjsDrpy3Service implements ISpiderService {
 
   @override
   Future<Map<String, dynamic>> fetchPlayUrl(String play,
-          {String? flag}) =>
-      _callSource('play', [flag ?? '', play, []]);
+      {String? flag}) async {
+    return _asMap(await _call('fetchPlayUrl', [play, flag]));
+  }
 
   @override
   Future<Map<String, dynamic>> searchDirect({
@@ -1144,31 +300,663 @@ class QjsDrpy3Service implements ISpiderService {
     final from = map['vod_play_from']?.toString() ?? '';
     final url = map['vod_play_url']?.toString() ?? '';
     if (from.isEmpty || url.isEmpty) return [];
-    final fl = from.split(r'$$$');
-    final ul = url.split(r'$$$');
+    final fromList = from.split(r'$$$');
+    final urlList = url.split(r'$$$');
     final out = <PlaySource>[];
-    for (var i = 0; i < fl.length && i < ul.length; i++) {
+    for (var i = 0; i < fromList.length && i < urlList.length; i++) {
       final eps = <Episode>[];
-      for (final part in ul[i].split('#')) {
+      for (final part in urlList[i].split('#')) {
         if (part.trim().isEmpty) continue;
         final kv = part.split(r'$');
         if (kv.length == 2) eps.add(Episode(name: kv[0], url: kv[1]));
       }
-      if (eps.isNotEmpty) out.add(PlaySource(name: fl[i], episodes: eps));
+      if (eps.isNotEmpty) out.add(PlaySource(name: fromList[i], episodes: eps));
     }
     return out;
   }
 
   void dispose() {
-    _proxyServer?.close(force: true);
-    _proxyServer = null;
-    _engine?.dispose();
-    _engine = null;
-    _moduleLoader = null;
-    _ready = false;
+    try {
+      _workerSendPort?.send({'id': -1, 'method': 'dispose', 'args': []});
+    } catch (_) {}
+    _isolate?.kill(priority: Isolate.immediate);
+    _isolate = null;
+    _workerSendPort = null;
+    _workerReady = false;
     isReady.value = false;
-    _siteReady = null;
-    _currentSourceBase = null;
+    _responseSub?.cancel();
+    _exitSub?.cancel();
+    _responsePort?.close();
+    _exitPort?.close();
+    _responseSub = null;
+    _exitSub = null;
+    _responsePort = null;
+    _exitPort = null;
+    for (final c in _pending.values) {
+      if (!c.isCompleted) c.completeError('disposed');
+    }
+    _pending.clear();
+    _currentKey = null;
+    _initInFlight = false;
+    _readyCompleter?.complete(false);
+    _readyCompleter = null;
+  }
+}
+
+// ============================================================
+// worker isolate 入口
+// ============================================================
+void _drpy3WorkerMain(Map<String, dynamic> args) {
+  final mainPort = args['mainPort'] as SendPort;
+  final libPath = args['libPath'] as String;
+  final bundleCode = args['bundleCode'] as String;
+
+  final receivePort = ReceivePort();
+  receivePort.listen((msg) async {
+    if (msg is! Map) return;
+    final method = msg['method'] as String?;
+    final id = msg['id'] as int?;
+    if (method == 'dispose') {
+      try {
+        await _workerImpl?.dispose();
+      } catch (_) {}
+      Isolate.exit();
+      return;
+    }
+    if (id == null || method == null) return;
+    final callArgs = (msg['args'] as List?) ?? const [];
+    try {
+      final result = await _workerImpl!.handle(method, callArgs);
+      mainPort.send({'id': id, 'result': result});
+    } catch (e, st) {
+      mainPort.send({'id': id, 'error': '$e\n$st'});
+    }
+  });
+
+  mainPort.send({'type': 'ready', 'port': receivePort.sendPort});
+
+  _workerImpl = _Drpy3WorkerImpl(libPath: libPath, bundleCode: bundleCode);
+  _workerImpl!.init().then((ok) {
+    mainPort.send({'type': 'initDone', 'ok': ok});
+  });
+}
+
+_Drpy3WorkerImpl? _workerImpl;
+
+// ============================================================
+// worker 内的 drpy3 runtime 实现
+// ============================================================
+class _Drpy3WorkerImpl {
+  _Drpy3WorkerImpl({required this.libPath, required this.bundleCode});
+
+  final String libPath;
+  final String bundleCode;
+
+  QuickjsEngine? _engine;
+  HttpServer? _proxyServer;
+  int _proxyPort = 0;
+
+  String? _currentKey;
+  String? _currentSourceBase;
+  int _siteVersion = 0;
+  Completer<void>? _siteReady;
+
+  final Map<String, Uint8List> _assetCache = {};
+  final Map<String, Uint8List> _segmentCache = {};
+  final Map<String, Future<List<dynamic>>> _segmentInflight = {};
+  static const int _maxSegmentCache = 50;
+
+  final Completer<bool> _initDone = Completer<bool>();
+  Future<void> _callChain = Future<void>.value();
+
+  final Dio _dio = Dio(BaseOptions(
+    connectTimeout: const Duration(seconds: 30),
+    receiveTimeout: const Duration(seconds: 60),
+    validateStatus: (_) => true,
+    responseType: ResponseType.bytes,
+  ));
+
+  // ============================================================
+  // init
+  // ============================================================
+  Future<bool> init() async {
+    try {
+      _engine = QuickjsEngine.createWith(
+        const JsEngineConfig(
+          stackSize: 1 * 1024 * 1024,
+          memoryLimit: 256 * 1024 * 1024,
+          timeoutMs: 120 * 1000,
+        ),
+        libPath: libPath,
+      );
+      // console.stdout 必须注册：emscripten 胶水顶层即调用 console，
+      // 未注册时抛 "When invoke console stuff,..."。这里顺带过滤掉
+      // 胶水内部的 [GTRACE] 调试轨迹，只保留 Woker_BTime 等关键标志。
+      _engine!.setConsoleSink((m) {
+        if (m.contains('[GTRACE]')) return;
+        print('[drpy3-worker][console] $m');
+      });
+
+      await _startProxyServer();
+      _engine!.installDrpy3Shim(_handleBridge);
+
+      await _engine!.loadModuleToGlobals('drpy3-qjs.bundle.js', bundleCode);
+      await _engine!.callAsync('__drpy3Setup', [
+        jsonEncode({'engine': 'qjs_ultra', 'action': true}),
+      ]);
+      _initDone.complete(true);
+      return true;
+    } catch (e, st) {
+      print('[drpy3-worker] init 失败: $e\n$st');
+      _initDone.complete(false);
+      return false;
+    }
+  }
+
+  Future<dynamic> handle(String method, List args) {
+    return _serial(() async {
+      if (!await _initDone.future) {
+        throw StateError('engine init failed');
+      }
+      return _dispatch(method, args);
+    });
+  }
+
+  Future<T> _serial<T>(Future<T> Function() fn) {
+    final prev = _callChain;
+    final completer = Completer<T>();
+    _callChain = () async {
+      try {
+        await prev;
+      } catch (_) {}
+      try {
+        completer.complete(await fn());
+      } catch (e, st) {
+        completer.completeError(e, st);
+      }
+    }();
+    return completer.future;
+  }
+
+  Future<dynamic> _dispatch(String method, List args) async {
+    switch (method) {
+      case 'loadSource':
+        return await _loadSource(
+          args[0] as String,
+          args[1] as String,
+          ext: args.length > 2 ? args[2] : null,
+        );
+      case 'fetchHome':
+        return await _callSource('home', [args.isNotEmpty ? args[0] : 1]);
+      case 'fetchCate':
+        return await _callSource('category', [args[0], args[1], false, {}]);
+      case 'search':
+        return await _callSource('search', [args[0], args[2] == 1, args[1]]);
+      case 'getDetail':
+        return await _callSource('detail', [args[0]]);
+      case 'fetchDetail':
+        return await _callSource('detail', [args[0]]);
+      case 'getPlayUrl':
+        return await _callSource('play', [args[1], args[0], []]);
+      case 'fetchPlayUrl':
+        return await _callSource(
+            'play', [args.length > 1 ? args[1] ?? '' : '', args[0], []]);
+      default:
+        throw ArgumentError('unknown method: $method');
+    }
+  }
+
+  Future<void> dispose() async {
+    try {
+      _proxyServer?.close(force: true);
+    } catch (_) {}
+    _proxyServer = null;
+    try {
+      _engine?.dispose();
+    } catch (_) {}
+    _engine = null;
+    _segmentCache.clear();
+    _segmentInflight.clear();
     _assetCache.clear();
+  }
+
+  // ============================================================
+  // proxy server
+  // ============================================================
+  Future<void> _startProxyServer() async {
+    if (_proxyServer != null) return;
+    _proxyServer = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    _proxyPort = _proxyServer!.port;
+    print('[drpy3-worker] proxy 监听 127.0.0.1:$_proxyPort');
+    _proxyServer!.listen(_handleProxyRequest);
+  }
+
+  Future<void> _handleProxyRequest(HttpRequest req) async {
+    try {
+      if (req.uri.path != '/proxy') {
+        req.response.statusCode = 404;
+        await req.response.close();
+        return;
+      }
+      final params = req.uri.queryParameters;
+      final target = params['url'] ?? '';
+      final isTs = target.split('?').first.endsWith('.ts');
+      final isM3u8 = target.split('?').first.endsWith('.m3u8');
+      // TS 的成功日志统一在 _proxyWithCache 里输出，这里只记录非 TS
+      if (!isTs) {
+        print('[drpy3-worker][proxy] << ${isM3u8 ? 'm3u8' : 'other'} '
+            '${_shortName(target)}');
+      }
+      final result = await _proxyWithCache(params);
+      await _writeProxyResult(req, result);
+    } catch (e, st) {
+      print('[drpy3-worker][proxy] 异常: $e\n$st');
+      try {
+        req.response.statusCode = 500;
+        await req.response.close();
+      } catch (_) {}
+    }
+  }
+
+  Future<List<dynamic>> _proxyWithCache(Map<String, String> params) {
+    final url = params['url'] ?? '';
+    if (!url.split('?').first.endsWith('.ts')) {
+      return _callJsProxy(params);
+    }
+    final name = _shortName(url);
+
+    final cached = _segmentCache[url];
+    if (cached != null) {
+      print('[drpy3-worker][ts] $name 缓存命中 ${cached.length}B');
+      return Future.value([200, 'video/MP2T', cached, <String, String>{}, 0]);
+    }
+    final inflight = _segmentInflight[url];
+    if (inflight != null) {
+      print('[drpy3-worker][ts] $name 复用 inflight');
+      return inflight;
+    }
+    final future = _decryptSegment(url);
+    _segmentInflight[url] = future;
+    return future.whenComplete(() => _segmentInflight.remove(url));
+  }
+
+  Future<List<dynamic>> _decryptSegment(String url) async {
+    final name = _shortName(url);
+    final sw = Stopwatch()..start();
+    final result = await _callJsProxy({'url': url});
+    if (result.length >= 5 && result[2] is String && result[4] == 1) {
+      try {
+        final bytes = base64Decode(result[2] as String);
+        while (_segmentCache.length >= _maxSegmentCache) {
+          _segmentCache.remove(_segmentCache.keys.first);
+        }
+        _segmentCache[url] = bytes;
+        sw.stop();
+        print('[drpy3-worker][ts] $name 解密 ${bytes.length}B '
+            '${sw.elapsedMilliseconds}ms');
+        return [200, result[1], bytes, result[3] ?? <String, String>{}, 0];
+      } catch (e) {
+        print('[drpy3-worker][ts] $name base64 解码失败: $e\n  url=$url');
+        return result;
+      }
+    }
+    sw.stop();
+    final body = result.length >= 3 ? result[2]?.toString() ?? '' : '';
+    print('[drpy3-worker][ts] $name 未解密 '
+        'status=${result.isNotEmpty ? result[0] : '?'} '
+        'body=${body.length > 120 ? '${body.substring(0, 120)}...' : body}'
+        '\n  url=$url');
+    return result;
+  }
+
+  Future<List<dynamic>> _callJsProxy(Map<String, String> params) async {
+    if (_engine == null || _currentKey == null) {
+      return [500, 'text/plain', 'engine/key not ready'];
+    }
+    final sw = Stopwatch()..start();
+    try {
+      final argsJson = jsonEncode([params]);
+      final resultJson = await _engine!.callAsync('__drpy3Call', [
+        _currentKey!,
+        'proxy',
+        argsJson,
+      ]);
+      sw.stop();
+      if (resultJson is String) {
+        final parsed = jsonDecode(resultJson);
+        if (parsed is List) {
+          // 成功日志由调用方输出，这里静默
+          return parsed;
+        }
+        if (parsed is Map && parsed.containsKey('__drpy3_error')) {
+          final err = parsed['__drpy3_error'];
+          final msg = err is Map ? err['error']?.toString() : err.toString();
+          print('[drpy3-worker][proxy] 源错误 ${sw.elapsedMilliseconds}ms: $msg');
+          return [500, 'text/plain', msg ?? 'unknown'];
+        }
+      }
+      return [500, 'text/plain', 'invalid proxy result'];
+    } catch (e) {
+      sw.stop();
+      print('[drpy3-worker][proxy] 异常 ${sw.elapsedMilliseconds}ms: $e');
+      return [500, 'text/plain', 'proxy call failed: $e'];
+    }
+  }
+
+  Future<void> _writeProxyResult(
+      HttpRequest req, List<dynamic> result) async {
+    if (result.length < 3) {
+      req.response.statusCode = 500;
+      req.response.add(utf8.encode('invalid proxy result'));
+      await req.response.close();
+      return;
+    }
+    final status = (result[0] as num?)?.toInt() ?? 404;
+    final contentType = result[1]?.toString() ?? 'application/octet-stream';
+    final content = result[2];
+    final extraHeaders = result.length > 3 && result[3] is Map
+        ? Map<String, String>.from((result[3] as Map).map((k, v) => MapEntry(
+            k.toString(), v is List ? v.join(', ') : v?.toString() ?? '')))
+        : <String, String>{};
+    final toBytes = result.length > 4 ? result[4] : null;
+
+    req.response.statusCode = status;
+    req.response.headers.set('content-type', contentType);
+    req.response.headers.set('access-control-allow-origin', '*');
+    for (final e in extraHeaders.entries) {
+      req.response.headers.set(e.key, e.value);
+    }
+
+    if ((toBytes == 1 || toBytes == true) && content is String) {
+      try {
+        req.response.add(base64Decode(content));
+      } catch (_) {
+        req.response.statusCode = 500;
+      }
+      await req.response.close();
+      return;
+    }
+    if (toBytes == 2 && content is String) {
+      req.response.statusCode = 302;
+      req.response.headers.set('location', content);
+      await req.response.close();
+      return;
+    }
+    if (toBytes == 3 && content is String) {
+      try {
+        final reqHeaders = <String, String>{};
+        final range = req.headers.value('range');
+        if (range != null) reqHeaders['range'] = range;
+        final resp = await _dio.get(content,
+            options: Options(
+                responseType: ResponseType.stream, headers: reqHeaders));
+        req.response.statusCode = resp.statusCode ?? 200;
+        await req.response.addStream((resp.data as ResponseBody).stream);
+        await req.response.close();
+      } catch (_) {
+        req.response.statusCode = 500;
+        await req.response.close();
+      }
+      return;
+    }
+    if (content is Uint8List) {
+      req.response.add(content);
+    } else if (content is List<int>) {
+      req.response.add(content);
+    } else {
+      req.response.add(utf8.encode(content?.toString() ?? ''));
+    }
+    await req.response.close();
+  }
+
+  // ============================================================
+  // bridge
+  // ============================================================
+  Future<Object?> _handleBridge(Object? message) async {
+    final msg = (message as Map).cast<String, dynamic>();
+    switch (msg['action']) {
+      case 'req':
+        return await _doDioRequest(msg['url'] as String,
+            (msg['options'] as Map?)?.cast<String, dynamic>() ?? {});
+      case 'loadAsset':
+        return await _loadAsset(msg['path'] as String);
+      case 'getProxy':
+        return 'http://127.0.0.1:$_proxyPort/proxy?do=js';
+      case 'evalModule':
+        final code = msg['code'] as String;
+        final path = (msg['path'] as String?) ?? '';
+        final name = path.isNotEmpty
+            ? path
+            : '__eval_${DateTime.now().microsecondsSinceEpoch}';
+        _engine!.registerModule(name, code);
+        return name;
+      default:
+        return null;
+    }
+  }
+
+  Future<Map<String, dynamic>> _doDioRequest(
+      String url, Map<String, dynamic> opts) async {
+    final method = (opts['method'] ?? 'GET').toString().toUpperCase();
+    final headers = <String, String>{};
+    (opts['headers'] as Map?)?.forEach((k, v) {
+      if (v == null) return;
+      final lk = k.toString().toLowerCase();
+      if (lk == 'host' || lk == 'connection') return;
+      headers[k.toString()] = v is List ? v.join(', ') : v.toString();
+    });
+    if (!headers.keys.any((k) => k.toLowerCase() == 'user-agent')) {
+      headers['User-Agent'] = 'Mozilla/5.0 (Linux; Android 11) '
+          'AppleWebKit/537.36 (KHTML, like Gecko) Mobile Safari/537.36';
+    }
+    dynamic body = opts['body'];
+    if (opts['data'] != null) {
+      body = jsonEncode(opts['data']);
+      headers.putIfAbsent('Content-Type', () => 'application/json');
+    }
+    final bufferType = opts['buffer'];
+    final resp = await _dio.request(url,
+        options: Options(
+          method: method,
+          headers: headers,
+          responseType: ResponseType.bytes,
+          validateStatus: (_) => true,
+        ),
+        data: body);
+    final bytes = (resp.data as List).cast<int>();
+    final respHeaders = <String, String>{};
+    resp.headers.forEach((k, v) {
+      if (v.isNotEmpty) respHeaders[k] = v.first;
+    });
+    if (bufferType == 1) {
+      return {
+        'content': Uint8List.fromList(bytes),
+        'headers': respHeaders,
+        'buffer': 1
+      };
+    }
+    if (bufferType == 2) {
+      return {
+        'content': base64Encode(bytes),
+        'headers': respHeaders,
+        'buffer': 2
+      };
+    }
+    return {
+      'content': utf8.decode(bytes, allowMalformed: true),
+      'headers': respHeaders
+    };
+  }
+
+  Future<Uint8List> _loadAsset(String rawPath) async {
+    final cached = _assetCache[rawPath];
+    if (cached != null) return cached;
+    final base = _currentSourceBase;
+    if (rawPath.startsWith('http://') || rawPath.startsWith('https://')) {
+      return _loadAssetHttp(rawPath, rawPath);
+    }
+    if (base == null || base.isEmpty) {
+      throw Exception('无 base URL: $rawPath');
+    }
+    if (!base.startsWith('http://') && !base.startsWith('https://')) {
+      final rel = rawPath.startsWith('./') ? rawPath.substring(2) : rawPath;
+      final sep =
+          base.endsWith(Platform.pathSeparator) ? '' : Platform.pathSeparator;
+      final fullPath = '$base$sep$rel';
+      final bytes = await File(fullPath).readAsBytes();
+      _assetCache[rawPath] = bytes;
+      return bytes;
+    }
+    return _loadAssetHttp(rawPath, Uri.parse(base).resolve(rawPath).toString());
+  }
+
+  Future<Uint8List> _loadAssetHttp(String cacheKey, String url) async {
+    final resp = await _dio.get<List<int>>(url,
+        options: Options(responseType: ResponseType.bytes));
+    if (resp.statusCode != 200) {
+      throw Exception('loadAsset HTTP ${resp.statusCode}: $url');
+    }
+    final bytes = Uint8List.fromList(resp.data ?? <int>[]);
+    if (cacheKey.endsWith('.js') ||
+        cacheKey.endsWith('.mjs') ||
+        cacheKey.endsWith('.cjs') ||
+        cacheKey.endsWith('.wasm') ||
+        cacheKey.contains('wasm') ||
+        cacheKey.contains('worker')) {
+      _assetCache[cacheKey] = bytes;
+    }
+    return bytes;
+  }
+
+  // ============================================================
+  // 源加载与六环节
+  // ============================================================
+  Future<void> _loadSource(String apiUrl, String siteKey,
+      {dynamic ext}) async {
+    _siteVersion++;
+    _siteReady = Completer<void>();
+    _currentKey = siteKey;
+    final version = _siteVersion;
+    try {
+      _assetCache.clear();
+      _segmentCache.clear();
+      _segmentInflight.clear();
+      final extStr = ext is String ? ext : (ext?.toString() ?? '');
+      String? sourceUrl;
+      String? localPath;
+      String? inlineCode;
+      if (extStr.isNotEmpty) {
+        if (extStr.startsWith('http://') || extStr.startsWith('https://')) {
+          sourceUrl = extStr;
+        } else if (File(extStr).existsSync()) {
+          localPath = extStr;
+          inlineCode = await File(extStr).readAsString();
+        } else if (extStr.contains('export default') ||
+            extStr.contains('defineSource') ||
+            extStr.startsWith('{')) {
+          inlineCode = extStr;
+        }
+      }
+      if (sourceUrl == null && inlineCode == null && apiUrl.isNotEmpty) {
+        if (File(apiUrl).existsSync()) {
+          localPath = apiUrl;
+          inlineCode = await File(apiUrl).readAsString();
+        } else {
+          sourceUrl = apiUrl;
+        }
+      }
+      if (sourceUrl == null && inlineCode == null) return;
+
+      String code;
+      if (inlineCode != null) {
+        code = inlineCode;
+        _currentSourceBase =
+            localPath != null ? File(localPath).parent.path : null;
+      } else {
+        final resp = await _dio.get<List<int>>(sourceUrl!,
+            options: Options(responseType: ResponseType.bytes));
+        code = utf8.decode((resp.data ?? []), allowMalformed: true);
+        final uri = Uri.parse(sourceUrl);
+        final p = uri.path;
+        _currentSourceBase = uri
+            .replace(
+                path: p.contains('/')
+                    ? p.substring(0, p.lastIndexOf('/') + 1)
+                    : '/')
+            .toString();
+      }
+      if (code.trimLeft().startsWith('H4sI')) {
+        try {
+          code = utf8.decode(
+              gzip.decode(base64Decode(code.replaceAll(RegExp(r'\s'), ''))),
+              allowMalformed: true);
+        } catch (_) {}
+      }
+      final r = await _engine!.callAsync('__drpy3Load', [
+        code,
+        siteKey,
+        sourceUrl ?? '',
+        extStr.isNotEmpty ? jsonEncode(extStr) : null,
+        siteKey
+      ]);
+      final failed =
+          r is String && r.contains('__drpy3_error');
+      print('[drpy3-worker] 源加载${failed ? '失败' : '成功'}: $siteKey');
+      if (failed) print('[drpy3-worker] 详情: $r');
+    } catch (e) {
+      print('[drpy3-worker] 源加载异常: $siteKey - $e');
+    } finally {
+      if (version == _siteVersion &&
+          _siteReady != null &&
+          !_siteReady!.isCompleted) {
+        _siteReady!.complete();
+      }
+    }
+  }
+
+  Future<Map<String, dynamic>> _callSource(
+      String fn, List<dynamic> args) async {
+    final ready = _siteReady;
+    if (ready != null && !ready.isCompleted) {
+      try {
+        await ready.future.timeout(const Duration(seconds: 90));
+      } catch (_) {}
+    }
+    if (_engine == null) return {'success': false, 'error': 'engine null'};
+
+    final argsJson = jsonEncode(args);
+    try {
+      final resultJson = await _engine!.callAsync('__drpy3Call', [
+        _currentKey ?? '',
+        fn,
+        argsJson,
+      ]);
+      if (resultJson is String) {
+        final parsed = jsonDecode(resultJson);
+        if (parsed is Map) {
+          if (parsed.containsKey('__drpy3_error')) {
+            final err = parsed['__drpy3_error'];
+            return {
+              'success': false,
+              'error': err is Map ? err['error']?.toString() : err.toString()
+            };
+          }
+          return parsed.cast<String, dynamic>();
+        }
+      }
+      return {'success': false, 'error': 'unexpected'};
+    } catch (e) {
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  /// 用于日志：URL 只保留文件名（如 0.ts、2000.m3u8），长 URL 不刷屏。
+  /// 失败时调用方自己输出完整 URL，保留排查能力。
+  String _shortName(String url) {
+    if (url.isEmpty) return '';
+    final path = url.split('?').first;
+    final segs = path.split('/');
+    final last = segs.isNotEmpty ? segs.last : path;
+    return last.isEmpty ? path : last;
   }
 }

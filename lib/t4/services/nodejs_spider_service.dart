@@ -5,6 +5,7 @@ import 'package:yuanying/t4/models/video_detail.dart';
 import 'package:yuanying/t4/services/i_spider_service.dart';
 import 'package:yuanying/nodejs/nodejs_service.dart';
 import 'package:yuanying/services/catvod_log_service.dart';
+import 'package:yuanying/utils/error_formatter.dart';
 
 class NodeJSSpiderService implements ISpiderService {
   String? _currentKey;
@@ -20,6 +21,29 @@ class NodeJSSpiderService implements ISpiderService {
 
   void _log(String msg) {
     _logService.addLog('[SpiderService] $msg');
+  }
+
+  /// 确保 Node 进程 + 当前 spider 就绪
+  ///
+  /// 供刷新数据等被动场景使用：
+  ///   - 关闭插件后重新开启，用户不切源只刷新
+  ///   - Node 进程崩溃自动重启后
+  Future<void> _ensureNodeReady() async {
+    final didRestart = await _nodejs.ensureReady();
+    if (!didRestart) return;
+
+    // Node 进程重启后服务端状态丢失，重新切到当前 spider
+    final key = _currentKey;
+    if (key == null || key.isEmpty) return;
+
+    final parts = key.split('_');
+    if (parts.length < 2) return;
+
+    final spiderKey = parts[1];
+    final type = parts.length > 2 ? int.tryParse(parts[2]) ?? 3 : 3;
+    _log('Node 刚重启，重新切 spider: key=$spiderKey, type=$type');
+    _nodejs.setCurrentSpider(spiderKey, type, apiBase: _baseUrl ?? '');
+    await _nodejs.initSpider();
   }
 
   @override
@@ -74,12 +98,13 @@ class NodeJSSpiderService implements ISpiderService {
   Future<Map<String, dynamic>> fetchHome({int filter = 1}) async {
     _log('📡 fetchHome: filter=$filter');
     try {
+      await _ensureNodeReady();
       final result = await _nodejs.getHomeContent();
       _log('✅ fetchHome success, keys: ${result.keys}');
       return result;
     } catch (e) {
       _log('❌ fetchHome error: $e');
-      rethrow;
+      return {'error': ErrorFormatter.formatException(e)};
     }
   }
 
@@ -102,6 +127,7 @@ class NodeJSSpiderService implements ISpiderService {
       }
     }
     try {
+      await _ensureNodeReady();
       final result = await _nodejs.getCategoryContent(
         categoryId: cateId,
         page: page,
@@ -111,7 +137,7 @@ class NodeJSSpiderService implements ISpiderService {
       return result;
     } catch (e) {
       _log('❌ fetchCate error: $e');
-      rethrow;
+      return {'error': ErrorFormatter.formatException(e)};
     }
   }
 
@@ -133,6 +159,7 @@ class NodeJSSpiderService implements ISpiderService {
   Future<VideoDetail?> getDetail({required String vodId, required String pwd}) async {
     _log('📖 getDetail: vodId=$vodId');
     try {
+      await _ensureNodeReady();
       final result = await _nodejs.getVideoDetail(videoId: vodId);
       final list = result['list'];
       if (list is List && list.isNotEmpty) {
@@ -163,6 +190,7 @@ class NodeJSSpiderService implements ISpiderService {
   Future<Map<String, dynamic>> fetchDetail(String ids) async {
     _log('📖 fetchDetail: ids=$ids');
     try {
+      await _ensureNodeReady();
       final result = await _nodejs.getVideoDetail(videoId: ids);
       _log('✅ fetchDetail success');
       return result;
@@ -180,6 +208,7 @@ class NodeJSSpiderService implements ISpiderService {
   }) async {
     _log('🎬 getPlayUrl: playParams=$playParams, flag=$flag');
     try {
+      await _ensureNodeReady();
       final result = await _nodejs.getPlayUrl(
         videoId: '',
         flag: flag,
@@ -217,6 +246,7 @@ class NodeJSSpiderService implements ISpiderService {
   Future<Map<String, dynamic>> fetchPlayUrl(String play, {String? flag}) async {
     _log('🎬 fetchPlayUrl: play=$play, flag=$flag');
     try {
+      await _ensureNodeReady();
       final result = await _nodejs.getPlayUrl(
         videoId: '',
         flag: flag ?? '',
@@ -240,6 +270,7 @@ class NodeJSSpiderService implements ISpiderService {
   }) async {
     _log('🔍 searchDirect: baseUrl=$baseUrl, wd="$wd", page=$page');
     try {
+      await _ensureNodeReady();
       final result = await _nodejs.search(keyword: wd, page: page);
       final list = result['list'] as List?;
       _log('✅ searchDirect success, count=${list?.length ?? 0}');

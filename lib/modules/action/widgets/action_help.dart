@@ -3,11 +3,11 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:get/get.dart';
 
 import '../models/action_config.dart';
 import '../models/button_type.dart';
 import '../utils/action_parser.dart';
+import 'action_button_bar.dart';
 
 /// 帮助信息 Action
 /// 严格对应 DrPlayer 的 HelpAction.vue
@@ -796,49 +796,26 @@ class _HelpActionState extends State<HelpAction> {
   }
 
   Widget _buildButtons(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+    final colorScheme = Theme.of(context).colorScheme;
 
-    final children = <Widget>[];
-
-    // 复制按钮
-    children.add(
-      TextButton.icon(
-        onPressed: _copyContent,
-        icon: const Icon(Icons.copy, size: 18),
-        label: const Text('复制内容'),
-      ),
-    );
-
-    if (_showCancelButton) {
-      children.add(
-        TextButton(
-          onPressed: _handleClose,
-          child: const Text('取消'),
-        ),
-      );
-    }
-
-    if (_showOkButton) {
-      children.add(
-        ElevatedButton(
-          onPressed: _handleClose,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: colorScheme.primary,
-            foregroundColor: colorScheme.onPrimary,
+    return ActionButtonBar(
+      showCancel: _showCancelButton,
+      showOk: _showOkButton,
+      // Help 场景下"取消"和"确定"语义一致，都是关闭
+      onCancel: _handleClose,
+      onOk: _handleClose,
+      leadingActions: [
+        TextButton.icon(
+          onPressed: _copyContent,
+          icon: const Icon(Icons.copy, size: 16),
+          label: const Text('复制内容'),
+          style: TextButton.styleFrom(
+            foregroundColor: colorScheme.primary,
+            minimumSize: const Size(0, 40),
+            padding: const EdgeInsets.symmetric(horizontal: 10),
           ),
-          child: const Text('确定'),
         ),
-      );
-    }
-
-    return Container(
-      margin: const EdgeInsets.only(top: 8),
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.end,
-        children: children,
-      ),
+      ],
     );
   }
 }

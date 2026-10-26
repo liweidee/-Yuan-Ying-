@@ -718,6 +718,14 @@ class QjsDrpy2Service implements ISpiderService {
       if (ext.startsWith('http://') || ext.startsWith('https://')) {
         final r = _syncFetch(proxyPort, ext, {});
         ruleContent = (r['content'] as String?) ?? '';
+      } else if (File(ext).existsSync()) {
+        // 本地文件源
+        try {
+          ruleContent = await File(ext).readAsString();
+          debugPrint('[QjsDrpy2] 本地源文件: $ext (${ruleContent.length} chars)');
+        } catch (e) {
+          debugPrint('[QjsDrpy2] 读取本地源失败: $e');
+        }
       } else if (ext.contains('var rule') || ext.contains('{')) {
         ruleContent = ext;
       } else {
@@ -725,8 +733,18 @@ class QjsDrpy2Service implements ISpiderService {
         ruleContent = (r['content'] as String?) ?? '';
       }
     } else if (apiUrl.isNotEmpty) {
-      final r = _syncFetch(proxyPort, apiUrl, {});
-      ruleContent = (r['content'] as String?) ?? '';
+      if (File(apiUrl).existsSync()) {
+        // 手动源场景：apiUrl 是本地文件路径
+        try {
+          ruleContent = await File(apiUrl).readAsString();
+          debugPrint('[QjsDrpy2] 本地源文件（apiUrl）: $apiUrl (${ruleContent.length} chars)');
+        } catch (e) {
+          debugPrint('[QjsDrpy2] 读取本地源失败（apiUrl）: $e');
+        }
+      } else {
+        final r = _syncFetch(proxyPort, apiUrl, {});
+        ruleContent = (r['content'] as String?) ?? '';
+      }
     }
 
     if (ruleContent.isEmpty) {

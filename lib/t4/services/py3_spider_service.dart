@@ -1,18 +1,26 @@
+// lib/t4/services/py3_spider_service.dart
+
 import 'dart:convert';
 import 'dart:io';
-import 'package:get/get.dart';
+
+import 'package:yuanying/modules/plugin_center/services/install_manager.dart';
 import 'package:yuanying/t4/models/play_url.dart';
 import 'package:yuanying/t4/models/video_detail.dart';
 import 'package:yuanying/t4/services/i_spider_service.dart';
 import 'package:yuanying/t4/services/python_runtime.dart';
+import 'package:yuanying/utils/error_formatter.dart';
+import 'package:yuanying/utils/business_exception.dart';
 
-/// py3 爬虫服务实现类
-/// 通过调用 PythonRuntime 启动子进程执行爬虫脚本
-/// 注意：仅在桌面端有效，移动端会抛出异常
+/// py3 爬虫服务
+/// - Android：走 DsPlayer-Python-plugin APK（AIDL）
+/// - 桌面端：走插件中心 python-win 插件（常驻 HTTP worker）
 class Py3SpiderService implements ISpiderService {
   final String _siteKey;
   String? _apiUrl;
   dynamic _ext;
+
+  /// Android：APK 内加载后的 key（loadSource 返回）
+  String? _androidKey;
 
   Py3SpiderService(this._siteKey) {
     print('[Py3SpiderService][$_siteKey] 实例创建');
@@ -20,9 +28,10 @@ class Py3SpiderService implements ISpiderService {
 
   @override
   Future<void> switchSite(String apiUrl, String siteKey, {dynamic ext}) async {
-    print('[Py3SpiderService][$siteKey] 切换站点');
+    print('[Py3SpiderService][$siteKey] 切换站点: $apiUrl');
     _apiUrl = apiUrl;
     _ext = ext;
+    _androidKey = null;
   }
 
   @override
@@ -31,145 +40,170 @@ class Py3SpiderService implements ISpiderService {
   @override
   void setBaseUrl(String url) {}
 
-  /// 内部调用 Python 的通用方法
-  /// 将方法名、API URL、扩展参数等封装为 Map，传递给 PythonRuntime
-  Future<Map<String, dynamic>> _callPython(String method, {Map<String, dynamic>? args}) async {
-    // 平台检查：移动端不支持，直接抛出异常
-    if (!Platform.isWindows && !Platform.isMacOS && !Platform.isLinux) {
-      throw Exception('py3 爬虫仅支持桌面端（Windows / macOS / Linux）');
-    }
+  String get _extendStr {
+    if (_ext is String) return _ext as String;
+    if (_ext is Map) return json.encode(_ext);
+    return _ext?.toString() ?? '';
+  }
 
+  Future<Map<String, dynamic>> _call(String method, List<dynamic> args) async {
     if (_apiUrl == null || _apiUrl!.isEmpty) {
-      throw Exception('API URL 未设置');
+      throw const BusinessException('py 源路径未设置');
     }
 
-    // 将 extend 统一转换为 JSON 字符串（保证可哈希）
-    String extendStr;
-    if (_ext is String) {
-      extendStr = _ext;
-    } else if (_ext is Map) {
-      extendStr = json.encode(_ext);
-    } else {
-      extendStr = _ext?.toString() ?? '';
+    // Android：检测 py 插件
+    if (PythonRuntime.isAndroid) {
+      await _ensureAndroidPyPlugin();
+      return _callAndroid(method, args);
     }
 
+    // 桌面端：检测 python-win 插件
+    if (PythonRuntime.isDesktopPlatform) {
+      await _ensureDesktopPythonWin();
+      return _callDesktop(method, args);
+    }
+
+    throw const BusinessException('py 源仅支持 Android / 桌面端');
+  }
+
+  /// Android 端检测 py 插件
+  Future<void> _ensureAndroidPyPlugin() async {
+    final reg = InstallManager.instance.findInstalled('py');
+    if (reg == null) {
+      throw const BusinessException(
+        '未安装 Python 爬虫引擎。请前往「插件中心 → 市场」安装 py 插件后再使用 py 源。',
+      );
+    }
+    final installed = await InstallManager.instance.isInstalledById('py');
+    if (!installed) {
+      throw const BusinessException(
+        'Python 爬虫引擎未正确安装（可能已被系统卸载）。请前往「插件中心」重新安装 py 插件。',
+      );
+    }
+  }
+
+  /// 桌面端检测 python-win 插件
+  Future<void> _ensureDesktopPythonWin() async {
+    final reg = InstallManager.instance.findInstalled('python-win');
+    if (reg == null) {
+      throw const BusinessException(
+        '未安装 Python 运行时（python-win）。请前往「插件中心 → 市场」安装 python-win 插件后再使用 py 源。',
+      );
+    }
+    if (!PythonRuntime.isDesktopRuntimeAvailable()) {
+      throw const BusinessException(
+        'python-win 插件缺少 bin/python.exe 或 bin/py_worker_server.py，请重新安装 python-win 插件。',
+      );
+    }
+  }
+
+  Future<Map<String, dynamic>> _callAndroid(String method, List<dynamic> args) async {
+    if (_androidKey == null) {
+      final file = File(_apiUrl!);
+      if (!await file.exists()) {
+        throw BusinessException('py 源文件不存在: $_apiUrl');
+      }
+      final bytes = await file.readAsBytes();
+      _androidKey = await PythonRuntime.androidLoadSource(bytes, _apiUrl!.split('/').last);
+      if (_androidKey == null) {
+        throw const BusinessException('py 源加载失败（请确认已安装 DsPlayer-Python-plugin）');
+      }
+    }
+
+    final raw = await PythonRuntime.androidCall(
+      key: _androidKey!,
+      method: method,
+      proxyUrl: _extendStr,
+      args: args,
+    );
+
+    final Map<String, dynamic> envelope;
+    try {
+      envelope = jsonDecode(raw) as Map<String, dynamic>;
+    } catch (e) {
+      throw Exception('py 返回非 JSON: $raw');
+    }
+    if (envelope['success'] != true) {
+      throw Exception(
+        ErrorFormatter.formatScriptError(envelope['error'] ?? envelope),
+      );
+    }
+    final result = envelope['result'];
+    if (result is Map) return Map<String, dynamic>.from(result);
+    return {};
+  }
+
+  Future<Map<String, dynamic>> _callDesktop(String method, List<dynamic> args) async {
     final params = {
       'method': method,
       'apiUrl': _apiUrl,
-      'extend': extendStr,
-      'args': args ?? {},
+      'extend': _extendStr,
+      'args': args,
     };
-
-    // 调用 PythonRuntime 执行
-    final resultStr = await PythonRuntime.runSpiderMethod(params);
-
-    print('[Py3SpiderService] Python 原始返回长度: ${resultStr.length}');
-
-    if (resultStr.isEmpty) {
-      throw Exception('Python 返回空结果');
-    }
-
-    try {
-      // 第一层解析：Python 返回的包装 JSON
-      final Map<String, dynamic> result = json.decode(resultStr);
-      if (result['success'] == true) {
-        // 第二层解析：实际业务数据（存于 data 字段，为 JSON 字符串）
-        final data = result['data'];
-        if (data is String) {
-          return json.decode(data);
-        } else {
-          return data ?? {};
+    final resultStr = await PythonRuntime.desktopRunSpiderMethod(params);
+    if (resultStr.isEmpty) throw Exception('Python 返回空结果');
+    final Map<String, dynamic> wrapper = jsonDecode(resultStr) as Map<String, dynamic>;
+    if (wrapper['success'] == true) {
+      final data = wrapper['result'];
+      if (data is String) {
+        try {
+          return jsonDecode(data) as Map<String, dynamic>;
+        } catch (_) {
+          return {'list': []};
         }
-      } else {
-        throw Exception(result['error'] ?? '未知错误');
       }
-    } catch (e) {
-      print('[Py3SpiderService] JSON 解析失败，完整内容: $resultStr');
-      rethrow;
+      if (data is Map) return Map<String, dynamic>.from(data);
+      return {};
     }
+    throw Exception(
+      ErrorFormatter.formatScriptError(wrapper['error'] ?? '未知错误'),
+    );
   }
 
   @override
   Future<Map<String, dynamic>> fetchHome({int filter = 1}) async {
-    return await _callPython('homeContent', args: {'filter': filter});
+    return await _call('home', [filter != 0]);
   }
 
   @override
-  Future<Map<String, dynamic>> fetchCate(
-    String cateId,
-    int page, {
-    String? ext,
-  }) async {
-    final args = {
-      'tid': cateId,
-      'pg': page.toString(),
-      'filter': false,
-      'extend': {},
-    };
+  Future<Map<String, dynamic>> fetchCate(String cateId, int page, {String? ext}) async {
+    final extend = <String, dynamic>{};
     if (ext != null && ext.isNotEmpty) {
-      try {
-        args['extend'] = json.decode(ext);
-      } catch (_) {}
+      try { extend.addAll(jsonDecode(ext) as Map<String, dynamic>); } catch (_) {}
     }
-    return await _callPython('categoryContent', args: args);
+    return await _call('category', [cateId, page, false, extend]);
   }
 
   @override
-  Future<Map<String, dynamic>> search(
-    String wd,
-    int page, {
-    int quick = 0,
-  }) async {
-    return await _callPython('searchContent', args: {
-      'key': wd,
-      'pg': page.toString(),
-    });
+  Future<Map<String, dynamic>> search(String wd, int page, {int quick = 0}) async {
+    return await _call('search', [wd, quick == 1, page]);
   }
 
   @override
-  Future<VideoDetail?> getDetail({
-    required String vodId,
-    required String pwd,
-  }) async {
-    final result = await _callPython('detailContent', args: {
-      'ids': [vodId],
-    });
+  Future<VideoDetail?> getDetail({required String vodId, required String pwd}) async {
+    final result = await _call('detail', [[vodId]]);
     final list = result['list'];
     if (list is List && list.isNotEmpty) {
-      return VideoDetail.fromJson(list[0]);
+      return VideoDetail.fromJson(Map<String, dynamic>.from(list[0] as Map));
     }
     return null;
   }
 
   @override
-  Future<PlayUrl?> getPlayUrl({
-    required String playParams,
-    required String flag,
-    required String pwd,
-  }) async {
-    final result = await _callPython('playerContent', args: {
-      'flag': flag,
-      'videoId': playParams,
-      'vipFlags': [],
-    });
+  Future<PlayUrl?> getPlayUrl({required String playParams, required String flag, required String pwd}) async {
+    final result = await _call('play', [flag, playParams, []]);
+    if (result.isEmpty) return null;
     return PlayUrl.fromJson(result);
   }
 
-  // ===== 以下为接口要求但实际未使用的额外方法 =====
   @override
   Future<Map<String, dynamic>> fetchDetail(String ids) async {
-    return await _callPython('detailContent', args: {
-      'ids': ids,
-    });
+    return await _call('detail', [[ids]]);
   }
 
   @override
   Future<Map<String, dynamic>> fetchPlayUrl(String play, {String? flag}) async {
-    return await _callPython('playerContent', args: {
-      'flag': flag ?? '',
-      'videoId': play,
-      'vipFlags': [],
-    });
+    return await _call('play', [flag ?? '', play, []]);
   }
 
   @override
@@ -180,15 +214,20 @@ class Py3SpiderService implements ISpiderService {
     required int page,
     int quick = 0,
   }) async {
-    // 直接使用 search 方法
-    return await _callPython('searchContent', args: {
-      'key': wd,
-      'pg': page.toString(),
-    });
+    return await _call('search', [wd, quick == 1, page]);
   }
 
-  /// 卸载方法（空实现）
   Future<void> unload() async {
-    print('[Py3SpiderService][$_siteKey] unload 调用（无操作）');
+    if (PythonRuntime.isAndroid) {
+      if (_androidKey != null) {
+        await PythonRuntime.androidUnload(_androidKey!);
+      }
+    } else if (PythonRuntime.isDesktopPlatform) {
+      if (_apiUrl != null && _apiUrl!.isNotEmpty) {
+        await PythonRuntime.desktopUnloadSource(_apiUrl!);
+      }
+    }
+    _androidKey = null;
+    print('[Py3SpiderService][$_siteKey] unload');
   }
 }

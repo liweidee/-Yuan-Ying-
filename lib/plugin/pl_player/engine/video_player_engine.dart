@@ -1077,19 +1077,14 @@ class VideoPlayerEngine implements IPlayerEngine {
 
   @override
   bool get supportsRecording => false;
-
   @override
   bool get supportsExternalSubtitle => false;
-
   @override
   bool get supportsSubtitleExport => false;
-
   @override
   bool get supportsOnlyPlayAudio => false;
-
   @override
   bool get supportsHardwareDecodingSetting => false;
-
   @override
   bool get supportsExternalAudio => false;
 }

@@ -1644,6 +1644,15 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
       autoFullScreenFlag: PlayerPref.autoEnterFullScreen,
     );
 
+    // ===== 失败兜底 =====
+    // 各引擎 setDataSource 内部吞掉异常，只把 dataStatus 置为 error。
+    // 若不检查，会继续走 play() 且保持 autoPlay=true，
+    // 导致手动 UI（含返回 / 主页 / 重试按钮）不显示，最终黑屏无法退出。
+    if (playerController.dataStatus.value == DataStatus.error) {
+      _handlePlayFailure('视频加载失败，请尝试切换线路或内核');
+      return;
+    }
+
     // 应用片头跳过
     await playerController.applySkipStart();
 
@@ -2760,6 +2769,15 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
         seekTo: null,
         vodId: '直链播放',
       );
+
+      // ===== 失败兜底 =====
+      if (playerController.dataStatus.value == DataStatus.error) {
+        autoPlay.value = false;
+        detailError.value = '播放失败：视频加载失败';
+        isLoadingDetail.value = false;
+        return;
+      }
+      
       await playerController.play();
       isPlaying.value = true;
 

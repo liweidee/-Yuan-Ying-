@@ -146,28 +146,30 @@ class _HeaderControlState extends State<HeaderControl> {
                   color: Colors.black.withOpacity(0.8),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   initialValue: PlayerPref.playerEngine,
-                  itemBuilder: (context) {
-                    // 只显示当前平台可用的内核
-                    return PlayerEngineType.values
-                        .where((t) => t.isAvailableOnCurrentPlatform)
-                        .map((type) {
-                      final isCurrent = PlayerPref.playerEngine == type;
-                      return PopupMenuItem<PlayerEngineType>(
-                        value: type,
-                        child: Row(
-                          children: [
-                            Text(
-                              type.displayName,
-                              style: const TextStyle(color: Colors.white, fontSize: 13),
-                            ),
-                            if (isCurrent) const Spacer(),
-                            if (isCurrent)
-                              const Icon(Icons.check, color: Colors.white, size: 16),
-                          ],
-                        ),
-                      );
-                    }).toList();
-                  },
+                  itemBuilder: (context) => [
+                    PopupMenuItem<PlayerEngineType>(
+                      value: PlayerEngineType.mediaKit,
+                      child: Row(
+                        children: [
+                          Text('MPV', style: const TextStyle(color: Colors.white, fontSize: 13)),
+                          if (PlayerPref.playerEngine == PlayerEngineType.mediaKit) const Spacer(),
+                          if (PlayerPref.playerEngine == PlayerEngineType.mediaKit)
+                            const Icon(Icons.check, color: Colors.white, size: 16),
+                        ],
+                      ),
+                    ),
+                    PopupMenuItem<PlayerEngineType>(
+                      value: PlayerEngineType.fvp,
+                      child: Row(
+                        children: [
+                          Text('MDK', style: const TextStyle(color: Colors.white, fontSize: 13)),
+                          if (PlayerPref.playerEngine == PlayerEngineType.fvp) const Spacer(),
+                          if (PlayerPref.playerEngine == PlayerEngineType.fvp)
+                            const Icon(Icons.check, color: Colors.white, size: 16),
+                        ],
+                      ),
+                    ),
+                  ],
                   onSelected: (newType) => _switchEngine(newType),
                   child: SizedBox(
                     width: 60,
@@ -178,7 +180,7 @@ class _HeaderControlState extends State<HeaderControl> {
                         const Icon(Icons.play_arrow, size: 14, color: Colors.white),
                         const SizedBox(width: 4),
                         Text(
-                          PlayerPref.playerEngine.displayName,
+                          PlayerPref.playerEngine == PlayerEngineType.fvp ? 'MDK' : 'MPV',
                           style: const TextStyle(
                             color: Colors.white,
                             fontSize: 11,
@@ -507,7 +509,7 @@ class _HeaderControlState extends State<HeaderControl> {
       controller.engineSwitchNotifier.value++;
       
       if (mounted) setState(() {});
-      SmartDialog.showToast('已切换到 ${newType.displayName} 内核');
+      SmartDialog.showToast('已切换到 ${newType == PlayerEngineType.fvp ? 'MDK' : 'MPV'} 内核');
     } catch (e) {
       SmartDialog.dismiss();
       SmartDialog.showToast('切换失败: $e');

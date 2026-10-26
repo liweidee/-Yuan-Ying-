@@ -40,16 +40,17 @@ target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 add_dependencies(${BINARY_NAME} flutter_assemble)
 
 # ============================================================
-# 拷贝 Node.js 运行时和猫影视项目到可执行文件旁
-# 目的：让 Release 目录自带 Node 环境，无需用户单独安装
-# 入口文件兼容 main.js / index.js（与 iOS NodeJSManager.m 兜底一致）
+# 拷贝猫影视 Node 项目到可执行文件旁
+#
+# 说明：
+#   - Node 运行环境（node.exe、npm、node_modules 等）由插件中心的
+#     nodejs-win 插件提供，不再内嵌到 Release 目录
+#   - 本段只拷贝 project（dist/main.js、node_modules 等业务资源）
+#     到 {输出目录}/nodejs/project
+#   - 入口文件兼容 main.js / index.js（与 iOS NodeJSManager.m 兜底一致）
 # ============================================================
 set(NODEJS_SRC_DIR "${CMAKE_SOURCE_DIR}/nodejs")
 set(NODEJS_DST_DIR "$<TARGET_FILE_DIR:${BINARY_NAME}>/nodejs")
-
-if(NOT EXISTS "${NODEJS_SRC_DIR}/runtime/node.exe")
-    message(FATAL_ERROR "[NodeJS] 缺少 ${NODEJS_SRC_DIR}/runtime/node.exe")
-endif()
 
 if(EXISTS "${NODEJS_SRC_DIR}/project/dist/main.js")
     set(NODEJS_ENTRY "main.js")
@@ -61,14 +62,21 @@ endif()
 
 message(STATUS "[NodeJS] 使用入口: ${NODEJS_ENTRY}")
 
+# 可选：清理旧版遗留的 runtime 目录（防止从旧版本升级上来时残留）
+# 如果你不想每次构建都删，注释掉下面这一段即可
+if(EXISTS "${NODEJS_DST_DIR}/runtime")
+    add_custom_command(TARGET ${BINARY_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E remove_directory
+            "${NODEJS_DST_DIR}/runtime"
+        COMMENT "[NodeJS] 清理旧版遗留的 runtime 目录"
+    )
+endif()
+
 add_custom_command(TARGET ${BINARY_NAME} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${NODEJS_SRC_DIR}/runtime"
-        "${NODEJS_DST_DIR}/runtime"
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${NODEJS_SRC_DIR}/project"
         "${NODEJS_DST_DIR}/project"
-    COMMENT "[NodeJS] 拷贝 runtime 和 project 到 ${NODEJS_DST_DIR}"
+    COMMENT "[NodeJS] 拷贝 project 到 ${NODEJS_DST_DIR}"
 )
 
 # ============================================================

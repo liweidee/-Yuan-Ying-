@@ -46,6 +46,7 @@ class Site {
   });
 
   bool get isLocalConfig => source == 'local';
+  bool get isManualConfig => source == 'manual' || key == 'manual_source';
   bool get isLocalFile => source == 'local_file';
   bool get isCatVodConfig => configType == 'catvod';
   bool get isCatVodLocalZip => source == 'catvod_local_zip' && zipFilePath != null;

@@ -238,6 +238,8 @@ class ActionConfig {
   final ActionType? type;
   final String? title;
   final String? msg;
+  /// 富文本消息（优先于 msg）
+  final String? htmlMsg;
   final double? width;
   final double? height;
   final double? bottom;
@@ -297,6 +299,7 @@ class ActionConfig {
     this.type,
     this.title,
     this.msg,
+    this.htmlMsg,
     this.width,
     this.height,
     this.bottom,
@@ -362,12 +365,20 @@ class ActionConfig {
     return null;
   }
 
+  /// 统一的展示消息：优先 htmlMsg，其次 msg。
+  /// 各 Action 组件读取消息内容时统一走这个 getter，避免遗漏 htmlMsg。
+  String? get displayMessage {
+    if (htmlMsg != null && htmlMsg!.isNotEmpty) return htmlMsg;
+    return msg;
+  }
+
   factory ActionConfig.fromJson(Map<String, dynamic> json) {
     return ActionConfig(
       actionId: json['actionId']?.toString() ?? '',
       type: json['type'] != null ? ActionTypeExtension.fromString(json['type'].toString()) : null,
       title: json['title']?.toString(),
       msg: json['msg']?.toString(),
+      htmlMsg: json['htmlMsg']?.toString(),
       width: json['width'] != null ? (json['width'] is int ? (json['width'] as int).toDouble() : json['width']) : null,
       height: json['height'] != null ? (json['height'] is int ? (json['height'] as int).toDouble() : json['height']) : null,
       bottom: json['bottom'] != null ? (json['bottom'] is int ? (json['bottom'] as int).toDouble() : json['bottom']) : null,
@@ -436,6 +447,7 @@ class ActionConfig {
       if (type != null) 'type': type!.toJson,
       if (title != null) 'title': title,
       if (msg != null) 'msg': msg,
+      if (htmlMsg != null) 'htmlMsg': htmlMsg,
       if (width != null) 'width': width,
       if (height != null) 'height': height,
       if (bottom != null) 'bottom': bottom,

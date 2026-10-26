@@ -1,4 +1,5 @@
 // lib/modules/setting/views/setting_page.dart
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:yuanying/core/theme/style.dart';
@@ -42,12 +43,50 @@ class SettingPage extends StatelessWidget {
           const SizedBox(height: 8),
           _buildSettingItem(
             context: context,
+            icon: Icons.folder_open,
+            title: '手动源管理',
+            subtitle: 'py / dr2 / dr3 / cat / xbpq / xyq / html / t4 本地源',
+            onTap: () => Get.toNamed(AppPages.manualSource),
+          ),
+          const SizedBox(height: 8),
+          _buildSettingItem(
+            context: context,
             icon: Icons.live_tv,
             title: '直播配置',
             subtitle: '管理直播源配置（TVBox格式）',
             onTap: () => Get.to(() => const LiveConfigPage()),
           ),
           const SizedBox(height: 8),
+          if (Platform.isWindows || Platform.isAndroid) ...[
+            _buildSettingItem(
+              context: context,
+              icon: Icons.extension_outlined,
+              title: '插件中心',
+              subtitle: '市场 / 插件 / 服务管理',
+              onTap: () => Get.toNamed(AppPages.pluginCenter),
+            ),
+            const SizedBox(height: 8),
+          ],
+          if (Platform.isWindows || Platform.isAndroid) ...[
+            _buildSettingItem(
+              context: context,
+              icon: Icons.code,
+              title: 'Python 爬虫源',
+              subtitle: '管理本地 py 源文件',
+              onTap: () => Get.toNamed(AppPages.pySource),
+            ),
+            const SizedBox(height: 8),
+          ],
+          if (Platform.isWindows || Platform.isAndroid) ...[
+            _buildSettingItem(
+              context: context,
+              icon: Icons.terminal,
+              title: 'PHP-T4 本地服务',
+              subtitle: '管理 PHP-T4 源文件并启动本地服务',
+              onTap: () => Get.toNamed(AppPages.phpT4),
+            ),
+            const SizedBox(height: 8),
+          ],
           _buildSettingItem(
             context: context,
             icon: Icons.video_settings_outlined,

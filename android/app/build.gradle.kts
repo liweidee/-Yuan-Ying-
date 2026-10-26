@@ -54,6 +54,8 @@ android {
     }
 
     buildFeatures {
+        // 启用 AIDL 编译（PythonPluginBridge 依赖 IPySpiderService）
+        aidl = true
         if (project.hasProperty("dev")) {
             resValues = true
         }

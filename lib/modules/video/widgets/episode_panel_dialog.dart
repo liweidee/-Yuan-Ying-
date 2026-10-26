@@ -465,6 +465,11 @@ class _EpisodePanelDialogState extends State<EpisodePanelDialog>
     final colorScheme = theme.colorScheme;
     final primary = colorScheme.primary;
 
+    // 与文字行高严格一致，防止 WidgetSpan 图标把行高撑高
+    const double fontSize = 11;
+    const double lineHeight = 1.2;
+    final double textLine = fontSize * lineHeight; // ≈ 13.2
+
     return GestureDetector(
       onTap: () {
         Navigator.pop(context);
@@ -490,34 +495,56 @@ class _EpisodePanelDialogState extends State<EpisodePanelDialog>
                   width: 0.5,
                 ),
         ),
-        child: Center(
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              if (isCurrentIndex)
-                Icon(
-                  Icons.play_circle_outline,
-                  size: 14,
-                  color: primary,
+        // 保持 Row 的垂直居中，避免 GridView 固定高度下内容顶边被裁切
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(
+              child: Text.rich(
+                TextSpan(
+                  children: [
+                    // 播放图标内嵌到文本流，只占第一行
+                    if (isCurrentIndex) ...[
+                      WidgetSpan(
+                        alignment: PlaceholderAlignment.middle,
+                        // 关键：将占位盒高度限制为文本行高，
+                        // 避免 WidgetSpan 把行高撑高导致选中按钮被裁剪
+                        child: SizedBox(
+                          width: textLine,
+                          height: textLine,
+                          child: FittedBox(
+                            fit: BoxFit.contain,
+                            child: Icon(
+                              Icons.play_circle_outline,
+                              size: 14,
+                              color: primary,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const TextSpan(text: ' '),
+                    ],
+                    TextSpan(text: episode.name),
+                  ],
                 ),
-              if (isCurrentIndex) const SizedBox(width: 4),
-              Flexible(
-                child: Text(
-                  episode.name,
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: isCurrentIndex ? primary : colorScheme.onSurface,
-                    fontWeight: isCurrentIndex ? FontWeight.w600 : FontWeight.normal,
-                    height: 1.2,
-                  ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.left, // 左对齐
+                // 强制统一行高，保证选中/非选中按钮高度一致
+                strutStyle: const StrutStyle(
+                  fontSize: fontSize,
+                  height: lineHeight,
+                  forceStrutHeight: true,
+                ),
+                style: TextStyle(
+                  fontSize: fontSize,
+                  color: isCurrentIndex ? primary : colorScheme.onSurface,
+                  fontWeight: isCurrentIndex ? FontWeight.w600 : FontWeight.normal,
+                  height: lineHeight,
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

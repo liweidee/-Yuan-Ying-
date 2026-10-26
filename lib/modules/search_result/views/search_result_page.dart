@@ -162,6 +162,11 @@ class _SearchResultPageState extends State<SearchResultPage> {
 
   // ===== 左侧边栏 =====
   Widget _buildLeftSidebar(BuildContext context) {
+    // 源内搜索：只有一项，隐藏侧栏
+    if (controller.selfSearch) {
+      return const SizedBox.shrink();
+    }
+
     final colorScheme = Theme.of(context).colorScheme;
 
     return Container(

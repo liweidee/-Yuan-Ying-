@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:get/get.dart';
 import 'package:json5/json5.dart';
 import 'package:yuanying/t4/models/video_item.dart';
@@ -14,6 +15,38 @@ import 'dart:convert';
 class XbpqService extends T3JsonAdapter {
   XbpqService(String id, String api, String extUrl, List<String> categories)
       : super(id, api, extUrl, categories);
+
+  @override
+  Future<void> loadConfig() async {
+    // 本地文件路径：直接读文件，不走 dio
+    if (!extUrl.startsWith('http://') && !extUrl.startsWith('https://')) {
+      try {
+        final file = File(extUrl);
+        if (!file.existsSync()) {
+          print('加载 T3 配置失败: 本地文件不存在 $extUrl');
+          return;
+        }
+        String rawData = await file.readAsString();
+        // 去除 UTF-8 BOM 头
+        if (rawData.startsWith('\uFEFF')) {
+          rawData = rawData.substring(1);
+        }
+        // 解析 JSON5
+        final decoded = JSON5.parse(rawData);
+        if (decoded is Map) {
+          config = Map<String, dynamic>.from(decoded);
+          print('[XbpqService] 本地配置加载成功: $extUrl (${config.length} keys)');
+        } else {
+          print('JSON5 解析结果不是 Map 类型: $extUrl');
+        }
+      } catch (e) {
+        print('加载 T3 本地配置失败: $e');
+      }
+      return;
+    }
+    // HTTP URL：走父类逻辑
+    return super.loadConfig();
+  }
 
   @override
   Future<void> init() async {

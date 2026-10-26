@@ -2,13 +2,14 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 
 import '../models/action_config.dart';
 import '../utils/action_parser.dart';
 import '../models/button_type.dart';
 import 'action_renderer.dart';
+import 'action_button_bar.dart';
+import 'action_chip_style.dart';
 
 /// 单项输入 Action
 /// 严格对应 DrPlayer 的 InputAction.vue
@@ -248,14 +249,8 @@ class _InputActionState extends State<InputAction> {
     _focusNode.requestFocus();
   }
 
-  void _onImageTap(TapDownDetails details) {
-    if (!widget.config.imageClickCoord) return;
-
-    final RenderBox box = context.findRenderObject() as RenderBox;
-    final localPos = box.globalToLocal(details.globalPosition);
-    final x = localPos.dx.round();
-    final y = localPos.dy.round();
-
+  /// 图片点击回调：接收"图片原始像素坐标"
+  void _handleImageTap(int x, int y) {
     setState(() {
       _imageCoords = Offset(x.toDouble(), y.toDouble());
       final newCoord = '$x,$y';
@@ -282,121 +277,9 @@ class _InputActionState extends State<InputAction> {
     }
   }
 
-  void _openTextEditor() {
-    final overlayContext = Overlay.of(context);
-    final editorController = TextEditingController(text: _inputValue);
-    String tempText = editorController.text;
-
-    OverlayEntry? overlayEntry;
-
-    overlayEntry = OverlayEntry(
-      builder: (context) => Material(
-        color: Colors.black.withOpacity(0.5),
-        child: Center(
-          child: Container(
-            width: _getEditorWidth(context),
-            height: MediaQuery.of(context).size.height * 0.6,
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surface,
-              borderRadius: BorderRadius.circular(16),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.2),
-                  blurRadius: 20,
-                  offset: const Offset(0, 10),
-                ),
-              ],
-            ),
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '大文本编辑器',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
-                    color: Theme.of(context).colorScheme.onSurface,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Expanded(
-                  child: TextField(
-                    controller: editorController,
-                    maxLines: null,
-                    expands: true,
-                    decoration: InputDecoration(
-                      hintText: '请输入文本内容...',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      contentPadding: const EdgeInsets.all(12),
-                    ),
-                    onChanged: (value) {
-                      tempText = value;
-                    },
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    TextButton(
-                      onPressed: () {
-                        overlayEntry?.remove();
-                      },
-                      style: TextButton.styleFrom(
-                        foregroundColor: Theme.of(context).colorScheme.onSurface,
-                      ),
-                      child: const Text('取消'),
-                    ),
-                    const SizedBox(width: 8),
-                    ElevatedButton(
-                      onPressed: () {
-                        setState(() {
-                          _inputValue = tempText;
-                          _controller.text = tempText;
-                          _errorMessage = '';
-                        });
-                        _validateInput();
-                        overlayEntry?.remove();
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Theme.of(context).colorScheme.primary,
-                        foregroundColor: Theme.of(context).colorScheme.onPrimary,
-                      ),
-                      child: const Text('确定'),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-
-    overlayContext.insert(overlayEntry!);
-  }
-
-  // 添加在类中作为私有方法
-  double _getEditorWidth(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isMobile = screenWidth < 600;
-    
-    if (isMobile) {
-      return (screenWidth * 0.85).clamp(300.0, 500.0);
-    } else {
-      return (560.0).clamp(400.0, screenWidth * 0.8);
-    }
-  }
-
   // 响应共享状态：消息更新和重置
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-
     return Obx(() {
       // 处理重置信号（来自 __keep__ 的 reset）
       if (_renderer.shouldReset.value) {
@@ -450,8 +333,7 @@ class _InputActionState extends State<InputAction> {
   }
 
   Widget _buildMessage(BuildContext context, String message) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+    final colorScheme = Theme.of(context).colorScheme;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -484,8 +366,7 @@ class _InputActionState extends State<InputAction> {
   }
 
   Widget _buildImage(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+    final colorScheme = Theme.of(context).colorScheme;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -494,50 +375,17 @@ class _InputActionState extends State<InputAction> {
         color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
         borderRadius: BorderRadius.circular(8),
       ),
-      child: GestureDetector(
-        onTapDown: widget.config.imageClickCoord ? _onImageTap : null,
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(4),
-          child: Align(
-            alignment: Alignment.center,
-            child: Image.network(
-              widget.config.imageUrl!,
-              height: widget.config.imageHeight ?? 200,
-              fit: BoxFit.contain,
-              loadingBuilder: (context, child, loadingProgress) {
-                if (loadingProgress == null) return child;
-                return Container(
-                  height: widget.config.imageHeight ?? 200,
-                  alignment: Alignment.center,
-                  child: const CircularProgressIndicator(),
-                );
-              },
-              errorBuilder: (context, error, stackTrace) {
-                return Container(
-                  height: widget.config.imageHeight ?? 200,
-                  alignment: Alignment.center,
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.broken_image, size: 48, color: colorScheme.outline),
-                      const SizedBox(height: 8),
-                      Text('图片加载失败',
-                        style: TextStyle(fontSize: 12, color: colorScheme.outline),
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
-          ),
-        ),
+      child: _ClickableImage(
+        url: widget.config.imageUrl!,
+        displayHeight: (widget.config.imageHeight ?? 200).toDouble(),
+        clickCoord: widget.config.imageClickCoord,
+        onTap: _handleImageTap,
       ),
     );
   }
 
   Widget _buildQrcode(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+    final colorScheme = Theme.of(context).colorScheme;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -585,8 +433,7 @@ class _InputActionState extends State<InputAction> {
   }
 
   Widget _buildInput(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+    final colorScheme = Theme.of(context).colorScheme;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -603,11 +450,6 @@ class _InputActionState extends State<InputAction> {
                 borderRadius: BorderRadius.circular(8),
               ),
               errorText: _hasError ? _errorMessage : null,
-              suffixIcon: IconButton(
-                icon: const Icon(Icons.open_in_full),
-                onPressed: _openTextEditor,
-                tooltip: '打开大文本编辑器',
-              ),
             ),
             onChanged: _onInputChanged,
           ),
@@ -623,11 +465,6 @@ class _InputActionState extends State<InputAction> {
                 borderRadius: BorderRadius.circular(8),
               ),
               errorText: _hasError ? _errorMessage : null,
-              suffixIcon: IconButton(
-                icon: const Icon(Icons.open_in_full),
-                onPressed: _openTextEditor,
-                tooltip: '打开大文本编辑器',
-              ),
             ),
             onChanged: _onInputChanged,
           ),
@@ -648,9 +485,6 @@ class _InputActionState extends State<InputAction> {
   }
 
   Widget _buildQuickSelect(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       child: Wrap(
@@ -658,17 +492,11 @@ class _InputActionState extends State<InputAction> {
         runSpacing: 6,
         children: _quickSelectOptions.map((option) {
           final isSelected = _inputValue == option.value;
-          return ChoiceChip(
-            label: Text(option.name),
-            selected: isSelected,
-            onSelected: (_) => _selectQuickOption(option),
-            backgroundColor: colorScheme.surfaceContainerHighest,
-            selectedColor: colorScheme.primaryContainer,
-            labelStyle: TextStyle(
-              fontSize: 12,
-              color: isSelected ? colorScheme.primary : colorScheme.onSurface,
-            ),
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          return buildActionSelectChip(
+            context: context,
+            label: option.name,
+            isSelected: isSelected,
+            onTap: () => _selectQuickOption(option),
           );
         }).toList(),
       ),
@@ -676,8 +504,7 @@ class _InputActionState extends State<InputAction> {
   }
 
   Widget _buildTimeout(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+    final colorScheme = Theme.of(context).colorScheme;
 
     return Container(
       margin: const EdgeInsets.only(top: 8),
@@ -721,53 +548,14 @@ class _InputActionState extends State<InputAction> {
   }
 
   Widget _buildButtons(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-
-    final children = <Widget>[];
-
-    if (_showCancelButton) {
-      children.add(
-        TextButton(
-          onPressed: _handleCancel,
-          child: const Text('取消'),
-        ),
-      );
-    }
-
-    if (_showResetButton) {
-      children.add(
-        TextButton(
-          onPressed: _handleReset,
-          child: const Text('重置'),
-        ),
-      );
-    }
-
-    if (_showOkButton) {
-      children.add(
-        ElevatedButton(
-          onPressed: _isValid ? _handleSubmit : null,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: _isValid ? colorScheme.primary : colorScheme.outline,
-            foregroundColor: _isValid ? colorScheme.onPrimary : colorScheme.onSurface,
-          ),
-          child: const Text('确定'),
-        ),
-      );
-    }
-
-    if (children.isEmpty) {
-      return const SizedBox.shrink();
-    }
-
-    return Container(
-      margin: const EdgeInsets.only(top: 16),
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.end,
-        children: children,
-      ),
+    return ActionButtonBar(
+      showCancel: _showCancelButton,
+      showReset: _showResetButton,
+      showOk: _showOkButton,
+      okEnabled: _isValid,
+      onCancel: _handleCancel,
+      onReset: _handleReset,
+      onOk: _handleSubmit,
     );
   }
 
@@ -782,5 +570,184 @@ class _InputActionState extends State<InputAction> {
       default:
         return TextInputType.text;
     }
+  }
+}
+
+// ============================================================
+// 支持"点击坐标"的图片组件
+// ============================================================
+
+/// 场景：验证码点击、图片坐标采集
+///
+/// - 坐标输出为"图片原始像素坐标"（服务端期望的坐标系）
+/// - 无论图片被 `imageHeight` 缩放成什么尺寸，坐标都会换算回原始像素
+/// - `BoxFit.contain` 的居中留白会被自动扣除
+/// - 点击落在留白区域会被忽略
+class _ClickableImage extends StatefulWidget {
+  const _ClickableImage({
+    required this.url,
+    required this.displayHeight,
+    required this.clickCoord,
+    required this.onTap,
+  });
+
+  final String url;
+
+  /// 显示高度（对应 config.imageHeight）
+  final double displayHeight;
+  final bool clickCoord;
+
+  /// 回调返回"图片原始像素坐标"
+  final void Function(int x, int y) onTap;
+
+  @override
+  State<_ClickableImage> createState() => _ClickableImageState();
+}
+
+class _ClickableImageState extends State<_ClickableImage> {
+  final GlobalKey _boxKey = GlobalKey();
+
+  /// 图片原始像素尺寸（从 ImageStream 拿到）
+  Size? _originalImageSize;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadImageSize();
+  }
+
+  @override
+  void didUpdateWidget(_ClickableImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.url != widget.url) {
+      _originalImageSize = null;
+      _loadImageSize();
+    }
+  }
+
+  /// 通过 ImageStream 拿到图片原始尺寸
+  void _loadImageSize() {
+    final stream = NetworkImage(widget.url).resolve(ImageConfiguration.empty);
+    late final ImageStreamListener listener;
+    listener = ImageStreamListener(
+      (info, _) {
+        if (!mounted) return;
+        setState(() {
+          _originalImageSize = Size(
+            info.image.width.toDouble(),
+            info.image.height.toDouble(),
+          );
+        });
+        stream.removeListener(listener);
+      },
+      onError: (_, __) {
+        stream.removeListener(listener);
+      },
+    );
+    stream.addListener(listener);
+  }
+
+  void _handleTapDown(TapDownDetails details) {
+    if (!widget.clickCoord) return;
+
+    final renderBox = _boxKey.currentContext?.findRenderObject();
+    if (renderBox is! RenderBox) return;
+
+    final imgSize = _originalImageSize;
+    if (imgSize == null || imgSize.width == 0 || imgSize.height == 0) {
+      // 尺寸未加载完，忽略
+      return;
+    }
+
+    // 1. 布局框尺寸（显示框，固定 height）
+    final boxSize = renderBox.size;
+
+    // 2. 图片原始宽高比
+    final imageRatio = imgSize.width / imgSize.height;
+    final boxRatio = boxSize.width / boxSize.height;
+
+    // 3. BoxFit.contain 的实际显示尺寸（等比例缩放后的显示像素）
+    double displayWidth;
+    double displayHeight;
+    double scale;
+
+    if (imageRatio > boxRatio) {
+      // 图片更宽 → 宽度撑满，上下留白
+      displayWidth = boxSize.width;
+      displayHeight = boxSize.width / imageRatio;
+      scale = displayWidth / imgSize.width;
+    } else {
+      // 图片更高 → 高度撑满，左右留白
+      displayHeight = boxSize.height;
+      displayWidth = boxSize.height * imageRatio;
+      scale = displayHeight / imgSize.height;
+    }
+
+    // 4. 显示区域相对布局框的偏移（居中）
+    final offsetX = (boxSize.width - displayWidth) / 2;
+    final offsetY = (boxSize.height - displayHeight) / 2;
+
+    // 5. 点击位置相对布局框
+    final localPos = renderBox.globalToLocal(details.globalPosition);
+
+    // 6. 相对显示区域
+    final displayX = localPos.dx - offsetX;
+    final displayY = localPos.dy - offsetY;
+
+    // 7. 边界检查：点击落在留白区域
+    if (displayX < 0 ||
+        displayY < 0 ||
+        displayX > displayWidth ||
+        displayY > displayHeight) {
+      return;
+    }
+
+    // 8. 换算到"图片原始像素坐标"
+    final originalX = (displayX / scale).round();
+    final originalY = (displayY / scale).round();
+
+    widget.onTap(originalX, originalY);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return GestureDetector(
+      onTapDown: widget.clickCoord ? _handleTapDown : null,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(4),
+        child: SizedBox(
+          key: _boxKey,
+          width: double.infinity,
+          height: widget.displayHeight,
+          child: Image.network(
+            widget.url,
+            fit: BoxFit.contain,
+            loadingBuilder: (context, child, loadingProgress) {
+              if (loadingProgress == null) return child;
+              return const Center(child: CircularProgressIndicator());
+            },
+            errorBuilder: (context, error, stackTrace) {
+              return Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.broken_image,
+                        size: 48, color: colorScheme.outline),
+                    const SizedBox(height: 8),
+                    Text(
+                      '图片加载失败',
+                      style: TextStyle(
+                          fontSize: 12, color: colorScheme.outline),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ),
+      ),
+    );
   }
 }

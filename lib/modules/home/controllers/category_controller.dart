@@ -7,6 +7,7 @@ import 'package:yuanying/t4/services/i_spider_service.dart';
 import 'package:yuanying/modules/home/controllers/home_controller.dart';
 import 'package:yuanying/t4/services/source_manager.dart';
 import 'package:yuanying/models/common/card_layout_mode.dart';
+import 'package:yuanying/utils/error_formatter.dart';
 
 class CategoryController extends GetxController {
   final String categoryId;
@@ -164,7 +165,7 @@ class CategoryController extends GetxController {
       if (result is Map) {
         final err = result['error']?.toString() ?? '';
         if (err.isNotEmpty) {
-          errorMsg.value = _truncateError(err);
+          errorMsg.value = _truncateError(_ensurePrefix(err));
           isError.value = true;
           return;  // finally 会复位 loading
         }
@@ -215,7 +216,7 @@ class CategoryController extends GetxController {
       if (requestId != _requestId) return;
       print('[CategoryController] error: $e');
       print('[CategoryController] stack: $stack');
-      errorMsg.value = e.toString();
+      errorMsg.value = ErrorFormatter.formatException(e);
       isError.value = true;
     } finally {
       // 只有最新请求才允许复位 loading 状态
@@ -260,6 +261,13 @@ class CategoryController extends GetxController {
     hasLoaded.value = false;
     isLoading.value = true;
     loadData(refresh: true);
+  }
+
+  String _ensurePrefix(String err) {
+    // 已带任何前缀 → 原样返回（幂等）
+    if (ErrorFormatter.hasAnyPrefix(err)) return err;
+    // 未带前缀 → formatSourceError 内部会先尝试分类，再兜底"源返回错误："
+    return ErrorFormatter.formatSourceError(err);
   }
 
   /// 截断错误信息，避免 UI 溢出。

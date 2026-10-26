@@ -5,6 +5,7 @@ import 'package:yuanying/t4/services/t4_api_service.dart';
 import 'package:yuanying/t4/models/video_item.dart';
 import 'package:yuanying/t4/services/source_manager.dart';
 import 'package:yuanying/t4/services/i_spider_service.dart';
+import 'package:yuanying/modules/action/widgets/action_renderer.dart';
 
 /// 分页状态
 class _PaginationState {
@@ -104,10 +105,28 @@ class SearchResultController extends GetxController {
 
   // ===== 更新源选项列表（触发 UI 更新） =====
   void _updateSourceOptions() {
-    final list = <String>['all'];
+    final list = <String>[];
+
+    // 聚合搜索：显示"全部"
+    if (!selfSearch) {
+      list.add('all');
+    }
+
     list.addAll(sourceKeys);
     sourceOptions.value = list;
+
+    // 源内搜索：默认选中第一个（也是唯一一个）
+    if (selfSearch && !sourceKeys.contains(currentSourceKey.value)) {
+      currentSourceKey.value = sourceKeys.isNotEmpty ? sourceKeys.first : 'all';
+    }
   }
+
+  /// 是否为"源内搜索"模式
+  bool selfSearch = false;
+
+  /// 源内搜索时的目标源 key
+  /// 聚合搜索时为 null
+  String? selfSearchTargetKey;
 
   // ===== 初始化 =====
   @override
@@ -124,11 +143,17 @@ class SearchResultController extends GetxController {
     keyword = args['keyword']?.toString() ?? '';
     sourceKeys = (args['sources'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? [];
     onlyDefault = args['onlyDefault'] ?? false;
+    selfSearch = args['selfSearch'] == true;
 
     if (keyword.isEmpty || sourceKeys.isEmpty) {
       isError.value = true;
       errorMsg.value = '搜索参数错误';
       return;
+    }
+
+    // 源内搜索：sourceKeys 里的那一项是目标源 key
+    if (selfSearch) {
+      selfSearchTargetKey = sourceKeys.first;
     }
 
     // 初始化各源分页状态
@@ -188,17 +213,29 @@ class SearchResultController extends GetxController {
       return;
     }
 
-    final api = site['api']?.toString() ?? '';
-    final ext = site['ext'];
-
     try {
-      final result = await _apiService.searchDirect(
-        baseUrl: api,
-        ext: ext,
-        wd: keyword,
-        page: page,
-        quick: 0,
-      );
+      dynamic result;
+
+      if (selfSearch) {
+        // 源内搜索：走 T4 分类接口，t = 关键词
+        final ext = site['ext'];
+        result = await _apiService.fetchCate(
+          keyword,
+          page,
+          ext: ext is String ? ext : null,
+        );
+      } else {
+        // 聚合搜索：原有逻辑
+        final api = site['api']?.toString() ?? '';
+        final ext = site['ext'];
+        result = await _apiService.searchDirect(
+          baseUrl: api,
+          ext: ext,
+          wd: keyword,
+          page: page,
+          quick: 0,
+        );
+      }
 
       final list = _parseVideoList(result, sourceKey);
 
@@ -371,6 +408,45 @@ class SearchResultController extends GetxController {
         SmartDialog.showToast('无法获取播放源');
         return;
       }
+    }
+
+    // Action 卡片：走 ActionRenderer，不跳详情
+    if (item.isAction) {
+      final module = targetSite['key']?.toString() ?? '';
+      final extend = targetSite['ext'];
+      final apiUrl = targetSite['api']?.toString();
+
+      final renderer = Get.find<ActionRenderer>();
+
+      // 1. vod_id 是 JSON（含 actionId），直接弹窗
+      final config = item.actionConfig;
+      if (config != null) {
+        renderer.showAction(
+          config.toJson(),
+          module: module,
+          extend: extend,
+          apiUrl: apiUrl,
+        );
+        return;
+      }
+
+      // 2. vod_id 是纯字符串（如 '夸克扫码' / 'set-cookie'），
+      //    需要先请求服务端 ac=action&action=xxx 拿到真正的配置
+      final raw = item.vodId.trim();
+      if (raw.isNotEmpty &&
+          !raw.startsWith('{') &&
+          !raw.startsWith('[')) {
+        renderer.showStringAction(
+          raw,
+          module: module,
+          extend: extend,
+          apiUrl: apiUrl,
+        );
+        return;
+      }
+
+      SmartDialog.showToast('Action 配置解析失败');
+      return;
     }
 
     // drpy2 / Catvod 且非当前源，拒绝跳转

@@ -49,6 +49,10 @@ class _HomePageState extends CommonPageState<HomePage>
   late final SourceManager sourceManager;
   late final ActionRenderer actionRenderer;
 
+  /// 防止"一次点击触发多次 _navigateToDetail"导致弹窗重复。
+  /// 只在 Action 卡片分支生效，不影响普通视频卡片。
+  bool _actionNavigating = false;
+
   @override
   bool get wantKeepAlive => true;
 
@@ -138,16 +142,51 @@ class _HomePageState extends CommonPageState<HomePage>
 
     // Action 卡片
     if (item.isAction) {
+      // 避免卡片多层手势导致一次点击触发多次回调
+      if (_actionNavigating) {
+        debugPrint('[HomePage] Action 正在处理中，忽略重复点击: ${item.vodId}');
+        return;
+      }
+      _actionNavigating = true;
+
+      // 确保在异步链路结束后复位（用 Future.microtask 是因为后续调用
+      // 都是 fire-and-forget，无法 await，只能在下一个微任务/下一帧释放）
+      Future.delayed(const Duration(milliseconds: 300), () {
+        if (mounted) _actionNavigating = false;
+      });
+
+      final module = sourceManager.currentSite.value?['key'] ?? '';
+      final extend = sourceManager.currentSite.value?['ext'];
+      final apiUrl = sourceManager.currentSite.value?['api'];
+
+      // 1. vod_id 是 JSON（含 actionId），直接弹窗
       final config = item.actionConfig;
       if (config != null) {
         actionRenderer.showAction(
           config.toJson(),
-          module: sourceManager.currentSite.value?['key'] ?? '',
-          extend: sourceManager.currentSite.value?['ext'],
-          apiUrl: sourceManager.currentSite.value?['api'],
+          module: module,
+          extend: extend,
+          apiUrl: apiUrl,
         );
         return;
       }
+
+      // 2. vod_id 是纯字符串（如 '夸克扫码' / 'set-cookie'），
+      //    需要先请求服务端 ac=action&action=xxx 拿到真正的配置
+      final raw = item.vodId.trim();
+      if (raw.isNotEmpty &&
+          !raw.startsWith('{') &&
+          !raw.startsWith('[')) {
+        actionRenderer.showStringAction(
+          raw,
+          module: module,
+          extend: extend,
+          apiUrl: apiUrl,
+        );
+        return;
+      }
+
+      // 3. 兜底
       SmartDialog.showToast('Action 配置解析失败');
       return;
     }
@@ -440,7 +479,42 @@ class _HomePageState extends CommonPageState<HomePage>
   Widget _buildConfigError(ThemeData theme) {
     final colorScheme = theme.colorScheme;
     final isCatvod = sourceManager.currentConfigType.value == 'catvod';
-    
+    final isManualEmpty = sourceManager.isManualConfigEmpty.value;
+    // 业务异常时优先展示具体原因（如"未安装 Node.js 运行时"）
+    final specificError = sourceManager.configLoadErrorMessage.value;
+
+    // 三种场景文案：
+    //   1. 手动源为空（最优先）
+    //   2. 猫影视配置失败
+    //   3. 其他（remote / local / file）配置失败
+    final String title;
+    final String subtitle;
+    final IconData icon;
+    final Color iconColor;
+
+    if (isManualEmpty) {
+      title = '手动源为空';
+      subtitle = specificError.isNotEmpty
+          ? specificError
+          : '请前往「手动源管理」上传 py / dr2 / dr3 等源文件';
+      icon = Icons.folder_off_outlined;
+      iconColor = colorScheme.primary;
+    } else if (isCatvod) {
+      title = '猫影视配置获取失败';
+      subtitle = specificError.isNotEmpty
+          ? specificError
+          : '如果点击重试无效则需要重启 App';
+      icon = Icons.error_outline;
+      iconColor = colorScheme.error;
+    } else {
+      title = '配置加载失败';
+      subtitle = specificError.isNotEmpty
+          ? specificError
+          : '请检查网络连接或配置内容是否正确';
+      icon = Icons.error_outline;
+      iconColor = colorScheme.error;
+    }
+
     return Column(
       children: [
         _buildNormalTopBar(theme),
@@ -451,14 +525,10 @@ class _HomePageState extends CommonPageState<HomePage>
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(
-                    Icons.error_outline,
-                    size: 48,
-                    color: colorScheme.error,
-                  ),
+                  Icon(icon, size: 48, color: iconColor),
                   const SizedBox(height: 16),
                   Text(
-                    isCatvod ? '猫影视配置获取失败' : '配置加载失败',
+                    title,
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.w500,
@@ -467,9 +537,7 @@ class _HomePageState extends CommonPageState<HomePage>
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    isCatvod 
-                        ? '如果点击重试无效则需要重启 App'
-                        : '请检查网络连接或配置内容是否正确',
+                    subtitle,
                     style: TextStyle(
                       fontSize: 14,
                       color: colorScheme.outline,
@@ -477,17 +545,47 @@ class _HomePageState extends CommonPageState<HomePage>
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 16),
-                  FilledButton(
-                    onPressed: () {
-                      sourceManager.configLoadError.value = false;
-                      sourceManager.loadConfig();
-                    },
-                    style: FilledButton.styleFrom(
-                      backgroundColor: colorScheme.primary,
-                      foregroundColor: colorScheme.onPrimary,
+                  // 手动源为空：主按钮"前往手动源管理"，次按钮"重试"
+                  // 其他场景：仅"重试"
+                  if (isManualEmpty)
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        OutlinedButton(
+                          onPressed: () {
+                            sourceManager.configLoadError.value = false;
+                            sourceManager.loadConfig();
+                          },
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: colorScheme.primary,
+                          ),
+                          child: const Text('重试'),
+                        ),
+                        const SizedBox(width: 12),
+                        FilledButton.icon(
+                          onPressed: () =>
+                              Get.toNamed(AppPages.manualSource),
+                          icon: const Icon(Icons.folder_special, size: 18),
+                          label: const Text('前往手动源管理'),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: colorScheme.primary,
+                            foregroundColor: colorScheme.onPrimary,
+                          ),
+                        ),
+                      ],
+                    )
+                  else
+                    FilledButton(
+                      onPressed: () {
+                        sourceManager.configLoadError.value = false;
+                        sourceManager.loadConfig();
+                      },
+                      style: FilledButton.styleFrom(
+                        backgroundColor: colorScheme.primary,
+                        foregroundColor: colorScheme.onPrimary,
+                      ),
+                      child: const Text('重试'),
                     ),
-                    child: const Text('重试'),
-                  ),
                 ],
               ),
             ),
@@ -572,6 +670,7 @@ class _HomePageState extends CommonPageState<HomePage>
             child: SizedBox(
               width: 100,
               child: MarqueeText(
+                key: ValueKey(name),
                 name,
                 style: TextStyle(
                   fontSize: 14,
@@ -756,6 +855,13 @@ class _HomePageState extends CommonPageState<HomePage>
                       return GestureDetector(
                         onTap: () {
                           GStorage.setSetting('selected_config_key', key);
+
+                          if (source == 'manual' || key == 'manual_source') {
+                            GStorage.setSetting('selected_config_key', key);
+                            sourceManager.switchToManualConfig();
+                            Navigator.pop(dialogContext);
+                            return;
+                          }
 
                           if (source == 'local') {
                             final configKey = site['_configKey']?.toString();
@@ -1474,9 +1580,9 @@ class _SourceSwitchDialogContentState extends State<_SourceSwitchDialogContent> 
                     return Padding(
                       padding: const EdgeInsets.only(right: 8),
                       child: _buildTagChip(
-                        label: tag,
-                        isSelected: _selectedTag == tag,
-                        onTap: () => _selectTag(tag),
+                        label: '[$tag]',                  // 加中括号显示
+                        isSelected: _selectedTag == tag,  // 选中判断仍用原始 tag
+                        onTap: () => _selectTag(tag),     // 选中值仍用原始 tag
                       ),
                     );
                   }),

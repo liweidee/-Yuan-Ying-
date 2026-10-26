@@ -7,6 +7,7 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
+import 'package:yuanying/core/routes/app_pages.dart';
 import 'package:yuanying/core/theme/style.dart';
 import 'package:yuanying/modules/setting/controllers/site_config_controller.dart';
 import 'package:yuanying/t4/models/site.dart';
@@ -109,6 +110,15 @@ class SiteConfigPage extends StatelessWidget {
           itemBuilder: (context, index) {
             final site = controller.sites[index];
             final isCurrent = controller.currentSiteKey.value == site.key;
+            if (site.isManualConfig) {
+              return _buildManualConfigCard(
+                context: context,
+                theme: theme,
+                site: site,
+                isCurrent: isCurrent,
+                controller: controller,
+              );
+            }
             return _buildSiteCard(
               context: context,
               theme: theme,
@@ -122,7 +132,119 @@ class SiteConfigPage extends StatelessWidget {
     );
   }
 
-  // ========== 空状态 & 卡片构建 ==========
+  // ========== 手动源配置卡片 ==========
+  Widget _buildManualConfigCard({
+    required BuildContext context,
+    required ThemeData theme,
+    required Site site,
+    required bool isCurrent,
+    required SiteConfigController controller,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      borderRadius: Style.mdRadius,
+      child: InkWell(
+        borderRadius: Style.mdRadius,
+        onTap: () async {
+          await controller.switchSite(site.key);
+          SmartDialog.showToast('已切换到 ${site.name}');
+        },
+        child: Container(
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surface,
+            borderRadius: Style.mdRadius,
+            border: Border.all(
+              color: isCurrent ? theme.colorScheme.primary : theme.colorScheme.outline.withOpacity(0.15),
+              width: isCurrent ? 1.5 : 1,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: theme.shadowColor.withOpacity(0.08),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Row(
+              children: [
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: isCurrent ? theme.colorScheme.primary.withOpacity(0.1) : theme.colorScheme.primaryContainer.withOpacity(0.2),
+                    borderRadius: Style.mdRadius,
+                  ),
+                  child: Icon(Icons.folder, color: theme.colorScheme.primary, size: 24),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              site.name,
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                                color: isCurrent ? theme.colorScheme.primary : theme.colorScheme.onSurface,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.tertiaryContainer,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              '手动源',
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: theme.colorScheme.onTertiaryContainer,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(
+                          '本地 py / dr2 / dr3 / js / html 源',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 12, color: theme.colorScheme.outline),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (isCurrent) ...[
+                  Icon(Icons.check_circle, color: theme.colorScheme.primary, size: 20),
+                  const SizedBox(width: 4),
+                ],
+                IconButton(
+                  tooltip: '管理本地源',
+                  icon: Icon(Icons.tune, color: theme.colorScheme.primary),
+                  onPressed: () => Get.toNamed(AppPages.manualSource),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ========== 空状态 & 普通卡片 ==========
   Widget _buildEmptyState(BuildContext context, ThemeData theme, SiteConfigController controller) {
     return Center(
       child: Column(
@@ -320,17 +442,6 @@ class SiteConfigPage extends StatelessWidget {
     SmartDialog.showToast('接口链接已复制到剪贴板');
   }
 
-  String _generateKey(String name) {
-    String key = name.toLowerCase().replaceAll(' ', '_');
-    int index = 1;
-    final existing = GStorage.getCustomSites().map((s) => s['key']).toList();
-    while (existing.contains(key)) {
-      key = '${name.toLowerCase().replaceAll(' ', '_')}_$index';
-      index++;
-    }
-    return key;
-  }
-
   Future<bool> _checkStoragePermission(BuildContext context) async {
     if (!PlatformUtils.isMobile) return true;
     final status = await Permission.storage.request();
@@ -347,18 +458,27 @@ class SiteConfigPage extends StatelessWidget {
   }
 
   // ================================================================
-  // 恢复功能（新增）
+  // 恢复功能
   // ================================================================
   void _performRestore(List<Map<String, dynamic>> newSites, SiteConfigController controller) {
-    final existingKeys = GStorage.getCustomSites().map((s) => s['key']?.toString() ?? '').toList();
-    for (final key in existingKeys) {
-      if (key.isNotEmpty) {
-        GStorage.removeCustomSite(key);
-      }
+    // 保留手动源配置
+    final existing = GStorage.getCustomSites();
+    final manual = existing.firstWhere(
+      (s) => s['key']?.toString() == 'manual_source',
+      orElse: () => <String, dynamic>{},
+    );
+    for (final s in existing) {
+      final k = s['key']?.toString() ?? '';
+      if (k.isEmpty) continue;
+      if (k == 'manual_source') continue;
+      GStorage.removeCustomSite(k);
     }
-
     for (final site in newSites) {
+      if (site['key']?.toString() == 'manual_source') continue;
       GStorage.addCustomSite(site);
+    }
+    if (manual.isNotEmpty) {
+      GStorage.addCustomSite(manual);
     }
 
     String? currentKey = GStorage.getSetting<String>('selected_config_key');
@@ -369,8 +489,6 @@ class SiteConfigPage extends StatelessWidget {
           GStorage.setSetting('selected_config_key', currentKey);
         }
       }
-    } else {
-      GStorage.deleteSetting('selected_config_key');
     }
 
     controller.loadSites();
@@ -509,7 +627,7 @@ class SiteConfigPage extends StatelessWidget {
   }
 
   // ================================================================
-  // 导入配置包：中央弹窗（三个选项）
+  // 导入配置包：中央弹窗
   // ================================================================
   void _showImportPackageDialog(BuildContext context, SiteConfigController controller) {
     final theme = Theme.of(context);
@@ -561,9 +679,6 @@ class SiteConfigPage extends StatelessWidget {
     );
   }
 
-  // ================================================================
-  // 手动输入配置包
-  // ================================================================
   void _showManualImportDialog(BuildContext context, SiteConfigController controller) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
@@ -662,9 +777,6 @@ class SiteConfigPage extends StatelessWidget {
     );
   }
 
-  // ================================================================
-  // 从剪切板导入配置包
-  // ================================================================
   void _importFromClipboard(BuildContext context, SiteConfigController controller) async {
     final clipboardData = await Clipboard.getData(Clipboard.kTextPlain);
     if (clipboardData == null || clipboardData.text == null) {
@@ -692,9 +804,6 @@ class SiteConfigPage extends StatelessWidget {
     }
   }
 
-  // ================================================================
-  // 从本地文件导入配置包（恢复为最初逻辑：调用 _showAddDialog）
-  // ================================================================
   void _importFromLocalFile(BuildContext context, SiteConfigController controller) async {
     if (!await _checkStoragePermission(context)) return;
     try {
@@ -716,7 +825,6 @@ class SiteConfigPage extends StatelessWidget {
         return;
       }
 
-      // 保存临时数据，供 _showAddDialog 使用
       _pendingFilePath = file.path;
       _pendingFileName = file.name;
       _pendingConfigPackage = jsonData;
@@ -728,9 +836,6 @@ class SiteConfigPage extends StatelessWidget {
     }
   }
 
-  // ================================================================
-  // 导入确认弹窗
-  // ================================================================
   void _showImportConfirmDialog(
     BuildContext context,
     SiteConfigController controller,
@@ -855,46 +960,6 @@ class SiteConfigPage extends StatelessWidget {
   // ================================================================
   // 添加/编辑/删除
   // ================================================================
-  Future<void> _pickConfigFile(
-    BuildContext context,
-    TextEditingController nameController,
-    TextEditingController apiController,
-  ) async {
-    if (!await _checkStoragePermission(context)) return;
-
-    try {
-      final file = await FilePicker.pickFile(
-        type: FileType.custom,
-        allowedExtensions: ['json', 'txt'],
-      );
-      if (file == null) return;
-
-      final content = utf8.decode(await file.readAsBytes());
-      final jsonData = jsonDecode(content);
-
-      if (jsonData is! Map<String, dynamic>) {
-        SmartDialog.showToast('配置格式错误：期望对象格式');
-        return;
-      }
-      if (jsonData['sites'] == null || jsonData['sites'] is! List) {
-        SmartDialog.showToast('配置格式错误：缺少 sites 字段');
-        return;
-      }
-
-      _pendingFilePath = file.path;
-      _pendingFileName = file.name;
-      _pendingConfigPackage = null;
-
-      final baseName = file.name.split('.').first;
-      nameController.text = baseName;
-      apiController.text = file.path ?? '';
-
-      SmartDialog.showToast('已加载本地配置文件');
-    } catch (e) {
-      SmartDialog.showToast('加载配置失败: $e');
-    }
-  }
-
   void _showAddDialog(
     BuildContext context,
     SiteConfigController controller, {
@@ -905,7 +970,6 @@ class SiteConfigPage extends StatelessWidget {
     final apiController = TextEditingController(text: initialApi ?? '');
     String selectedConfigType = 'tvbox';
 
-    // 如果初始 API 是 ZIP 文件，自动切换类型
     if (initialApi != null &&
         initialApi.isNotEmpty &&
         initialApi.endsWith('.zip') &&
@@ -941,7 +1005,6 @@ class SiteConfigPage extends StatelessWidget {
                   ),
                   const SizedBox(height: 20),
 
-                  // ---- 线路名称 ----
                   TextField(
                     controller: nameController,
                     style: TextStyle(fontSize: 14, color: colorScheme.onSurface),
@@ -967,7 +1030,6 @@ class SiteConfigPage extends StatelessWidget {
                   ),
                   const SizedBox(height: 14),
 
-                  // ---- 接口类型下拉 ----
                   DropdownButtonFormField<String>(
                     value: selectedConfigType,
                     decoration: InputDecoration(
@@ -988,29 +1050,27 @@ class SiteConfigPage extends StatelessWidget {
                       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                     ),
                     dropdownColor: colorScheme.surface,
-                    menuMaxHeight: 120,
+                    menuMaxHeight: 160,
                     iconSize: 20,
                     isExpanded: true,
                     style: TextStyle(fontSize: 14, color: colorScheme.onSurface),
-                    items: [
-                      const DropdownMenuItem(
+                    items: const [
+                      DropdownMenuItem(
                         value: 'tvbox',
                         child: Text('TVBox', style: TextStyle(fontSize: 14)),
                       ),
-                      // if (!PlatformUtils.isDesktop)
-                      //   const DropdownMenuItem(
-                      //     value: 'catvod',
-                      //     child: Text('CatVod (猫影视)', style: TextStyle(fontSize: 14)),
-                      //   ),
                       DropdownMenuItem(
                         value: 'catvod',
                         child: Text('CatVod (猫影视)', style: TextStyle(fontSize: 14)),
+                      ),
+                      DropdownMenuItem(
+                        value: 'manual',
+                        child: Text('手动源配置', style: TextStyle(fontSize: 14)),
                       ),
                     ],
                     onChanged: (value) {
                       setState(() {
                         selectedConfigType = value!;
-                        // 切换类型时，如果输入框内容不是初始传入的路径，清空
                         if (!(initialApi != null &&
                             initialApi.isNotEmpty &&
                             File(initialApi).existsSync())) {
@@ -1021,97 +1081,104 @@ class SiteConfigPage extends StatelessWidget {
                   ),
                   const SizedBox(height: 14),
 
-                  // ---- 统一输入框 + 文件选择按钮 ----
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: apiController,
-                          style: TextStyle(fontSize: 14, color: colorScheme.onSurface),
-                          decoration: InputDecoration(
-                            labelText: '接口链接或本地文件路径',
-                            labelStyle: TextStyle(fontSize: 13, color: colorScheme.outline),
-                            hintText: '输入 URL 或点击右侧选择文件',
-                            hintStyle: TextStyle(
-                              fontSize: 13,
-                              color: colorScheme.outline.withOpacity(0.5),
-                            ),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            enabledBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(10),
-                              borderSide: BorderSide(
-                                color: colorScheme.outline.withOpacity(0.2),
+                  if (selectedConfigType != 'manual')
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: apiController,
+                            style: TextStyle(fontSize: 14, color: colorScheme.onSurface),
+                            decoration: InputDecoration(
+                              labelText: '接口链接或本地文件路径',
+                              labelStyle: TextStyle(fontSize: 13, color: colorScheme.outline),
+                              hintText: '输入 URL 或点击右侧选择文件',
+                              hintStyle: TextStyle(
+                                fontSize: 13,
+                                color: colorScheme.outline.withOpacity(0.5),
                               ),
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(10),
-                              borderSide: BorderSide(
-                                color: colorScheme.primary,
-                                width: 1.5,
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(10),
                               ),
-                            ),
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 14,
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(10),
+                                borderSide: BorderSide(
+                                  color: colorScheme.outline.withOpacity(0.2),
+                                ),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(10),
+                                borderSide: BorderSide(
+                                  color: colorScheme.primary,
+                                  width: 1.5,
+                                ),
+                              ),
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 14,
+                              ),
                             ),
                           ),
                         ),
-                      ),
-                      const SizedBox(width: 10),
-                      GestureDetector(
-                        onTap: () async {
-                          // 根据类型限制文件后缀
-                          final extensions = selectedConfigType == 'tvbox'
-                              ? ['json', 'txt']
-                              : ['zip'];
+                        const SizedBox(width: 10),
+                        GestureDetector(
+                          onTap: () async {
+                            final extensions = selectedConfigType == 'tvbox'
+                                ? ['json', 'txt']
+                                : ['zip'];
 
-                          final file = await FilePicker.pickFile(
-                            type: FileType.custom,
-                            allowedExtensions: extensions,
-                          );
-                          if (file != null && file.path != null) {
-                            setState(() {
-                              apiController.text = file.path!;
-                              if (nameController.text.isEmpty) {
-                                nameController.text = file.name.replaceAll(RegExp(r'\.[^.]+$'), '');
-                              }
-                            });
-                            SmartDialog.showToast('已选择文件: ${file.name}');
-                          }
-                        },
-                        child: Container(
-                          width: 36,
-                          height: 36,
-                          decoration: BoxDecoration(
-                            color: colorScheme.primary,
-                            shape: BoxShape.circle,
-                          ),
-                          child: Icon(
-                            Icons.folder_open_outlined,
-                            size: 18,
-                            color: colorScheme.onPrimary,
+                            final file = await FilePicker.pickFile(
+                              type: FileType.custom,
+                              allowedExtensions: extensions,
+                            );
+                            if (file != null && file.path != null) {
+                              setState(() {
+                                apiController.text = file.path!;
+                                if (nameController.text.isEmpty) {
+                                  nameController.text = file.name.replaceAll(RegExp(r'\.[^.]+$'), '');
+                                }
+                              });
+                              SmartDialog.showToast('已选择文件: ${file.name}');
+                            }
+                          },
+                          child: Container(
+                            width: 36,
+                            height: 36,
+                            decoration: BoxDecoration(
+                              color: colorScheme.primary,
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              Icons.folder_open_outlined,
+                              size: 18,
+                              color: colorScheme.onPrimary,
+                            ),
                           ),
                         ),
-                      ),
-                    ],
-                  ),
-
-                  // ---- 提示文本 ----
-                  Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: Text(
-                      selectedConfigType == 'tvbox'
-                          ? 'TVBox 支持远程 URL 或本地 json/txt 文件'
-                          : 'CatVod 支持远程 URL 或本地 zip 文件',
-                      style: TextStyle(fontSize: 12, color: colorScheme.outline),
+                      ],
                     ),
-                  ),
+
+                  if (selectedConfigType != 'manual')
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text(
+                        selectedConfigType == 'tvbox'
+                            ? 'TVBox 支持远程 URL 或本地 json/txt 文件'
+                            : 'CatVod 支持远程 URL 或本地 zip 文件',
+                        style: TextStyle(fontSize: 12, color: colorScheme.outline),
+                      ),
+                    ),
+
+                  if (selectedConfigType == 'manual')
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text(
+                        '手动源配置用于管理本地 py / dr2 / dr3 / js / html 源，可在创建后进入「本地源管理」上传文件。',
+                        style: TextStyle(fontSize: 12, color: colorScheme.outline),
+                      ),
+                    ),
 
                   const SizedBox(height: 24),
 
-                  // ---- 按钮 ----
                   Row(
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
@@ -1138,19 +1205,42 @@ class SiteConfigPage extends StatelessWidget {
                             return;
                           }
 
+                          if (selectedConfigType == 'manual') {
+                            // 已存在则只改名，不存在则创建
+                            final list = GStorage.getCustomSites();
+                            final has = list.any((s) => s['key']?.toString() == 'manual_source');
+                            if (has) {
+                              controller.renameManualConfig(name);
+                            } else {
+                              GStorage.addCustomSite({
+                                'key': 'manual_source',
+                                'name': name,
+                                'api': 'manual',
+                                'searchable': 0,
+                                'filterable': 0,
+                                'quickSearch': 0,
+                                'lang': 'manual',
+                                'type': '3',
+                                '_source': 'manual',
+                                'configType': 'tvbox',
+                              });
+                              controller.loadSites();
+                            }
+                            Navigator.pop(dialogContext);
+                            SmartDialog.showToast('手动源配置已保存');
+                            return;
+                          }
+
                           final api = apiController.text.trim();
                           if (api.isEmpty) {
                             SmartDialog.showToast('请输入接口链接或选择文件');
                             return;
                           }
 
-                          // ---- 判断是否为本地文件 ----
                           final isLocalFile = File(api).existsSync();
 
                           if (isLocalFile) {
-                            // ---- 本地文件分支 ----
                             if (selectedConfigType == 'tvbox') {
-                              // TVBox 本地配置（json/txt）
                               if (!api.endsWith('.json') && !api.endsWith('.txt')) {
                                 SmartDialog.showToast(
                                   'TVBox 本地文件仅支持 .json 或 .txt 格式',
@@ -1160,7 +1250,6 @@ class SiteConfigPage extends StatelessWidget {
                               controller.addLocalFileSite(name, api);
                               SmartDialog.showToast('TVBox 本地配置添加成功');
                             } else {
-                              // CatVod 本地 ZIP
                               if (!api.endsWith('.zip')) {
                                 SmartDialog.showToast('CatVod 本地文件仅支持 .zip 格式');
                                 return;
@@ -1169,8 +1258,6 @@ class SiteConfigPage extends StatelessWidget {
                               SmartDialog.showToast('CatVod 本地配置导入成功');
                             }
                           } else {
-                            // ---- 远程 URL 分支 ----
-                            // 简单验证是否为 URL
                             if (!api.contains('://')) {
                               SmartDialog.showToast('请输入有效的 URL（如 http://...）');
                               return;
@@ -1225,7 +1312,9 @@ class SiteConfigPage extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                site.isLocalConfig ? '编辑本地缓存配置' : (site.isLocalFile ? '编辑本地文件配置' : '编辑接口'),
+                site.isLocalConfig
+                    ? '编辑本地缓存配置'
+                    : (site.isLocalFile ? '编辑本地文件配置' : '编辑接口'),
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: colorScheme.onSurface),
               ),
               const SizedBox(height: 20),
@@ -1308,6 +1397,10 @@ class SiteConfigPage extends StatelessWidget {
   }
 
   void _showDeleteConfirm(BuildContext context, SiteConfigController controller, Site site) {
+    if (site.isManualConfig) {
+      SmartDialog.showToast('手动源配置不可删除');
+      return;
+    }
     showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(

@@ -5,6 +5,7 @@ import 'package:yuanying/t4/models/play_url.dart';
 import 'package:yuanying/t4/models/video_detail.dart';
 import 'package:yuanying/t4/services/i_spider_service.dart';
 import 'package:yuanying/services/debug_log_service.dart';
+import 'package:yuanying/utils/error_formatter.dart';
 
 /// 苹果CMS标准协议服务
 /// 对应 TVBox 的 csp_CMS 类型
@@ -219,6 +220,15 @@ class AppCmsService implements ISpiderService {
     final finalUrl = '${_apiBase}?$query';
 
     final json = await _getJson(finalUrl);
+    if (json == null) {
+      return {
+        'error': ErrorFormatter.formatSourceError('接口无响应或返回空'),
+        'list': [],
+        'page': page,
+        'pagecount': 0,
+        'total': 0,
+      };
+    }
     final list = _parseVideoList(json);
     return {
       'list': list,
@@ -237,6 +247,13 @@ class AppCmsService implements ISpiderService {
     if (_apiBase.isEmpty) return {'list': []};
     final url = '${_apiBase}?ac=list&wd=${Uri.encodeComponent(wd)}&pg=$page';
     final json = await _getJson(url);
+    if (json == null) {
+      return {
+        'error': ErrorFormatter.formatSourceError('接口无响应或返回空'),
+        'list': [],
+        'page': page,
+      };
+    }
     return {
       'list': _parseVideoList(json),
       'page': page,
@@ -314,6 +331,13 @@ class AppCmsService implements ISpiderService {
     final url = '$tempBase/api.php/provide/vod/?ac=list'
         '&wd=${Uri.encodeComponent(wd)}&pg=$page';
     final json = await _getJson(url);
+    if (json == null) {
+      return {
+        'error': ErrorFormatter.formatSourceError('接口无响应或返回空'),
+        'list': [],
+        'page': page,
+      };
+    }
     return {
       'list': _parseVideoList(json),
       'page': page,

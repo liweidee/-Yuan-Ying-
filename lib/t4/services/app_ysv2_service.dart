@@ -5,6 +5,7 @@ import 'package:yuanying/t4/models/play_url.dart';
 import 'package:yuanying/t4/models/video_detail.dart';
 import 'package:yuanying/t4/services/i_spider_service.dart';
 import 'package:yuanying/services/debug_log_service.dart';
+import 'package:yuanying/utils/error_formatter.dart';
 
 /// AppYsV2 服务
 /// 对应 TVBox 的 csp_AppYsV2 类型
@@ -292,6 +293,15 @@ class AppYsV2Service implements ISpiderService {
     }
 
     final json = await _getJson(url);
+    if (json == null) {
+      return {
+        'error': ErrorFormatter.formatSourceError('接口无响应或返回空'),
+        'list': [],
+        'page': page,
+        'pagecount': 0,
+        'total': 0,
+      };
+    }
     final list = _parseVideoList(json);
     return {
       'list': list,
@@ -309,6 +319,13 @@ class AppYsV2Service implements ISpiderService {
   }) async {
     if (_apiPrefix.isEmpty) return {'list': []};
     final json = await _getJson(_searchUrl(wd, page));
+    if (json == null) {
+      return {
+        'error': ErrorFormatter.formatSourceError('接口无响应或返回空'),
+        'list': [],
+        'page': page,
+      };
+    }
     return {
       'list': _parseVideoList(json),
       'page': page,
@@ -396,6 +413,13 @@ class AppYsV2Service implements ISpiderService {
       url = '$raw/api.php/app/search?text=${Uri.encodeComponent(wd)}&pg=$page';
     }
     final json = await _getJson(url);
+    if (json == null) {
+      return {
+        'error': ErrorFormatter.formatSourceError('接口无响应或返回空'),
+        'list': [],
+        'page': page,
+      };
+    }
     return {
       'list': _parseVideoList(json),
       'page': page,

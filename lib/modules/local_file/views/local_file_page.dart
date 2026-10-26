@@ -16,6 +16,7 @@ import 'package:yuanying/modules/local_file/widgets/folder_item.dart';
 import 'package:yuanying/modules/local_file/widgets/path_management_dialog.dart';
 import 'package:yuanying/modules/local_file/widgets/statistics_bar.dart';
 import 'package:yuanying/utils/platform_utils.dart';
+import 'package:yuanying/modules/plugin_center/widgets/storage_permission_button.dart';
 
 class LocalFilePage extends StatefulWidget {
   const LocalFilePage({super.key});
@@ -152,6 +153,9 @@ class _LocalFilePageState extends State<LocalFilePage>
                 },
           splashRadius: 20,
         )),
+
+        // ===== 新增：Android 手动授权文件访问权限 =====
+        if (Platform.isAndroid) const StoragePermissionButton(),
 
         // 非 iOS：路径管理
         if (!Platform.isIOS)

@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:get/get.dart';
 import 'package:json5/json5.dart';
@@ -15,6 +16,34 @@ import 'dart:convert';
 class XyqService extends T3JsonAdapter {
   XyqService(String id, String api, String extUrl, List<String> categories)
       : super(id, api, extUrl, categories);
+
+  @override
+  Future<void> loadConfig() async {
+    if (!extUrl.startsWith('http://') && !extUrl.startsWith('https://')) {
+      try {
+        final file = File(extUrl);
+        if (!file.existsSync()) {
+          print('加载 T3 配置失败: 本地文件不存在 $extUrl');
+          return;
+        }
+        String rawData = await file.readAsString();
+        if (rawData.startsWith('\uFEFF')) {
+          rawData = rawData.substring(1);
+        }
+        final decoded = JSON5.parse(rawData);
+        if (decoded is Map) {
+          config = Map<String, dynamic>.from(decoded);
+          print('[XyqService] 本地配置加载成功: $extUrl (${config.length} keys)');
+        } else {
+          print('JSON5 解析结果不是 Map 类型: $extUrl');
+        }
+      } catch (e) {
+        print('加载 T3 本地配置失败: $e');
+      }
+      return;
+    }
+    return super.loadConfig();
+  }
 
   @override
   Future<void> init() async {

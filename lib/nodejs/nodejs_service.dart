@@ -10,6 +10,9 @@ import 'package:flutter/foundation.dart';
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:yuanying/utils/platform_utils.dart';
 import 'package:yuanying/services/catvod_log_service.dart';
+import 'package:path/path.dart' as p;
+import 'package:yuanying/modules/plugin_center/services/install_manager.dart';
+import 'package:yuanying/utils/business_exception.dart';
 
 class NodeJSService extends GetxService with WidgetsBindingObserver {
   static const MethodChannel _channel = MethodChannel('com.tvbox/nodejs');
@@ -52,13 +55,172 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
 
   /// 可执行文件所在目录（仅桌面端有意义）
   String get _exeDir => File(Platform.resolvedExecutable).parent.path;
-  String get _nodeExePath => '$_exeDir/nodejs/runtime/node.exe';
 
   /// 入口脚本路径，优先 main.js，兜底 index.js（与 iOS NodeJSManager.m 一致）
   String get _scriptPath {
     final mainJs = '$_exeDir/nodejs/project/dist/main.js';
     if (File(mainJs).existsSync()) return mainJs;
     return '$_exeDir/nodejs/project/dist/index.js';
+  }
+
+  /// 资源目录（内嵌在应用安装目录，不随插件变动）
+  String get _resourceProjectDir => '$_exeDir/nodejs/project';
+
+  /// 检查 nodejs-win 插件是否可用
+  ///
+  /// 返回 null 表示可用；否则返回业务错误文案（由 SourceManager 展示到首页）。
+  String? _checkNodejsWinPlugin() {
+    if (!Platform.isWindows) return null;
+
+    final reg = InstallManager.instance.findInstalled('nodejs-win');
+    if (reg == null) {
+      return '未安装 Node.js 运行时（nodejs-win），无法加载猫影视配置。'
+          '请前往「插件中心 → 市场」安装后重试。';
+    }
+    if (!reg.enabled) {
+      return 'Node.js 运行时（nodejs-win）已关闭，无法加载猫影视配置。'
+          '请前往「插件中心 → 插件」重新开启后重试。';
+    }
+    return null;
+  }
+
+  /// 从 nodejs-win 插件目录解析 node.exe 路径
+  ///
+  /// 按 plugin.json 声明的 `binaries.win32 = "bin/node.exe"` 解析，
+  /// 找不到再兜底递归搜索，兼容未来可能的目录布局变化。
+  String? _resolveNodeExePath() {
+    final reg = InstallManager.instance.findInstalled('nodejs-win');
+    if (reg == null) return null;
+    final root = reg.installPath;
+
+    // 1. plugin.json 声明的标准路径
+    final standard = p.join(root, 'bin', 'node.exe');
+    if (File(standard).existsSync()) return standard;
+
+    // 2. 根目录 node.exe（兜底）
+    final rootExe = p.join(root, 'node.exe');
+    if (File(rootExe).existsSync()) return rootExe;
+
+    // 3. 兜底递归搜索
+    try {
+      final entities = Directory(root).listSync(recursive: true);
+      for (final e in entities) {
+        if (e is File && p.basename(e.path).toLowerCase() == 'node.exe') {
+          return e.path;
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// 检查 nodejs-win 插件是否可用（供外部主动检查）
+  ///
+  /// 与 `_checkNodejsWinPlugin` 语义相同，但此方法为公开，
+  /// 允许调用方在 Node 进程已启动的情况下依然能感知插件被禁用。
+  /// 非 Windows 平台返回 null（Android 走 APK 插件，由其他逻辑处理）。
+  String? checkPluginUsable() {
+    if (!PlatformUtils.isDesktop) return null;
+    return _checkNodejsWinPlugin();
+  }
+
+  /// 停掉已启动的 Node 进程并清理 Dart 侧状态
+  ///
+  /// 与 `shutdown()` 的区别：
+  ///   - `shutdown()`：App 退出时调用，永久关闭，不重置 `_isShuttingDown`
+  ///   - 本方法：插件被禁用时调用，临时停止，清空 `_isShuttingDown`
+  ///             和 `_restartCount`，允许后续重新启用插件后重新启动
+  ///
+  /// 保留 `_lastLoadedUrl` 和 `_localNotifyServer`：
+  ///   - 重新启用插件后可复用已下载的源、复用同一个通知服务器端口
+  Future<void> stopForPluginDisabled() async {
+    if (!PlatformUtils.isDesktop) return;
+    if (_nodeProcess == null && !_isInitialized) return; // 已经是停止状态
+
+    _isShuttingDown = true; // 阻止 exitCode 回调触发自动重启
+    try {
+      final proc = _nodeProcess;
+      if (proc != null) {
+        try {
+          proc.kill();
+        } catch (_) {}
+        try {
+          await proc.exitCode.timeout(
+            const Duration(seconds: 2),
+            onTimeout: () {
+              try {
+                proc.kill(ProcessSignal.sigkill);
+              } catch (_) {}
+              return -1;
+            },
+          );
+        } catch (_) {}
+      }
+    } finally {
+      _nodeProcess = null;
+      _isInitialized = false;
+      _isNodeReady = false;
+      _managementPort = 0;
+      _spiderPort = 0;
+      _spiderApiBase = '';
+      _restartCount = 0; // 重置计数，允许重新启用后再启动
+      _isShuttingDown = false; // 恢复，下次启动用
+      _log('Node 进程已停止（插件被禁用）');
+    }
+  }
+
+  /// 确保 Node 进程 + 猫影视源就绪（被动场景专用）
+  ///
+  /// 与 `initialize()` 的区别：
+  ///   - `initialize()`：只启动 Node 进程，不保证源已加载
+  ///   - 本方法：额外从 `_lastLoadedUrl` 恢复源，保证 `spiderPort` 就绪
+  ///
+  /// 适用场景：刷新首页 / 切分类 / 切详情 —— 这些路径不经过
+  /// `_switchToNodeJSSite`，Node 被杀后无法自动重启，需要本方法兜底。
+  ///
+  /// 返回 `true` 表示本次调用**启动过进程或加载过源**（服务端状态丢失，
+  /// 调用方需要重新 `setCurrentSpider + initSpider`）；
+  /// 返回 `false` 表示 Node 本来就好，无需任何操作。
+  ///
+  /// 非桌面端直接返回 `false`（Android/iOS 走原生 channel，不受影响）。
+  Future<bool> ensureReady() async {
+    if (!PlatformUtils.isDesktop) return false;
+
+    // 1) 插件可用性
+    final pluginError = _checkNodejsWinPlugin();
+    if (pluginError != null) {
+      throw BusinessException(pluginError);
+    }
+
+    bool didRestart = false;
+
+    // 2) 进程就绪
+    if (!_isInitialized) {
+      await initialize();
+      didRestart = true;
+    }
+
+    // 3) 源就绪
+    if (_spiderPort == 0) {
+      final url = _lastLoadedUrl;
+      if (url == null || url.isEmpty) {
+        throw BusinessException(
+          'Node.js 已启动但猫影视源未加载，请切换到猫影视配置或点重试',
+        );
+      }
+      bool ok;
+      if (url == 'local_zip') {
+        ok = await reloadLocalSpider();
+      } else {
+        ok = await loadSourceFromURL(url);
+      }
+      if (!ok) {
+        throw BusinessException('猫影视源加载失败，请点重试或切换配置');
+      }
+      await waitForSpiderPort();
+      didRestart = true;
+    }
+
+    return didRestart;
   }
 
   /// 桌面端保活/关闭状态（移动端不会访问）
@@ -168,6 +330,18 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
   }
 
   Future<void> initialize() async {
+    // 防御性检查：即使进程已在运行，也要确认插件未被禁用。
+    // 场景：App 运行中用户关闭了 nodejs-win 插件，此时 _isInitialized
+    //      仍为 true、_managementPort 仍 > 0，但插件已不可用。
+    //      不检查的话，所有调用方都会静默复用已死的状态。
+    if (PlatformUtils.isDesktop && _isInitialized) {
+      final pluginError = _checkNodejsWinPlugin();
+      if (pluginError != null) {
+        _log('❌ initialize: $pluginError');
+        throw BusinessException(pluginError);
+      }
+    }
+
     if (_isInitialized) return;
     // 如果端口还在，说明 Node.js 还在运行（stop 只清了 Dart 状态）
     // 直接恢复 _isInitialized，不调用 startNodeJS，避免二次 node_start 闪退
@@ -413,8 +587,15 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
       _log('❌ Node.js 服务已停止，无法在进程内重启（需重启 App）');
       _showFatalError();
     } catch (e) {
-      _log('❌ reinitialize 异常: $e');
-      _showFatalError();
+      if (e is BusinessException) {
+        // 插件缺失/关闭 → 只记日志，不弹窗、不调 _showFatalError。
+        // 用户下次切源或刷新时，SourceManager 会通过 configLoadErrorMessage
+        // 在首页列表区域展示引导文案。
+        _log('❌ ${e.message}');
+      } else {
+        _log('❌ reinitialize 异常: $e');
+        _showFatalError();
+      }
     } finally {
       _isRestarting = false;
     }
@@ -731,6 +912,22 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
   Future<void> _initializeDesktop() async {
     _log('🚀 桌面端初始化 Node.js...');
 
+    // ===== 前置检查 1：nodejs-win 插件 =====
+    final pluginError = _checkNodejsWinPlugin();
+    if (pluginError != null) {
+      _log('❌ $pluginError');
+      throw BusinessException(pluginError);
+    }
+
+    // ===== 前置检查 2：解析 node.exe =====
+    final nodeExePath = _resolveNodeExePath();
+    if (nodeExePath == null) {
+      final msg = 'nodejs-win 插件中找不到 node.exe，请重新安装 nodejs-win 插件';
+      _log('❌ $msg');
+      throw BusinessException(msg);
+    }
+    _log('✅ 使用插件 node.exe: $nodeExePath');
+
     // 启动前先清理上次残留的孤儿 Node 进程（避免端口冲突 / 文件占用）
     await _killOrphanNodeProcesses();
 
@@ -738,11 +935,7 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
     final nativePort = await _ensureNotifyServer();
     if (nativePort == null) return;
 
-    // 2) 校验二进制存在性
-    if (!File(_nodeExePath).existsSync()) {
-      _log('❌ 找不到 node.exe: $_nodeExePath');
-      return;
-    }
+    // 2) 校验入口脚本存在性（资源仍在安装目录，不移动）
     final scriptPath = _scriptPath;
     if (!File(scriptPath).existsSync()) {
       _log('❌ 找不到入口脚本: $scriptPath');
@@ -753,15 +946,15 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
     _readyCompleter = Completer<void>();
     _managementPortCompleter = Completer<void>();
 
-    // 4) 启动子进程
+    // 4) 启动子进程（node.exe 来自插件，工作目录来自安装目录资源）
     try {
       final sourceDir = await getDefaultSourcePath();
       await Directory(sourceDir).create(recursive: true);
 
       _nodeProcess = await Process.start(
-        _nodeExePath,
+        nodeExePath,                             // ← 从插件解析
         [scriptPath, '--native-port', '$nativePort'],
-        workingDirectory: '$_exeDir/nodejs/project',
+        workingDirectory: _resourceProjectDir,   // ← 内嵌资源目录
         environment: {
           ...Platform.environment,
           'NODE_PATH': sourceDir,
@@ -947,7 +1140,14 @@ if (\$targets) {
     final previousUrl = _lastLoadedUrl;
     _lastLoadedUrl = url;
 
-    if (!_isInitialized) await initialize();
+    // initialize 可能因插件缺失抛 BusinessException；
+    // 这里回滚 _lastLoadedUrl，避免后续误判"上次成功加载过"。
+    try {
+      if (!_isInitialized) await initialize();
+    } catch (e) {
+      _lastLoadedUrl = previousUrl;
+      rethrow;
+    }
 
     // 等待 managementPort 就绪
     if (_managementPort == 0) {

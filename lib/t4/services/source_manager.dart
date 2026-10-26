@@ -29,6 +29,10 @@ import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:yuanying/core/constants/app_constants.dart';
 import 'package:flutter/foundation.dart';
 import 'package:yuanying/services/catvod_log_service.dart';
+import 'package:yuanying/modules/manual_source/controllers/manual_source_controller.dart';
+import 'site_switch_result.dart';
+import 'package:yuanying/utils/error_formatter.dart';
+import 'package:yuanying/utils/business_exception.dart';
 
 class SourceManager extends GetxController {
   final T4ApiService _apiService = Get.find<T4ApiService>();
@@ -67,6 +71,9 @@ class SourceManager extends GetxController {
   final RxList<Map<String, dynamic>> fileSites = <Map<String, dynamic>>[].obs;
   final RxList<Map<String, dynamic>> fileParses = <Map<String, dynamic>>[].obs;
 
+  /// 手动源列表（来自 ManualSourceController，configSource == 'manual' 时生效）
+  final RxList<Map<String, dynamic>> manualSites = <Map<String, dynamic>>[].obs;
+
   final Rx<Map<String, dynamic>?> currentSite = Rx<Map<String, dynamic>?>(null);
   final RxList<Map<String, dynamic>> currentParses = <Map<String, dynamic>>[].obs;
   final RxString configLogo = ''.obs;
@@ -74,6 +81,16 @@ class SourceManager extends GetxController {
   final RxString configSource = 'remote'.obs;
   final RxBool isConfigLoading = false.obs;
   final RxBool configLoadError = false.obs;
+  /// 配置加载失败的具体原因（仅业务异常时有值，例如插件未安装/已关闭）
+  /// 首页列表区域可读取展示；为空时使用默认占位文案。
+  final RxString configLoadErrorMessage = ''.obs;
+
+  /// 手动源为空（configSource == 'manual' 但手动源列表无任何文件）
+  ///
+  /// 用于首页给出准确提示（"手动源为空，请前往手动源管理上传"），
+  /// 避免用户误以为是网络或接口配置问题。
+  final RxBool isManualConfigEmpty = false.obs;
+
   final RxString currentConfigType = 'tvbox'.obs;
   final RxString currentConfigKey = ''.obs;
 
@@ -278,13 +295,22 @@ class SourceManager extends GetxController {
   final Rx<Map<String, dynamic>?> _pushAgentSite = Rx<Map<String, dynamic>?>(null);
   Map<String, dynamic>? get pushAgentSite => _pushAgentSite.value;
 
+  /// 当前生效的源列表
+  /// - configSource == 'manual' → 手动源
+  /// - configSource == 'local' → 本地缓存
+  /// - configSource == 'file' → 本地文件
+  /// - 其他 → 远端
   List<Map<String, dynamic>> get sites {
+    if (configSource.value == 'manual') {
+      return manualSites;
+    }
     if (configSource.value == 'local') return localSites;
     if (configSource.value == 'file') return fileSites;
     return remoteSites;
   }
 
   List<Map<String, dynamic>> get parses {
+    if (configSource.value == 'manual') return const [];
     if (configSource.value == 'local') return localParses;
     if (configSource.value == 'file') return fileParses;
     return remoteParses;
@@ -307,6 +333,7 @@ class SourceManager extends GetxController {
     if (api == 'csp_APPV2') return true;
     if (api == 'csp_AppYsV2') return true;
     if (apiWithoutQuery.endsWith('.py')) return true;
+    if (key.startsWith('manual_')) return true;
     return false;
   }
 
@@ -348,6 +375,18 @@ class SourceManager extends GetxController {
       selectedSite ??= siteList.first;
       currentSite.value = selectedSite;
       currentParses.value = List.from(parseList);
+
+      // 有站点可用 → 清除配置错误状态
+      //
+      // 场景：
+      //   - 用户从"手动源为空"状态上传源后，reloadManualSites 调用本方法
+      //   - 任何配置加载成功后的正常路径
+      // 有站点即说明加载成功，`configLoadError` 理应回到 false，
+      // 避免首页残留"配置加载失败 / 手动源为空"的错误占位。
+      configLoadError.value = false;
+      isManualConfigEmpty.value = false;
+      configLoadErrorMessage.value = '';
+
       await _switchToSite(currentSite.value!);
       _notifyHomeController();
       _updatePushAgentCache();
@@ -374,34 +413,34 @@ class SourceManager extends GetxController {
     currentConfigKey.value = selectedConfig?['key']?.toString() ?? '';
     NodeJSService.instance.updateConfigType(currentConfigType.value);
 
+    // 每次重新加载配置时先清空旧的业务错误，
+    // 让"重试"和"切换配置"都能自然清除上一次的插件错误提示。
+    configLoadErrorMessage.value = '';
+    isManualConfigEmpty.value = false;
+
     try {
-      // if (PlatformUtils.isDesktop) {
-      //   final customConfigs = GStorage.getCustomSites();
-      //   if (customConfigs.isNotEmpty) {
-      //     final savedKey = GStorage.getSetting<String>('selected_config_key');
-      //     if (savedKey != null && savedKey.isNotEmpty) {
-      //       final targetConfig = customConfigs.firstWhereOrNull(
-      //         (c) => c['key']?.toString() == savedKey
-      //       );
-      //       if (targetConfig != null) {
-      //         final configType = targetConfig['configType']?.toString() ?? 'tvbox';
-      //         if (configType == 'catvod') {
-      //           final tvboxConfig = customConfigs.firstWhereOrNull(
-      //             (c) => (c['configType']?.toString() ?? 'tvbox') != 'catvod'
-      //           );
-      //           if (tvboxConfig != null) {
-      //             final newKey = tvboxConfig['key']?.toString() ?? '';
-      //             await GStorage.setSetting('selected_config_key', newKey);
-      //             print('[SourceManager] 桌面端自动跳转到 TVBox 配置: $newKey');
-      //           } else {
-      //             await GStorage.deleteSetting('selected_config_key');
-      //             print('[SourceManager] 桌面端无可用 TVBox 配置');
-      //           }
-      //         }
-      //       }
-      //     }
-      //   }
-      // }
+      // ===== 手动源配置分支 =====
+      if (configSource.value == 'manual') {
+        await _refreshManualSites();
+        if (currentLoadId != _configLoadId) return;
+        await _selectDefaultSite();
+        if (!isConfigLoaded.value) isConfigLoaded.value = true;
+
+        // 手动源为空：给出准确提示，避免用户误以为是"接口配置"问题
+        //
+        // 说明：manual 分支末尾有 return，会绕过下方统一的
+        //      "hasCustomSites && sites.isEmpty" 判定，因此这里需要
+        //      单独处理。仅当 manualSites 完全为空时才认为"手动源为空"，
+        //      有源但 currentSite 为空属于其他异常，交给 _selectDefaultSite
+        //      的既有逻辑（不会触发）。
+        if (manualSites.isEmpty) {
+          configLoadError.value = true;
+          isManualConfigEmpty.value = true;
+          configLoadErrorMessage.value =
+              '手动源为空，请前往「手动源管理」上传 py / dr2 / dr3 / js 等源文件';
+        }
+        return;
+      }
 
       if (configSource.value == 'local') {
         await _loadLocalConfigBySavedKey();
@@ -425,7 +464,49 @@ class SourceManager extends GetxController {
       configLoadError.value = true;
     } else {
       configLoadError.value = false;
+      // 非"手动源为空"的失败路径（如 remote 配置加载失败但 hasCustomSites 为 false）
+      // 确保该标记被重置，避免首页走"前往手动源管理"的错误分支
+      isManualConfigEmpty.value = false;
     }
+  }
+
+  // ================================================================
+  // 手动源
+  // ================================================================
+
+  /// 拉取手动源（不主动触发 controller.refresh，若全空则补扫一次）
+  Future<void> _refreshManualSites() async {
+    try {
+      if (!Get.isRegistered<ManualSourceController>()) {
+        manualSites.clear();
+        return;
+      }
+      final ctrl = Get.find<ManualSourceController>();
+      if (ctrl.all.isEmpty) {
+        await ctrl.refresh();
+      }
+      manualSites.assignAll(ctrl.buildSites());
+    } catch (e) {
+      print('[SourceManager] refreshManualSites failed: $e');
+    }
+  }
+
+  /// 手动源页操作完后调用：重新扫描 + 若当前是手动源配置则刷新站点列表
+  Future<void> reloadManualSites() async {
+    if (Get.isRegistered<ManualSourceController>()) {
+      await Get.find<ManualSourceController>().refresh();
+    }
+    await _refreshManualSites();
+    if (configSource.value == 'manual') {
+      await _selectDefaultSite();
+    }
+  }
+
+  /// 切换到手动源配置
+  Future<void> switchToManualConfig() async {
+    configSource.value = 'manual';
+    GStorage.setSetting('config_source', 'manual');
+    await loadConfig();
   }
 
   Future<void> _loadRemoteConfig({int? loadId}) async {
@@ -525,13 +606,13 @@ class SourceManager extends GetxController {
     );
 
     GStorage.addCustomSite(newSite.toJson());
-    
+
     // 4. 刷新列表
     await loadConfig();
-    
+
     // 不再强制自动切换
     // await switchConfig(key);
-    
+
     // 注：如果这是第一个配置，_selectDefaultSite 会自动选中它
     // 但如果是后续配置，让用户手动点击卡片切换
   }
@@ -545,7 +626,19 @@ class SourceManager extends GetxController {
   Future<void> _loadCatVodConfig(String configUrl, {int? loadId}) async {
     final currentLoadId = loadId ?? ++_configLoadId;
     try {
+      // ===== 显式检查插件状态 =====
+      // 即使 Node 进程已在运行，也要检查插件是否被禁用。
+      // 场景：App 运行中用户关闭了 nodejs-win 插件，此时
+      // nodejs.isInitialized 仍为 true，不会进入下面的 initialize()，
+      // 从而绕过 _initializeDesktop() 里的插件检查。
       final nodejs = NodeJSService.instance;
+      final pluginError = nodejs.checkPluginUsable();
+      if (pluginError != null) {
+        // 停掉已启动的 Node 进程，避免"关闭插件但进程还在跑"的状态
+        await nodejs.stopForPluginDisabled();
+        throw BusinessException(pluginError);
+      }
+
       if (!nodejs.isInitialized || nodejs.managementPort == 0) {
         await nodejs.initialize();
       }
@@ -721,6 +814,12 @@ class SourceManager extends GetxController {
     } catch (e) {
       configLoadError.value = true;
       _log('[SourceManager] 加载猫影视配置失败: $e');
+
+      // 捕获业务异常（插件缺失/关闭），供首页列表区域展示引导文案
+      if (e is BusinessException) {
+        configLoadErrorMessage.value = e.message;
+      }
+
       if (loadId == null || loadId == _configLoadId) {
         remoteSites.clear();
         remoteParses.clear();
@@ -852,19 +951,19 @@ class SourceManager extends GetxController {
     final customConfigs = GStorage.getCustomSites();
     final targetConfig = customConfigs.firstWhereOrNull((c) => c['key'] == configKey);
     if (targetConfig == null) return;
-    
+
     final configType = targetConfig['configType']?.toString() ?? 'tvbox';
     // if (PlatformUtils.isDesktop && configType == 'catvod') {
     //   SmartDialog.showToast('猫影视配置仅支持移动端');
     //   return;
     // }
-    
+
     // 切换到非猫影视时，只清 Dart 层状态，不调用原生 stopNodeJS
     if (configType != 'catvod') {
       final nodejs = NodeJSService.instance;
       await nodejs.stop(); // 调用公共方法，安全清理所有 Dart 层状态
     }
-    
+
     await GStorage.setSetting('selected_config_key', configKey);
     currentConfigKey.value = configKey;
     configSource.value = 'remote';
@@ -915,7 +1014,8 @@ class SourceManager extends GetxController {
     }
     final sourceList = this.sites;
     final parseList = this.parses;
-    Map<String, dynamic>? target = sourceList.firstWhereOrNull((s) => s['key']?.toString() == siteKey);
+    Map<String, dynamic>? target = sourceList.firstWhereOrNull(
+        (s) => s['key']?.toString() == siteKey);
     if (target == null) {
       target = sourceList.isNotEmpty ? sourceList.first : null;
     }
@@ -926,10 +1026,22 @@ class SourceManager extends GetxController {
     }
     currentSite.value = target;
     currentParses.value = List.from(parseList);
-    await _switchToSite(target);
-    _notifyHomeController();
+
+    // 等待切换结果（所有分支都返回 SiteSwitchResult，异常已在 _switchToSite 内 catch）
+    final result = await _switchToSite(target);
+
     _updatePushAgentCache();
     _saveCurrentSiteKey();
+
+    if (result.success) {
+      _notifyHomeController();
+    } else {
+      final raw = result.error;
+      final errorMsg = (raw != null && raw.isNotEmpty)
+          ? ErrorFormatter.formatSwitchError(raw)   // 幂等，已带切源前缀原样返回
+          : '切换源失败：未知错误';
+      _notifyHomeControllerFailure(errorMsg);
+    }
   }
 
   Future<void> refreshSites() async {
@@ -974,6 +1086,11 @@ class SourceManager extends GetxController {
         target = fileSites.firstWhere((site) => site['key']?.toString() == siteKey);
       } catch (_) {}
     }
+    if (target == null) {
+      try {
+        target = manualSites.firstWhere((site) => site['key']?.toString() == siteKey);
+      } catch (_) {}
+    }
     if (target != null) {
       switchSite(target);
     } else {
@@ -981,89 +1098,101 @@ class SourceManager extends GetxController {
     }
   }
 
-  Future<void> _switchToSite(Map<String, dynamic> site) async {
+  Future<SiteSwitchResult> _switchToSite(Map<String, dynamic> site) async {
     print('_switchToSite received: key=${site['key']}, api=${site['api']}');
-    if (isDrpy3Site(site)) {
-      await _switchToDrpy3Site(site);
-    } else if (isDrpy2Site(site)) {
-      await _switchToDrpy2Site(site);
-    } else if (isXbpqSite(site)) {
-      await _switchToXbpqSite(site);
-    } else if (isXyqSite(site)) {
-      await _switchToXyqSite(site);
-    } else if (isCatVodOpenSite(site)) {
-      await _switchToCatVodOpenSite(site);
-    } else if (isPurePy3Site(site)) {
-      await _switchToPy3Site(site);
-    } else if (isNodeJSSite(site)) {
-      await _switchToNodeJSSite(site);
-    } else if (isAppCmsSite(site)) {
-      _getOrCreateAppCmsService(site).switchSite(
-        site['api']?.toString() ?? '',
-        site['key']?.toString() ?? '',
-        ext: site['ext'],
+
+    final t = site['type']?.toString();
+    if (t == '4' && (site['lang']?.toString() == 'html')) {
+      print('[SourceManager] 本地 html 源暂未实现执行: ${site['key']}');
+      return SiteSwitchResult.failure(
+        '本地 HTML 源暂不支持',
+        siteKey: site['key']?.toString(),
       );
-    } else if (isAppYsV2Site(site) || isAppV2Site(site)) {
-      _getOrCreateAppYsV2Service(site).switchSite(
-        site['api']?.toString() ?? '',
-        site['key']?.toString() ?? '',
-        ext: site['ext'],
-      );
-    } else {
+    }
+
+    final key = site['key']?.toString();
+
+    try {
+      if (isDrpy3Site(site)) {
+        return await _switchToDrpy3Site(site);
+      }
+      if (isDrpy2Site(site)) {
+        return await _switchToDrpy2Site(site);
+      }
+      if (isXbpqSite(site)) {
+        return await _switchToXbpqSite(site);
+      }
+      if (isXyqSite(site)) {
+        return await _switchToXyqSite(site);
+      }
+      if (isCatVodOpenSite(site)) {
+        return await _switchToCatVodOpenSite(site);
+      }
+      if (isPurePy3Site(site)) {
+        return await _switchToPy3Site(site);
+      }
+      if (isNodeJSSite(site)) {
+        return await _switchToNodeJSSite(site);
+      }
+      if (isAppCmsSite(site)) {
+        _getOrCreateAppCmsService(site).switchSite(
+          site['api']?.toString() ?? '',
+          site['key']?.toString() ?? '',
+          ext: site['ext'],
+        );
+        return SiteSwitchResult.success(siteKey: key);
+      }
+      if (isAppYsV2Site(site) || isAppV2Site(site)) {
+        _getOrCreateAppYsV2Service(site).switchSite(
+          site['api']?.toString() ?? '',
+          site['key']?.toString() ?? '',
+          ext: site['ext'],
+        );
+        return SiteSwitchResult.success(siteKey: key);
+      }
       _switchToT4Site(site);
+      return SiteSwitchResult.success(siteKey: key);
+    } catch (e, st) {
+      debugPrint('[SourceManager] _switchToSite 异常: $e\n$st');
+      return SiteSwitchResult.failure(
+        ErrorFormatter.formatSwitchError(e),
+        siteKey: key,
+      );
     }
   }
 
-  // Future<void> _switchToDrpy2Site(Map<String, dynamic> site) async {
-  //   final ok = await _drpy2Service.ensureInitialized();
-  //   if (!ok) {
-  //     print('[SourceManager] drpy2 init failed, cannot switch to drpy2 site');
-  //     return;
-  //   }
-  //   _drpy2Service.switchSite(
-  //     site['api']?.toString() ?? '',
-  //     site['key']?.toString() ?? '',
-  //     ext: site['ext'],
-  //   );
-  // }
-
-  // Future<void> _switchToDrpy3Site(Map<String, dynamic> site) async {
-  //   final ok = await _drpy3Service.ensureInitialized();
-  //   if (!ok) {
-  //     print('[SourceManager] drpy3 init failed, cannot switch to drpy3 site');
-  //     return;
-  //   }
-  //   _drpy3Service.switchSite(
-  //     site['api']?.toString() ?? '',
-  //     site['key']?.toString() ?? '',
-  //     ext: site['ext'],
-  //   );
-  // }
-
-  Future<void> _switchToDrpy2Site(Map<String, dynamic> site) async {
+  Future<SiteSwitchResult> _switchToDrpy2Site(Map<String, dynamic> site) async {
     final ok = await _ensureDrpy2Ready();
     if (!ok) {
       print('[SourceManager] drpy2 init failed, cannot switch to drpy2 site');
-      return;
+      return SiteSwitchResult.failure(
+        'drpy2 初始化失败',
+        siteKey: site['key']?.toString(),
+      );
     }
     _drpy2Service.switchSite(
       site['api']?.toString() ?? '',
       site['key']?.toString() ?? '',
       ext: site['ext'],
     );
+    return SiteSwitchResult.success(siteKey: site['key']?.toString());
   }
 
-  Future<void> _switchToDrpy3Site(Map<String, dynamic> site) async {
+  Future<SiteSwitchResult> _switchToDrpy3Site(Map<String, dynamic> site) async {
     final ok = await _ensureDrpy3Ready();
     if (!ok) {
       print('[SourceManager] drpy3 init failed, cannot switch to drpy3 site');
-      return;
+      return SiteSwitchResult.failure(
+        'drpy3 初始化失败',
+        siteKey: site['key']?.toString(),
+      );
     }
     _drpy3Service.switchSite(
       site['api']?.toString() ?? '',
       site['key']?.toString() ?? '',
       ext: site['ext'],
     );
+    return SiteSwitchResult.success(siteKey: site['key']?.toString());
   }
 
   XbpqService _getOrCreateXbpqService(Map<String, dynamic> site) {
@@ -1077,14 +1206,22 @@ class SourceManager extends GetxController {
     return Get.find<XbpqService>(tag: key);
   }
 
-  Future<void> _switchToXbpqSite(Map<String, dynamic> site) async {
+  Future<SiteSwitchResult> _switchToXbpqSite(Map<String, dynamic> site) async {
     final service = _getOrCreateXbpqService(site);
-    await service.init();
-    service.switchSite(
-      site['api']?.toString() ?? '',
-      site['key']?.toString() ?? '',
-      ext: site['ext'],
-    );
+    try {
+      await service.init();
+      service.switchSite(
+        site['api']?.toString() ?? '',
+        site['key']?.toString() ?? '',
+        ext: site['ext'],
+      );
+      return SiteSwitchResult.success(siteKey: site['key']?.toString());
+      } catch (e) {
+        return SiteSwitchResult.failure(
+          ErrorFormatter.formatException(e),
+          siteKey: site['key']?.toString(),
+        );
+      }
   }
 
   XyqService _getOrCreateXyqService(Map<String, dynamic> site) {
@@ -1097,34 +1234,47 @@ class SourceManager extends GetxController {
     return Get.find<XyqService>(tag: key);
   }
 
-  Future<void> _switchToXyqSite(Map<String, dynamic> site) async {
+  Future<SiteSwitchResult> _switchToXyqSite(Map<String, dynamic> site) async {
     final service = _getOrCreateXyqService(site);
-    await service.init();
-    service.switchSite(
-      site['api']?.toString() ?? '',
-      site['key']?.toString() ?? '',
-      ext: site['ext'],
-    );
+    try {
+      await service.init();
+      service.switchSite(
+        site['api']?.toString() ?? '',
+        site['key']?.toString() ?? '',
+        ext: site['ext'],
+      );
+      return SiteSwitchResult.success(siteKey: site['key']?.toString());
+      } catch (e) {
+        return SiteSwitchResult.failure(
+          ErrorFormatter.formatException(e),
+          siteKey: site['key']?.toString(),
+        );
+      }
   }
 
   CatvodOpenService _getOrCreateCatvodOpenService(Map<String, dynamic> site) {
     return Get.find<CatvodOpenService>();
   }
 
-  Future<void> _switchToCatVodOpenSite(Map<String, dynamic> site) async {
+  Future<SiteSwitchResult> _switchToCatVodOpenSite(Map<String, dynamic> site) async {
     print('_switchToCatVodOpenSite: start for ${site['key']}');
     try {
       final service = _getOrCreateCatvodOpenService(site);
-      print('Service obtained, calling switchSite...');
-      await service.switchSite(
+      print('Service obtained, calling switchSiteSafe...');
+      final result = await service.switchSiteSafe(
         site['api']?.toString() ?? '',
         site['key']?.toString() ?? '',
         ext: site['ext'],
       );
-      print('_switchToCatVodOpenSite: ready');
+      print('_switchToCatVodOpenSite: '
+          '${result.success ? "ready" : "fail: ${result.error}"}');
+      return result;
     } catch (e, stack) {
       print('_switchToCatVodOpenSite error: $e\n$stack');
-      rethrow;
+      return SiteSwitchResult.failure(
+        ErrorFormatter.formatSwitchError(e),
+        siteKey: site['key']?.toString(),
+      );
     }
   }
 
@@ -1155,9 +1305,9 @@ class SourceManager extends GetxController {
     return Get.find<AppYsV2Service>(tag: key);
   }
 
-  Future<void> _switchToPy3Site(Map<String, dynamic> site) async {
+  Future<SiteSwitchResult> _switchToPy3Site(Map<String, dynamic> site) async {
     final service = _getOrCreatePy3Service(site);
-    await service.switchSite(
+    return await service.switchSiteSafe(
       site['api']?.toString() ?? '',
       site['key']?.toString() ?? '',
       ext: site['ext'],
@@ -1171,14 +1321,51 @@ class SourceManager extends GetxController {
     return Get.find<NodeJSSpiderService>();
   }
 
-  Future<void> _switchToNodeJSSite(Map<String, dynamic> site) async {
+  Future<SiteSwitchResult> _switchToNodeJSSite(Map<String, dynamic> site) async {
     final service = _getNodeJSService();
+    final siteKey = site['key']?.toString();
+    final nodejs = NodeJSService.instance;
+
+    // ===== 第一步：无条件先把 Dart 侧 spider 状态切到目标源 =====
+    // switchSite 是同步方法，只更新 NodeJSSpiderService._currentKey/_baseUrl
+    // 以及 NodeJSService._currentSpiderKey/_spiderApiBase，不发起网络请求。
+    //
+    // 即使插件关闭导致后续步骤失败，这里的更新也能保证：
+    //   - _currentKey 与 currentSite.value 一致
+    //   - 后续重试 / 刷新 / 切分类时，_ensureNodeReady 会用正确的 key
     service.switchSite(
       site['api']?.toString() ?? '',
-      site['key']?.toString() ?? '',
+      siteKey ?? '',
       ext: site['ext'],
     );
-    await service.initSpider();
+
+    // ===== 第二步：插件状态检查 =====
+    final pluginError = nodejs.checkPluginUsable();
+    if (pluginError != null) {
+      await nodejs.stopForPluginDisabled();
+      return SiteSwitchResult.failure(pluginError, siteKey: siteKey);
+    }
+
+    // ===== 第三步：确保 Node 进程 + 源就绪（幂等，已就绪时内部立即返回） =====
+    try {
+      await nodejs.ensureReady();
+    } catch (e) {
+      return SiteSwitchResult.failure(
+        ErrorFormatter.formatSwitchError(e),
+        siteKey: siteKey,
+      );
+    }
+
+    // ===== 第四步：init spider =====
+    try {
+      await service.initSpider();
+      return SiteSwitchResult.success(siteKey: siteKey);
+    } catch (e) {
+      return SiteSwitchResult.failure(
+        ErrorFormatter.formatSwitchError(e),
+        siteKey: siteKey,
+      );
+    }
   }
 
   void _switchToT4Site(Map<String, dynamic> site) {
@@ -1192,6 +1379,12 @@ class SourceManager extends GetxController {
   void _notifyHomeController() {
     if (Get.isRegistered<HomeController>()) {
       Get.find<HomeController>().onSiteChanged();
+    }
+  }
+
+  void _notifyHomeControllerFailure(String error) {
+    if (Get.isRegistered<HomeController>()) {
+      Get.find<HomeController>().onSiteChangedFailure(error);
     }
   }
 

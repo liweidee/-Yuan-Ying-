@@ -1,5 +1,8 @@
 package com.example.yuanying
 
+import android.os.Environment
+import android.provider.Settings
+import android.net.Uri
 import org.json.JSONObject
 import android.content.Intent
 import android.content.res.Configuration
@@ -39,6 +42,130 @@ class MainActivity : AudioServiceActivity(), MethodCallHandler {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "com.example.yuanying/storage"
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "isExternalStorageManager" -> {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        result.success(Environment.isExternalStorageManager())
+                    } else {
+                        result.success(true)
+                    }
+                }
+                "requestAllFilesAccess" -> {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        val appIntent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                            data = Uri.parse("package:$packageName")
+                        }
+                        if (appIntent.resolveActivity(packageManager) != null) {
+                            startActivity(appIntent)
+                        } else {
+                            startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+                        }
+                    }
+                    result.success(null)
+                }
+                "isPackageInstalled" -> {
+                    val pkgName = call.argument<String>("packageName")
+                    if (pkgName.isNullOrEmpty()) {
+                        result.success(false)
+                    } else {
+                        try {
+                            packageManager.getPackageInfo(pkgName, 0)
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.success(false)
+                        }
+                    }
+                }
+                "getPackageVersion" -> {
+                    val pkgName = call.argument<String>("packageName")
+                    if (pkgName.isNullOrEmpty()) {
+                        result.success(null)
+                    } else {
+                        try {
+                            val info = packageManager.getPackageInfo(pkgName, 0)
+                            result.success(info.versionName)
+                        } catch (e: Exception) {
+                            result.success(null)
+                        }
+                    }
+                }
+                "getApkPath" -> {
+                    val pkgName = call.argument<String>("packageName")
+                    if (pkgName.isNullOrEmpty()) {
+                        result.success(null)
+                    } else {
+                        try {
+                            val info = packageManager.getApplicationInfo(pkgName, 0)
+                            result.success(info.sourceDir)
+                        } catch (e: Exception) {
+                            result.success(null)
+                        }
+                    }
+                }
+                "uninstallPackage" -> {
+                    val pkgName = call.argument<String>("packageName")
+                    if (pkgName.isNullOrEmpty()) {
+                        result.success(false)
+                    } else {
+                        try {
+                            val intent = Intent(Intent.ACTION_DELETE)
+                            intent.data = Uri.parse("package:$pkgName")
+                            startActivity(intent)
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.success(false)
+                        }
+                    }
+                }
+                "openAppDetails" -> {
+                    val pkgName = call.argument<String>("packageName")
+                    if (pkgName.isNullOrEmpty()) {
+                        result.success(false)
+                    } else {
+                        try {
+                            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                            intent.data = Uri.parse("package:$pkgName")
+                            startActivity(intent)
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.success(false)
+                        }
+                    }
+                }
+                "openAllFilesAccessForApp" -> {
+                    val pkgName = call.argument<String>("packageName")
+                    if (pkgName.isNullOrEmpty()) {
+                        result.success(false)
+                    } else {
+                        try {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                                val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
+                                intent.data = Uri.parse("package:$pkgName")
+                                startActivity(intent)
+                            } else {
+                                val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                                intent.data = Uri.parse("package:$pkgName")
+                                startActivity(intent)
+                            }
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.success(false)
+                        }
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
+
+        val pyBridge = PythonPluginBridge(applicationContext)
+        pyBridge.registerChannel(
+            MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.example.yuanying/pyplugin")
+        )
 
         // ===== 1) 初始化 NodeJSManager =====
         nodeJSManager = NodeJSManager.getInstance(applicationContext)

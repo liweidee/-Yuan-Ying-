@@ -2,22 +2,22 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:get/get.dart';
 
 import '../models/action_config.dart';
 import '../models/button_type.dart';
 import '../utils/action_parser.dart';
+import 'action_button_bar.dart';
+import 'simple_html_text.dart';
 
 /// 消息弹窗 Action
 /// 严格对应 DrPlayer 的 MsgBoxAction.vue
 ///
 /// 功能：
 /// - 5种图标类型：info, success, warning, error, question
-/// - 消息内容（支持简单 HTML）
+/// - 消息内容（支持简单 HTML：加粗/斜体/下划线/字体颜色/链接等）
+/// - 消息 + 图片作为整体显示（共用同一个灰底卡片）
 /// - 详细信息
 /// - 列表展示
-/// - 图片展示
 /// - 二维码展示
 /// - 进度条
 /// - 超时自动关闭
@@ -93,6 +93,13 @@ class _MsgBoxActionState extends State<MsgBoxAction> {
   bool get _showOkButton => widget.config.button.showOk;
   bool get _showCancelButton => widget.config.button.showCancel;
 
+  /// 是否包含 HTML 标签（用于决定渲染路径）
+  bool get _hasHtml {
+    final raw = widget.config.displayMessage;
+    if (raw == null || raw.isEmpty) return false;
+    return RegExp(r'<[a-zA-Z][^>]*>').hasMatch(raw);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -154,11 +161,12 @@ class _MsgBoxActionState extends State<MsgBoxAction> {
     if (!widget.config.showProgress) return;
 
     final duration = widget.config.progressDuration;
-    final interval = 50;
+    const interval = 50;
     final step = 100 / duration * interval;
 
     _progress = 0.0;
-    _progressTimer = Timer.periodic(Duration(milliseconds: interval), (timer) {
+    _progressTimer =
+        Timer.periodic(const Duration(milliseconds: interval), (timer) {
       setState(() {
         _progress += step;
         if (_progress >= 100) {
@@ -201,28 +209,32 @@ class _MsgBoxActionState extends State<MsgBoxAction> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+    // 消息（优先 htmlMsg，其次 msg）
+    final displayMsg = widget.config.displayMessage ?? '';
 
     // 收集所有内容组件（不包含底部固定的超时和按钮）
     final contentChildren = <Widget>[
       // 图标
       if (_showIcon) _buildIcon(context),
-      // 消息
-      if (widget.config.msg != null && widget.config.msg!.isNotEmpty)
-        _buildMessage(context),
-      // 详情
-      if (widget.config.detail != null && widget.config.detail!.isNotEmpty)
-        _buildDetail(context),
-      // 列表
-      if (widget.config.list != null && widget.config.list!.isNotEmpty)
-        _buildList(context),
-      // 图片
-      if (widget.config.imageUrl != null && widget.config.imageUrl!.isNotEmpty)
-        _buildImage(context),
+
+      // 消息 + 图片作为一个整体（共用同一个灰底卡片）
+      if (displayMsg.isNotEmpty ||
+          (widget.config.imageUrl != null &&
+              widget.config.imageUrl!.isNotEmpty))
+        _buildMessageImageGroup(context, displayMsg),
+
       // 二维码
       if (widget.config.qrcode != null && widget.config.qrcode!.isNotEmpty)
         _buildQrcode(context),
+
+      // 详细信息
+      if (widget.config.detail != null && widget.config.detail!.isNotEmpty)
+        _buildDetail(context),
+
+      // 列表
+      if (widget.config.list != null && widget.config.list!.isNotEmpty)
+        _buildList(context),
+
       // 进度条
       if (widget.config.showProgress) _buildProgress(context),
     ];
@@ -247,8 +259,7 @@ class _MsgBoxActionState extends State<MsgBoxAction> {
   }
 
   Widget _buildIcon(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+    final colorScheme = Theme.of(context).colorScheme;
 
     Color iconColor;
     switch (_iconType) {
@@ -283,11 +294,20 @@ class _MsgBoxActionState extends State<MsgBoxAction> {
     );
   }
 
-  Widget _buildMessage(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+  /// 消息 + 图片作为整体，共用同一个灰底卡片
+  ///
+  /// 顺序：消息在上 → 图片在下（消息作为图注）
+  /// 若只有消息或只有图片，也共用同一个卡片样式，视觉统一
+  Widget _buildMessageImageGroup(BuildContext context, String message) {
+    final colorScheme = Theme.of(context).colorScheme;
 
-    final message = _formatMessage(widget.config.msg);
+    final hasMessage = message.isNotEmpty;
+    final imageUrl = widget.config.imageUrl;
+    final hasImage = imageUrl != null && imageUrl.isNotEmpty;
+
+    if (!hasMessage && !hasImage) {
+      return const SizedBox.shrink();
+    }
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -296,21 +316,79 @@ class _MsgBoxActionState extends State<MsgBoxAction> {
         color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
         borderRadius: BorderRadius.circular(8),
       ),
-      child: SelectableText(
-        message.replaceAll(RegExp(r'<[^>]*>'), ''),
-        style: TextStyle(
-          fontSize: 14,
-          color: colorScheme.onSurface,
-          height: 1.5,
-        ),
-        textAlign: TextAlign.center,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // ---- 消息 ----
+          if (hasMessage)
+            _hasHtml
+                ? SimpleHtmlText(
+                    data: _formatMessage(message),
+                    textAlign: TextAlign.center,
+                    baseStyle: TextStyle(
+                      fontSize: 14,
+                      color: colorScheme.onSurface,
+                      height: 1.5,
+                    ),
+                  )
+                : SelectableText(
+                    message,
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: colorScheme.onSurface,
+                      height: 1.5,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+
+          // 消息与图片之间的间距
+          if (hasMessage && hasImage) const SizedBox(height: 12),
+
+          // ---- 图片 ----
+          if (hasImage)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: Image.network(
+                imageUrl,
+                height: widget.config.imageHeight ?? 200,
+                fit: BoxFit.contain,
+                loadingBuilder: (context, child, loadingProgress) {
+                  if (loadingProgress == null) return child;
+                  return Container(
+                    height: widget.config.imageHeight ?? 200,
+                    alignment: Alignment.center,
+                    child: const CircularProgressIndicator(),
+                  );
+                },
+                errorBuilder: (context, error, stackTrace) {
+                  return Container(
+                    height: widget.config.imageHeight ?? 200,
+                    alignment: Alignment.center,
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.broken_image,
+                            size: 48, color: colorScheme.outline),
+                        const SizedBox(height: 8),
+                        Text(
+                          '图片加载失败',
+                          style: TextStyle(
+                              fontSize: 12, color: colorScheme.outline),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+        ],
       ),
     );
   }
 
   Widget _buildDetail(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+    final colorScheme = Theme.of(context).colorScheme;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -347,8 +425,7 @@ class _MsgBoxActionState extends State<MsgBoxAction> {
   }
 
   Widget _buildList(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+    final colorScheme = Theme.of(context).colorScheme;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -390,55 +467,8 @@ class _MsgBoxActionState extends State<MsgBoxAction> {
     );
   }
 
-  Widget _buildImage(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(4),
-        child: Image.network(
-          widget.config.imageUrl!,
-          height: widget.config.imageHeight ?? 200,
-          fit: BoxFit.contain,
-          loadingBuilder: (context, child, loadingProgress) {
-            if (loadingProgress == null) return child;
-            return Container(
-              height: widget.config.imageHeight ?? 200,
-              alignment: Alignment.center,
-              child: const CircularProgressIndicator(),
-            );
-          },
-          errorBuilder: (context, error, stackTrace) {
-            return Container(
-              height: widget.config.imageHeight ?? 200,
-              alignment: Alignment.center,
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.broken_image, size: 48, color: colorScheme.outline),
-                  const SizedBox(height: 8),
-                  Text('图片加载失败',
-                    style: TextStyle(fontSize: 12, color: colorScheme.outline),
-                  ),
-                ],
-              ),
-            );
-          },
-        ),
-      ),
-    );
-  }
-
   Widget _buildQrcode(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+    final colorScheme = Theme.of(context).colorScheme;
 
     final qrcodeUrl = ActionParser.generateQRCodeUrl(
       widget.config.qrcode!,
@@ -468,10 +498,13 @@ class _MsgBoxActionState extends State<MsgBoxAction> {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.qr_code_scanner, size: 48, color: colorScheme.outline),
+                    Icon(Icons.qr_code_scanner,
+                        size: 48, color: colorScheme.outline),
                     const SizedBox(height: 8),
-                    Text('二维码加载失败',
-                      style: TextStyle(fontSize: 12, color: colorScheme.outline),
+                    Text(
+                      '二维码加载失败',
+                      style:
+                          TextStyle(fontSize: 12, color: colorScheme.outline),
                     ),
                   ],
                 ),
@@ -490,8 +523,7 @@ class _MsgBoxActionState extends State<MsgBoxAction> {
   }
 
   Widget _buildProgress(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+    final colorScheme = Theme.of(context).colorScheme;
 
     final percent = _progress.clamp(0.0, 100.0);
 
@@ -541,8 +573,7 @@ class _MsgBoxActionState extends State<MsgBoxAction> {
   }
 
   Widget _buildTimeout(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+    final colorScheme = Theme.of(context).colorScheme;
 
     return Container(
       margin: const EdgeInsets.only(top: 4, bottom: 8),
@@ -572,44 +603,13 @@ class _MsgBoxActionState extends State<MsgBoxAction> {
   }
 
   Widget _buildButtons(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-
-    final children = <Widget>[];
-
-    if (_showCancelButton) {
-      children.add(
-        TextButton(
-          onPressed: _handleCancel,
-          child: Text(widget.config.cancelText ?? '取消'),
-        ),
-      );
-    }
-
-    if (_showOkButton) {
-      children.add(
-        ElevatedButton(
-          onPressed: _handleSubmit,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: colorScheme.primary,
-            foregroundColor: colorScheme.onPrimary,
-          ),
-          child: Text(widget.config.okText ?? '确定'),
-        ),
-      );
-    }
-
-    if (children.isEmpty) {
-      return const SizedBox.shrink();
-    }
-
-    return Container(
-      margin: const EdgeInsets.only(top: 12),
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.end,
-        children: children,
-      ),
+    return ActionButtonBar(
+      showCancel: _showCancelButton,
+      showOk: _showOkButton,
+      cancelText: widget.config.cancelText ?? '取消',
+      okText: widget.config.okText ?? '确定',
+      onCancel: _handleCancel,
+      onOk: _handleSubmit,
     );
   }
 }

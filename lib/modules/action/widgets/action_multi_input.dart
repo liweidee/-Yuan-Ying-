@@ -1,15 +1,18 @@
 // lib/modules/action/widgets/action_multi_input.dart
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 
 import '../models/action_config.dart';
 import '../models/button_type.dart';
 import '../utils/action_parser.dart';
-import '../models/action_type.dart';
 import 'action_renderer.dart';
+import 'action_button_bar.dart';
+import 'action_chip_style.dart';
 
 class MultiInputAction extends StatefulWidget {
   const MultiInputAction({
@@ -47,6 +50,13 @@ class MultiInputAction extends StatefulWidget {
 }
 
 class _MultiInputActionState extends State<MultiInputAction> {
+  /// 内联 chip 的选项数量上限。超过则只显示下拉弹窗按钮，
+  /// 避免 chip 撑高输入卡片、破坏布局。
+  static const int _inlineChipLimit = 5;
+
+  /// 图片 base64 编码上限（避免超长字符串导致 UI 卡顿/提交超时）
+  static const int _maxImageBytes = 2 * 1024 * 1024; // 2MB
+
   late final ActionRenderer _renderer;
 
   List<InputItemConfig> _inputItems = [];
@@ -55,17 +65,6 @@ class _MultiInputActionState extends State<MultiInputAction> {
 
   Timer? _timeoutTimer;
   int _timeLeft = 0;
-
-  // ===== 选项弹窗状态（保留，使用 OverlayEntry 实现） =====
-  bool _showOptionsDialog = false;
-  int _optionsIndex = -1;
-  List<SelectOption> _options = [];
-  String _selectedRadioValue = '';
-  List<String> _selectedCheckboxValues = [];
-  bool _isMultiSelect = false;
-  int _selectColumn = 4;
-
-  bool get _isEnhanced => widget.config.type == ActionType.multiInputX;
 
   bool get _showOkButton => widget.config.button.showOk;
   bool get _showCancelButton => widget.config.button.showCancel;
@@ -241,9 +240,7 @@ class _MultiInputActionState extends State<MultiInputAction> {
   }
 
   bool _hasNonSpecialOptions(InputItemConfig item) {
-    if (item.selectData == null) return false;
-    final options = ActionParser.parseSelectData(item.selectData!);
-    return options.any((opt) => !opt.isSpecial);
+    return _getNonSpecialOptions(item).isNotEmpty;
   }
 
   List<SelectOption> _getNonSpecialOptions(InputItemConfig item) {
@@ -293,79 +290,78 @@ class _MultiInputActionState extends State<MultiInputAction> {
     widget.onReset?.call();
   }
 
-  void _addInputItem() {
-    setState(() {
-      final newItem = InputItemConfig(
-        id: 'dynamic_${DateTime.now().millisecondsSinceEpoch}',
-        name: '输入项 ${_inputItems.length + 1}',
-        tip: '请输入内容',
-        required: false,
-      );
-      _inputItems.add(newItem);
-      _controllers.add(TextEditingController());
-      _errors.add('');
-    });
-  }
+  // ============================================================
+  // 快速选择 chip 点击
+  //
+  // - 单选：直接覆盖 controller.text
+  // - 多选：在逗号分隔的列表里 toggle
+  //
+  // 统一走这个方法后，chip 与下拉弹窗在语义上完全一致。
+  // ============================================================
+  void _onQuickOptionTap(int index, SelectOption option, bool isMulti) {
+    if (!isMulti) {
+      setState(() {
+        _controllers[index].text = option.value;
+        _errors[index] = '';
+      });
+    } else {
+      final current = _controllers[index].text;
+      final values = current.isEmpty
+          ? <String>[]
+          : current
+              .split(',')
+              .map((s) => s.trim())
+              .where((s) => s.isNotEmpty)
+              .toList();
 
-  void _removeInputItem(int index) {
-    if (_inputItems.length <= 1) return;
-    setState(() {
-      _controllers[index].dispose();
-      _inputItems.removeAt(index);
-      _controllers.removeAt(index);
-      _errors.removeAt(index);
-    });
-  }
-
-  void _clearAll() {
-    setState(() {
-      for (int i = 0; i < _controllers.length; i++) {
-        _controllers[i].text = '';
-        _errors[i] = '';
+      if (values.contains(option.value)) {
+        values.remove(option.value);
+      } else {
+        values.add(option.value);
       }
-    });
-  }
 
-  void _fillExample() {
-    setState(() {
-      for (int i = 0; i < _inputItems.length; i++) {
-        _controllers[i].text = '示例${i + 1}';
-        _errors[i] = '';
-        _validateInput(i);
-      }
-    });
-  }
-
-  void _selectQuickOption(int index, SelectOption option) {
-    setState(() {
-      _controllers[index].text = option.value;
-      _errors[index] = '';
-    });
+      setState(() {
+        _controllers[index].text = values.join(',');
+        _errors[index] = '';
+      });
+    }
     _validateInput(index);
   }
 
+  /// 判断当前 chip 是否处于"被选中"状态
+  bool _isQuickOptionSelected(String text, String value, bool isMulti) {
+    if (!isMulti) return text == value;
+    if (text.isEmpty) return false;
+    return text
+        .split(',')
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .contains(value);
+  }
+
   // ============================================================
-  // 日期选择器 → 使用 Flutter 原生 showDatePicker
+  // 日期选择器
   // ============================================================
   Future<void> _showDatePickerDialog(int index) async {
     final overlay = Overlay.of(context);
     OverlayEntry? overlayEntry;
 
     DateTime selectedDate = DateTime.now();
+    final cs = Theme.of(context).colorScheme;
 
     overlayEntry = OverlayEntry(
       builder: (context) => Material(
-        color: Colors.black.withOpacity(0.5),
+        color: cs.scrim.withValues(alpha: 0.5),
         child: Center(
           child: Container(
             width: 360,
             constraints: const BoxConstraints(maxWidth: 360),
             decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surface,
+              color: cs.surface,
               borderRadius: BorderRadius.circular(16),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.2),
+                  color: cs.shadow.withValues(alpha: 0.2),
                   blurRadius: 20,
                   offset: const Offset(0, 10),
                 ),
@@ -380,7 +376,7 @@ class _MultiInputActionState extends State<MultiInputAction> {
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w600,
-                    color: Theme.of(context).colorScheme.onSurface,
+                    color: cs.onSurface,
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -408,7 +404,6 @@ class _MultiInputActionState extends State<MultiInputAction> {
                     const SizedBox(width: 8),
                     ElevatedButton(
                       onPressed: () {
-                        // 保存日期到对应的输入框
                         if (index >= 0 && index < _controllers.length) {
                           setState(() {
                             _controllers[index].text =
@@ -434,25 +429,26 @@ class _MultiInputActionState extends State<MultiInputAction> {
   }
 
   // ============================================================
-  // 帮助对话框 → 使用 showDialog 独立弹出
+  // 帮助对话框
   // ============================================================
   void _showHelp(String content) {
     final overlay = Overlay.of(context);
     OverlayEntry? overlayEntry;
+    final cs = Theme.of(context).colorScheme;
 
     overlayEntry = OverlayEntry(
       builder: (context) => Material(
-        color: Colors.black.withOpacity(0.5),
+        color: cs.scrim.withValues(alpha: 0.5),
         child: Center(
           child: Container(
-            width: 400, // 固定最大宽度
+            width: 400,
             constraints: const BoxConstraints(maxWidth: 400),
             decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surface,
+              color: cs.surface,
               borderRadius: BorderRadius.circular(16),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.2),
+                  color: cs.shadow.withValues(alpha: 0.2),
                   blurRadius: 20,
                   offset: const Offset(0, 10),
                 ),
@@ -468,7 +464,7 @@ class _MultiInputActionState extends State<MultiInputAction> {
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w600,
-                    color: Theme.of(context).colorScheme.onSurface,
+                    color: cs.onSurface,
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -478,7 +474,7 @@ class _MultiInputActionState extends State<MultiInputAction> {
                     style: TextStyle(
                       fontSize: 14,
                       height: 1.6,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      color: cs.onSurfaceVariant,
                     ),
                   ),
                 ),
@@ -492,9 +488,7 @@ class _MultiInputActionState extends State<MultiInputAction> {
                       },
                       child: Text(
                         '确定',
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.primary,
-                        ),
+                        style: TextStyle(color: cs.primary),
                       ),
                     ),
                   ],
@@ -526,32 +520,104 @@ class _MultiInputActionState extends State<MultiInputAction> {
     }
   }
 
-  void _pickFile(int index) {
-    setState(() {
-      _controllers[index].text = 'selected_file.txt';
-      _errors[index] = '';
-    });
-    _validateInput(index);
+  // ============================================================
+  // 文件 / 文件夹 / 图片选择（file_picker 13.1.0）
+  // ============================================================
+
+  /// 选择单个文件（返回文件绝对路径）
+  Future<void> _pickFile(int index) async {
+    try {
+      final file = await FilePicker.pickFile();
+      if (file == null) return;
+      final path = file.path ?? file.name;
+
+      if (!mounted) return;
+      setState(() {
+        _controllers[index].text = path;
+        _errors[index] = '';
+      });
+      _validateInput(index);
+    } catch (e) {
+      debugPrint('文件选择失败: $e');
+      widget.onToast?.call('文件选择失败: $e', 'error');
+    }
   }
 
-  void _pickFolder(int index) {
-    setState(() {
-      _controllers[index].text = 'selected_folder';
-      _errors[index] = '';
-    });
-    _validateInput(index);
+  /// 选择文件夹（返回文件夹绝对路径）
+  Future<void> _pickFolder(int index) async {
+    try {
+      final path = await FilePicker.getDirectoryPath();
+      if (path == null || path.isEmpty) return;
+
+      if (!mounted) return;
+      setState(() {
+        _controllers[index].text = path;
+        _errors[index] = '';
+      });
+      _validateInput(index);
+    } catch (e) {
+      debugPrint('文件夹选择失败: $e');
+      widget.onToast?.call('文件夹选择失败: $e', 'error');
+    }
   }
 
-  void _pickImage(int index) {
-    setState(() {
-      _controllers[index].text = 'image_base64_data';
-      _errors[index] = '';
-    });
-    _validateInput(index);
+  /// 选择图片（读取为 base64 data URL，与 Vue 版 FileReader.readAsDataURL 输出格式一致）
+  Future<void> _pickImage(int index) async {
+    try {
+      final file = await FilePicker.pickFile(type: FileType.image);
+      if (file == null) return;
+      final path = file.path;
+      if (path == null) return;
+
+      // 读取文件并转 base64
+      final bytes = await File(path).readAsBytes();
+
+      // 文件过大提示（避免 base64 超长字符串导致 UI 卡顿/提交超时）
+      if (bytes.length > _maxImageBytes) {
+        widget.onToast?.call(
+          '图片过大（>${(_maxImageBytes / 1024 / 1024).toStringAsFixed(1)}MB），请选择更小的图片',
+          'error',
+        );
+        return;
+      }
+
+      final base64Str = base64Encode(bytes);
+      final mime = _guessMimeType(file.extension);
+      final dataUrl = 'data:$mime;base64,$base64Str';
+
+      if (!mounted) return;
+      setState(() {
+        _controllers[index].text = dataUrl;
+        _errors[index] = '';
+      });
+      _validateInput(index);
+    } catch (e) {
+      debugPrint('图片选择失败: $e');
+      widget.onToast?.call('图片选择失败: $e', 'error');
+    }
+  }
+
+  /// 根据扩展名推断 MIME 类型
+  String _guessMimeType(String? ext) {
+    switch (ext?.toLowerCase()) {
+      case 'png':
+        return 'image/png';
+      case 'jpg':
+      case 'jpeg':
+        return 'image/jpeg';
+      case 'gif':
+        return 'image/gif';
+      case 'webp':
+        return 'image/webp';
+      case 'bmp':
+        return 'image/bmp';
+      default:
+        return 'image/png';
+    }
   }
 
   // ============================================================
-  // 选项弹窗（保留，使用 OverlayEntry 实现）
+  // 选项弹窗（选项数超过 _inlineChipLimit 时使用）
   // ============================================================
   void _openOptionsDialog(int index) {
     final item = _inputItems[index];
@@ -559,13 +625,17 @@ class _MultiInputActionState extends State<MultiInputAction> {
 
     final options = ActionParser.parseSelectData(item.selectData!);
     final isMultiSelect = item.multiSelect;
-    final selectColumn = item.selectColumn ?? 4;
+    final selectColumn = item.selectColumn;
 
     String selectedRadioValue = _controllers[index].text;
     List<String> selectedCheckboxValues = [];
     if (isMultiSelect) {
       selectedCheckboxValues = _controllers[index].text.isNotEmpty
-          ? _controllers[index].text.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).toList()
+          ? _controllers[index].text
+              .split(',')
+              .map((s) => s.trim())
+              .where((s) => s.isNotEmpty)
+              .toList()
           : [];
     }
 
@@ -574,185 +644,241 @@ class _MultiInputActionState extends State<MultiInputAction> {
 
     OverlayEntry? overlayEntry;
 
+    // 弹窗宽度
+    final double dialogWidth = isMultiSelect
+        ? (MediaQuery.of(context).size.width * 0.8).clamp(320.0, 460.0)
+        : 400.0;
+
     overlayEntry = OverlayEntry(
-      builder: (context) => Material(
-        color: Colors.black.withOpacity(0.5),
+      builder: (overlayCtx) => Material(
+        color: Theme.of(overlayCtx).colorScheme.scrim.withValues(alpha: 0.5),
         child: Center(
-          child: Container(
-            width: isMultiSelect
-                ? (selectColumn.clamp(1, 4) * 120 + 60).toDouble().clamp(300.0, MediaQuery.of(context).size.width * 0.85)
-                : 400,
-            height: MediaQuery.of(context).size.height * 0.55,
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surface,
-              borderRadius: BorderRadius.circular(16),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.2),
-                  blurRadius: 20,
-                  offset: const Offset(0, 10),
-                ),
-              ],
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(overlayCtx).size.height * 0.55,
             ),
-            padding: const EdgeInsets.all(16),
-            child: StatefulBuilder(
-              builder: (context, setStateDialog) {
-                return Column(
-                  children: [
-                    Text(
-                      isMultiSelect ? '请选择（多选）' : '请选择',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: Theme.of(context).colorScheme.onSurface,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Expanded(
-                      child: ListView(
+            child: Container(
+              width: dialogWidth,
+              decoration: BoxDecoration(
+                color: Theme.of(overlayCtx).colorScheme.surface,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: Theme.of(overlayCtx)
+                        .colorScheme
+                        .shadow
+                        .withValues(alpha: 0.2),
+                    blurRadius: 20,
+                    offset: const Offset(0, 10),
+                  ),
+                ],
+              ),
+              padding: const EdgeInsets.all(16),
+              child: StatefulBuilder(
+                builder: (context, setStateDialog) {
+                  final cs = Theme.of(context).colorScheme;
+
+                  // ---- 多选内容区（按 selectColumn 决定布局）----
+                  Widget buildMultiSelectContent() {
+                    final columns = (selectColumn ?? 0).clamp(0, 4);
+
+                    Widget chipFor(SelectOption opt) {
+                      final isSelected =
+                          selectedCheckboxValues.contains(opt.value);
+                      return buildActionSelectChip(
+                        context: context,
+                        label: opt.name,
+                        isSelected: isSelected,
+                        maxWidth: 200,   // ← 长选项自动省略
+                        onTap: () {
+                          setStateDialog(() {
+                            if (!isSelected) {
+                              if (!selectedCheckboxValues
+                                  .contains(opt.value)) {
+                                selectedCheckboxValues.add(opt.value);
+                              }
+                            } else {
+                              selectedCheckboxValues.remove(opt.value);
+                            }
+                          });
+                        },
+                      );
+                    }
+
+                    // 单列
+                    if (columns == 1) {
+                      return SingleChildScrollView(
                         physics: const AlwaysScrollableScrollPhysics(
                           parent: BouncingScrollPhysics(),
                         ),
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        children: isMultiSelect
-                            ? options.map((option) {
-                                final isSelected = selectedCheckboxValues.contains(option.value);
-                                return Padding(
-                                  padding: const EdgeInsets.symmetric(vertical: 4),
-                                  child: ChoiceChip(
-                                    label: Text(
-                                      option.name,
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: isSelected
-                                            ? Theme.of(context).colorScheme.onPrimary
-                                            : Theme.of(context).colorScheme.onSurface,
-                                      ),
-                                    ),
-                                    selected: isSelected,
-                                    onSelected: (selected) {
-                                      setStateDialog(() {
-                                        if (selected) {
-                                          if (!selectedCheckboxValues.contains(option.value)) {
-                                            selectedCheckboxValues.add(option.value);
-                                          }
-                                        } else {
-                                          selectedCheckboxValues.remove(option.value);
-                                        }
-                                      });
-                                    },
-                                    backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
-                                    selectedColor: Theme.of(context).colorScheme.primary,
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                    labelPadding: const EdgeInsets.symmetric(horizontal: 4),
-                                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                  ),
-                                );
-                              }).toList()
-                            : options.map((option) {
-                                final isSelected = selectedRadioValue == option.value;
-                                return RadioListTile<String>(
-                                  title: Text(
-                                    option.name,
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      color: Theme.of(context).colorScheme.onSurface,
-                                    ),
-                                  ),
-                                  value: option.value,
-                                  groupValue: selectedRadioValue,
-                                  onChanged: (value) {
-                                    setStateDialog(() {
-                                      selectedRadioValue = value ?? '';
-                                    });
-                                  },
-                                  contentPadding: EdgeInsets.zero,
-                                  dense: true,
-                                  visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 4, vertical: 4),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: options.map((opt) {
+                            return Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(vertical: 2),
+                              child: Align(
+                                alignment: Alignment.centerLeft,
+                                child: chipFor(opt),
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                      );
+                    }
+
+                    // 固定列数网格
+                    if (columns >= 2) {
+                      return LayoutBuilder(
+                        builder: (context, constraints) {
+                          const spacing = 8.0;
+                          final itemWidth = (constraints.maxWidth -
+                                  spacing * (columns - 1)) /
+                              columns;
+                          return SingleChildScrollView(
+                            physics: const AlwaysScrollableScrollPhysics(
+                              parent: BouncingScrollPhysics(),
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 4, vertical: 4),
+                            child: Wrap(
+                              spacing: spacing,
+                              runSpacing: spacing,
+                              children: options.map((opt) {
+                                return SizedBox(
+                                  width: itemWidth,
+                                  child: chipFor(opt),
                                 );
                               }).toList(),
+                            ),
+                          );
+                        },
+                      );
+                    }
+
+                    // 自动流式（默认）
+                    return SingleChildScrollView(
+                      physics: const AlwaysScrollableScrollPhysics(
+                        parent: BouncingScrollPhysics(),
                       ),
-                    ),
-                    if (isMultiSelect)
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          TextButton(
-                            onPressed: () {
-                              setStateDialog(() {
-                                selectedCheckboxValues = options.map((opt) => opt.value).toList();
-                              });
-                            },
-                            style: TextButton.styleFrom(
-                              foregroundColor: Theme.of(context).colorScheme.onSurface,
-                            ),
-                            child: const Text('全选'),
-                          ),
-                          TextButton(
-                            onPressed: () {
-                              setStateDialog(() {
-                                selectedCheckboxValues = [];
-                              });
-                            },
-                            style: TextButton.styleFrom(
-                              foregroundColor: Theme.of(context).colorScheme.onSurface,
-                            ),
-                            child: const Text('全清'),
-                          ),
-                          TextButton(
-                            onPressed: () {
-                              setStateDialog(() {
-                                final allValues = options.map((opt) => opt.value).toList();
-                                selectedCheckboxValues = allValues
-                                    .where((value) => !selectedCheckboxValues.contains(value))
-                                    .toList();
-                              });
-                            },
-                            style: TextButton.styleFrom(
-                              foregroundColor: Theme.of(context).colorScheme.onSurface,
-                            ),
-                            child: const Text('反选'),
-                          ),
-                        ],
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 4, vertical: 4),
+                      child: Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: options.map(chipFor).toList(),
                       ),
-                    const SizedBox(height: 8),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        TextButton(
-                          onPressed: () {
-                            overlayEntry?.remove();
-                          },
-                          style: TextButton.styleFrom(
-                            foregroundColor: Theme.of(context).colorScheme.onSurface,
-                          ),
-                          child: const Text('取消'),
+                    );
+                  }
+
+                  // ---- 单选内容区 ----
+                  Widget buildSingleSelectContent() {
+                    return SingleChildScrollView(
+                      physics: const AlwaysScrollableScrollPhysics(
+                        parent: BouncingScrollPhysics(),
+                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: options.map((option) {
+                          final isSelected =
+                              selectedRadioValue == option.value;
+                          return buildActionSelectRadio(
+                            context: context,
+                            label: option.name,
+                            isSelected: isSelected,
+                            onTap: () {
+                              setStateDialog(() {
+                                selectedRadioValue = option.value;
+                              });
+                            },
+                          );
+                        }).toList(),
+                      ),
+                    );
+                  }
+
+                  return Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        isMultiSelect ? '请选择（多选）' : '请选择',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          color: cs.onSurface,
                         ),
-                        const SizedBox(width: 8),
-                        ElevatedButton(
-                          onPressed: () {
-                            setState(() {
-                              if (isMultiSelect) {
-                                _controllers[optionsIndex].text = selectedCheckboxValues.join(',');
-                              } else {
-                                _controllers[optionsIndex].text = selectedRadioValue;
-                              }
-                              _errors[optionsIndex] = '';
-                            });
-                            _validateInput(optionsIndex);
-                            overlayEntry?.remove();
-                          },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Theme.of(context).colorScheme.primary,
-                            foregroundColor: Theme.of(context).colorScheme.onPrimary,
-                          ),
-                          child: const Text('确定'),
+                      ),
+                      const SizedBox(height: 12),
+                      Flexible(
+                        child: isMultiSelect
+                            ? buildMultiSelectContent()
+                            : buildSingleSelectContent(),
+                      ),
+                      if (isMultiSelect)
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            TextButton(
+                              onPressed: () {
+                                setStateDialog(() {
+                                  selectedCheckboxValues =
+                                      options.map((opt) => opt.value).toList();
+                                });
+                              },
+                              child: const Text('全选'),
+                            ),
+                            TextButton(
+                              onPressed: () {
+                                setStateDialog(() {
+                                  selectedCheckboxValues = [];
+                                });
+                              },
+                              child: const Text('全清'),
+                            ),
+                            TextButton(
+                              onPressed: () {
+                                setStateDialog(() {
+                                  final allValues =
+                                      options.map((opt) => opt.value).toList();
+                                  selectedCheckboxValues = allValues
+                                      .where((value) => !selectedCheckboxValues
+                                          .contains(value))
+                                      .toList();
+                                });
+                              },
+                              child: const Text('反选'),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
-                  ],
-                );
-              },
+                      // 底部按钮：与其它 Action 弹窗保持一致
+                      ActionButtonBar(
+                        showCancel: true,
+                        showOk: true,
+                        onCancel: () {
+                          overlayEntry?.remove();
+                        },
+                        onOk: () {
+                          setState(() {
+                            if (isMultiSelect) {
+                              _controllers[optionsIndex].text =
+                                  selectedCheckboxValues.join(',');
+                            } else {
+                              _controllers[optionsIndex].text =
+                                  selectedRadioValue;
+                            }
+                            _errors[optionsIndex] = '';
+                          });
+                          _validateInput(optionsIndex);
+                          overlayEntry?.remove();
+                        },
+                      ),
+                    ],
+                  );
+                },
+              ),
             ),
           ),
         ),
@@ -760,164 +886,6 @@ class _MultiInputActionState extends State<MultiInputAction> {
     );
 
     overlayContext.insert(overlayEntry!);
-  }
-
-  void _confirmOptions() {
-    if (_optionsIndex >= 0) {
-      setState(() {
-        if (_isMultiSelect) {
-          _controllers[_optionsIndex].text = _selectedCheckboxValues.join(',');
-        } else {
-          _controllers[_optionsIndex].text = _selectedRadioValue;
-        }
-        _errors[_optionsIndex] = '';
-        _showOptionsDialog = false;
-        _optionsIndex = -1;
-        _options = [];
-        _selectedCheckboxValues = [];
-        _selectedRadioValue = '';
-      });
-      _validateInput(_optionsIndex);
-    }
-  }
-
-  void _cancelOptions() {
-    setState(() {
-      _showOptionsDialog = false;
-      _optionsIndex = -1;
-      _options = [];
-      _selectedCheckboxValues = [];
-      _selectedRadioValue = '';
-    });
-  }
-
-  void _selectAll() {
-    setState(() {
-      _selectedCheckboxValues = _options.map((opt) => opt.value).toList();
-    });
-  }
-
-  void _clearSelection() {
-    setState(() {
-      _selectedCheckboxValues = [];
-    });
-  }
-
-  void _invertSelection() {
-    setState(() {
-      final allValues = _options.map((opt) => opt.value).toList();
-      _selectedCheckboxValues = allValues
-          .where((value) => !_selectedCheckboxValues.contains(value))
-          .toList();
-    });
-  }
-
-  void _openTextEditor(int index) {
-    final overlayContext = Overlay.of(context);
-    final currentIndex = index;
-    final editorController = TextEditingController(text: _controllers[currentIndex].text);
-    String tempText = editorController.text;
-
-    OverlayEntry? overlayEntry;
-
-    overlayEntry = OverlayEntry(
-      builder: (context) => Material(
-        color: Colors.black.withOpacity(0.5),
-        child: Center(
-          child: Container(
-            width: _getEditorWidth(context),
-            height: MediaQuery.of(context).size.height * 0.6,
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surface,
-              borderRadius: BorderRadius.circular(16),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.2),
-                  blurRadius: 20,
-                  offset: const Offset(0, 10),
-                ),
-              ],
-            ),
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '大文本编辑器',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
-                    color: Theme.of(context).colorScheme.onSurface,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Expanded(
-                  child: TextField(
-                    controller: editorController,
-                    maxLines: null,
-                    expands: true,
-                    decoration: InputDecoration(
-                      hintText: '请输入文本内容...',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      contentPadding: const EdgeInsets.all(12),
-                    ),
-                    onChanged: (value) {
-                      tempText = value;
-                    },
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    TextButton(
-                      onPressed: () {
-                        overlayEntry?.remove();
-                      },
-                      style: TextButton.styleFrom(
-                        foregroundColor: Theme.of(context).colorScheme.onSurface,
-                      ),
-                      child: const Text('取消'),
-                    ),
-                    const SizedBox(width: 8),
-                    ElevatedButton(
-                      onPressed: () {
-                        setState(() {
-                          _controllers[currentIndex].text = tempText;
-                          _errors[currentIndex] = '';
-                        });
-                        _validateInput(currentIndex);
-                        overlayEntry?.remove();
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Theme.of(context).colorScheme.primary,
-                        foregroundColor: Theme.of(context).colorScheme.onPrimary,
-                      ),
-                      child: const Text('确定'),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-
-    overlayContext.insert(overlayEntry!);
-  }
-
-  double _getEditorWidth(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isMobile = screenWidth < 600;
-    
-    if (isMobile) {
-      return (screenWidth * 0.85).clamp(300.0, 500.0);
-    } else {
-      return (560.0).clamp(400.0, screenWidth * 0.8);
-    }
   }
 
   // ============================================================
@@ -952,12 +920,13 @@ class _MultiInputActionState extends State<MultiInputAction> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // ===== 顶部固定 =====
-            if (displayMessage.isNotEmpty) _buildMessage(context, displayMessage),
-            if (widget.config.imageUrl != null && widget.config.imageUrl!.isNotEmpty)
+            if (displayMessage.isNotEmpty)
+              _buildMessage(context, displayMessage),
+            if (widget.config.imageUrl != null &&
+                widget.config.imageUrl!.isNotEmpty)
               _buildImage(context),
 
             // ===== 中间滚动区域 =====
-            // 改为 Flexible，自适应高度，不强制拉伸
             Flexible(
               child: SingleChildScrollView(
                 physics: const BouncingScrollPhysics(),
@@ -966,21 +935,15 @@ class _MultiInputActionState extends State<MultiInputAction> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     _buildInputList(context),
-                    if (widget.config.timeout > 0 && _timeLeft > 0) _buildTimeout(context),
+                    if (widget.config.timeout > 0 && _timeLeft > 0)
+                      _buildTimeout(context),
                   ],
                 ),
               ),
             ),
 
             // ===== 底部固定区域 =====
-            Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (_isEnhanced) _buildEnhancedControls(context),
-                _buildButtons(context),
-              ],
-            ),
+            _buildButtons(context),
           ],
         ),
       );
@@ -988,8 +951,7 @@ class _MultiInputActionState extends State<MultiInputAction> {
   }
 
   Widget _buildMessage(BuildContext context, String message) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+    final colorScheme = Theme.of(context).colorScheme;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -1022,8 +984,7 @@ class _MultiInputActionState extends State<MultiInputAction> {
   }
 
   Widget _buildImage(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+    final colorScheme = Theme.of(context).colorScheme;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -1034,7 +995,6 @@ class _MultiInputActionState extends State<MultiInputAction> {
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(4),
-        // 添加 Align 实现居中，不添加任何 onTapDown
         child: Align(
           alignment: Alignment.center,
           child: Image.network(
@@ -1056,10 +1016,13 @@ class _MultiInputActionState extends State<MultiInputAction> {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.broken_image, size: 48, color: colorScheme.outline),
+                    Icon(Icons.broken_image,
+                        size: 48, color: colorScheme.outline),
                     const SizedBox(height: 8),
-                    Text('图片加载失败',
-                      style: TextStyle(fontSize: 12, color: colorScheme.outline),
+                    Text(
+                      '图片加载失败',
+                      style: TextStyle(
+                          fontSize: 12, color: colorScheme.outline),
                     ),
                   ],
                 ),
@@ -1072,11 +1035,18 @@ class _MultiInputActionState extends State<MultiInputAction> {
   }
 
   // ============================================================
-  // 输入列表 - 描述行使用 Expanded + Wrap + softWrap
+  // 输入列表
+  //
+  // 每个卡片内部布局：
+  //   [描述行 + 帮助]
+  //   [内联 chip]  ← 仅当选项 ≤ _inlineChipLimit 时显示
+  //   [输入框 + 图标按钮（特殊类型 / 下拉按钮）]
+  //   [错误信息]
+  //
+  // 内联 chip 与下拉按钮互斥，避免功能重复。
   // ============================================================
   Widget _buildInputList(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+    final colorScheme = Theme.of(context).colorScheme;
 
     return ConstrainedBox(
       constraints: BoxConstraints(
@@ -1088,13 +1058,26 @@ class _MultiInputActionState extends State<MultiInputAction> {
             final item = _inputItems[index];
             final controller = _controllers[index];
             final error = _errors[index];
-            final isEnhanced = _isEnhanced;
+
+            final specialType = _getSpecialType(item);
+            final nonSpecialOptions = _getNonSpecialOptions(item);
+            final hasNonSpecial = nonSpecialOptions.isNotEmpty;
+
+            // 内联 chip：非特殊 + 有普通选项 + 选项数 ≤ 上限
+            final showInlineChips = specialType == null &&
+                hasNonSpecial &&
+                nonSpecialOptions.length <= _inlineChipLimit;
+
+            // 下拉按钮：非特殊 + 有普通选项 + 不显示 chip
+            final showDropdown =
+                specialType == null && hasNonSpecial && !showInlineChips;
 
             return Container(
               margin: const EdgeInsets.only(bottom: 8),
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
+                color:
+                    colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(
                   color: error.isNotEmpty
@@ -1105,8 +1088,8 @@ class _MultiInputActionState extends State<MultiInputAction> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // ===== 描述行（使用 Expanded + Wrap + softWrap） =====
-                  if (item.name != null && item.name!.isNotEmpty)
+                  // ===== 描述行 =====
+                  if (item.name != null && item.name!.isNotEmpty) ...[
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
@@ -1123,7 +1106,7 @@ class _MultiInputActionState extends State<MultiInputAction> {
                                   fontWeight: FontWeight.w500,
                                   color: colorScheme.onSurface,
                                 ),
-                                softWrap: true, // 允许换行
+                                softWrap: true,
                               ),
                               if (item.required)
                                 Text(
@@ -1134,60 +1117,54 @@ class _MultiInputActionState extends State<MultiInputAction> {
                                     color: colorScheme.error,
                                   ),
                                 ),
-                              if (item.help != null && item.help!.isNotEmpty)
+                              if (item.help != null &&
+                                  item.help!.isNotEmpty)
                                 IconButton(
                                   icon: Icon(
                                     Icons.help_outline,
                                     size: 16,
                                     color: colorScheme.outline,
                                   ),
-                                  onPressed: () => _showHelp(item.help!), // 使用独立的 showDialog
+                                  onPressed: () => _showHelp(item.help!),
                                   padding: const EdgeInsets.all(2),
-                                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                                  constraints: const BoxConstraints(
+                                      minWidth: 28, minHeight: 28),
                                   visualDensity: VisualDensity.compact,
                                 ),
                             ],
                           ),
                         ),
-                        if (isEnhanced && _inputItems.length > 1)
-                          IconButton(
-                            icon: Icon(
-                              Icons.close,
-                              size: 16,
-                              color: colorScheme.error,
-                            ),
-                            onPressed: () => _removeInputItem(index),
-                            padding: const EdgeInsets.all(4),
-                            constraints: const BoxConstraints(),
-                          ),
                       ],
                     ),
+                    const SizedBox(height: 6),
+                  ],
 
-                  const SizedBox(height: 6),
-
-                  // ===== 快速选择 Chip =====
-                  if (_hasNonSpecialOptions(item))
-                    Wrap(
-                      spacing: 4,
-                      runSpacing: 4,
-                      children: _getNonSpecialOptions(item).map((option) {
-                        final isSelected = controller.text == option.value;
-                        return ChoiceChip(
-                          label: Text(
-                            option.name,
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: isSelected ? colorScheme.primary : colorScheme.onSurface,
+                  // ===== 内联 chip（含与输入框的间距）=====
+                  if (showInlineChips)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: nonSpecialOptions.map((option) {
+                          final isSelected = _isQuickOptionSelected(
+                            controller.text,
+                            option.value,
+                            item.multiSelect,
+                          );
+                          return buildActionSelectChip(
+                            context: context,
+                            label: option.name,
+                            isSelected: isSelected,
+                            fontSize: 11,
+                            onTap: () => _onQuickOptionTap(
+                              index,
+                              option,
+                              item.multiSelect,
                             ),
-                          ),
-                          selected: isSelected,
-                          onSelected: (_) => _selectQuickOption(index, option),
-                          backgroundColor: colorScheme.surfaceContainerHighest,
-                          selectedColor: colorScheme.primaryContainer,
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                          labelPadding: const EdgeInsets.symmetric(horizontal: 4),
-                        );
-                      }).toList(),
+                          );
+                        }).toList(),
+                      ),
                     ),
 
                   // ===== 输入行 =====
@@ -1196,39 +1173,29 @@ class _MultiInputActionState extends State<MultiInputAction> {
                       Expanded(
                         child: _buildInputField(context, index),
                       ),
-                      if (_getSpecialType(item) != null)
-                        IconButton(
-                          icon: _getSpecialIcon(_getSpecialType(item)!),
-                          onPressed: () => _handleSpecialInput(
-                            index,
-                            _getSpecialType(item)!,
-                          ),
-                          padding: const EdgeInsets.all(4),
-                          constraints: const BoxConstraints(),
+                      if (specialType != null) ...[
+                        const SizedBox(width: 8),
+                        _buildRoundIconButton(
+                          context: context,
+                          icon: _getSpecialIconData(specialType),
+                          background:
+                              _getSpecialIconColors(context, specialType).$1,
+                          foreground:
+                              _getSpecialIconColors(context, specialType).$2,
+                          onPressed: () =>
+                              _handleSpecialInput(index, specialType),
                         ),
-                      if (item.selectData != null &&
-                          _getSpecialType(item) == null &&
-                          _hasNonSpecialOptions(item))
-                        IconButton(
-                          icon: Icon(
-                            Icons.arrow_drop_down,
-                            size: 20,
-                            color: colorScheme.outline,
-                          ),
+                      ],
+                      if (showDropdown) ...[
+                        const SizedBox(width: 8),
+                        _buildRoundIconButton(
+                          context: context,
+                          icon: Icons.expand_more,
+                          background: colorScheme.surfaceContainerHighest,
+                          foreground: colorScheme.onSurfaceVariant,
                           onPressed: () => _openOptionsDialog(index),
-                          padding: const EdgeInsets.all(4),
-                          constraints: const BoxConstraints(),
                         ),
-                      IconButton(
-                        icon: Icon(
-                          Icons.open_in_full,
-                          size: 18,
-                          color: colorScheme.outline,
-                        ),
-                        onPressed: () => _openTextEditor(index),
-                        padding: const EdgeInsets.all(4),
-                        constraints: const BoxConstraints(),
-                      ),
+                      ],
                     ],
                   ),
 
@@ -1271,14 +1238,15 @@ class _MultiInputActionState extends State<MultiInputAction> {
     if (isMultiLine) {
       return TextField(
         controller: controller,
-        maxLines: item.multiLine.clamp(2, 8),
+        maxLines: item.multiLine.clamp(2, 10),
         decoration: InputDecoration(
           hintText: item.tip ?? '请输入内容...',
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(8),
           ),
           isDense: true,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         ),
         onChanged: (_) => _validateInput(index),
       );
@@ -1294,25 +1262,69 @@ class _MultiInputActionState extends State<MultiInputAction> {
             borderRadius: BorderRadius.circular(8),
           ),
           isDense: true,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         ),
         onChanged: (_) => _validateInput(index),
       );
     }
   }
 
-  Widget _getSpecialIcon(String type) {
+  /// 圆形图标按钮
+  Widget _buildRoundIconButton({
+    required BuildContext context,
+    required IconData icon,
+    required VoidCallback? onPressed,
+    Color? background,
+    Color? foreground,
+    double size = 36,
+  }) {
+    final cs = Theme.of(context).colorScheme;
+    return IconButton(
+      icon: Icon(icon),
+      onPressed: onPressed,
+      style: IconButton.styleFrom(
+        minimumSize: Size(size, size),
+        maximumSize: Size(size, size),
+        padding: EdgeInsets.zero,
+        shape: const CircleBorder(),
+        backgroundColor: background ?? cs.surfaceContainerHighest,
+        foregroundColor: foreground ?? cs.onSurfaceVariant,
+        iconSize: size * 0.5,
+      ),
+      visualDensity: VisualDensity.compact,
+    );
+  }
+
+  IconData _getSpecialIconData(String type) {
     switch (type) {
       case 'calendar':
-        return Icon(Icons.calendar_today, size: 18, color: Colors.blue);
+        return Icons.calendar_today;
       case 'file':
-        return Icon(Icons.attach_file, size: 18, color: Colors.green);
+        return Icons.attach_file;
       case 'folder':
-        return Icon(Icons.folder_open, size: 18, color: Colors.orange);
+        return Icons.folder_open;
       case 'image':
-        return Icon(Icons.image, size: 18, color: Colors.purple);
+        return Icons.image;
       default:
-        return Icon(Icons.help, size: 18, color: Colors.grey);
+        return Icons.help_outline;
+    }
+  }
+
+  /// 返回 (背景色, 图标色) 元组，全部走 colorScheme 保证主题适配
+  (Color, Color) _getSpecialIconColors(BuildContext context, String type) {
+    final cs = Theme.of(context).colorScheme;
+    switch (type) {
+      case 'calendar':
+        return (cs.tertiaryContainer, cs.onTertiaryContainer);
+      case 'file':
+        return (cs.primaryContainer, cs.onPrimaryContainer);
+      case 'folder':
+        return (cs.secondaryContainer, cs.onSecondaryContainer);
+      case 'image':
+        return (cs.tertiaryContainer, cs.onTertiaryContainer);
+      default:
+        return (cs.surfaceContainerHighest, cs.onSurfaceVariant);
     }
   }
 
@@ -1329,52 +1341,8 @@ class _MultiInputActionState extends State<MultiInputAction> {
     }
   }
 
-  Widget _buildEnhancedControls(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-
-    return Container(
-      margin: const EdgeInsets.only(top: 8, bottom: 4),
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-        children: [
-          TextButton.icon(
-            onPressed: _addInputItem,
-            icon: const Icon(Icons.add, size: 18),
-            label: const Text('添加项目'),
-            style: TextButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            ),
-          ),
-          TextButton.icon(
-            onPressed: _clearAll,
-            icon: const Icon(Icons.delete_outline, size: 18),
-            label: const Text('清空全部'),
-            style: TextButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            ),
-          ),
-          TextButton.icon(
-            onPressed: _fillExample,
-            icon: const Icon(Icons.edit_note, size: 18),
-            label: const Text('填充示例'),
-            style: TextButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildTimeout(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+    final colorScheme = Theme.of(context).colorScheme;
 
     return Container(
       margin: const EdgeInsets.only(top: 8),
@@ -1390,7 +1358,8 @@ class _MultiInputActionState extends State<MultiInputAction> {
         children: [
           Icon(Icons.timer_outlined, size: 16, color: colorScheme.error),
           const SizedBox(width: 6),
-          Text('$_timeLeft秒后自动关闭',
+          Text(
+            '$_timeLeft秒后自动关闭',
             style: TextStyle(fontSize: 12, color: colorScheme.error),
           ),
           const Spacer(),
@@ -1416,183 +1385,15 @@ class _MultiInputActionState extends State<MultiInputAction> {
     );
   }
 
-  // ============================================================
-  // 选项弹窗（保留，使用 OverlayEntry 实现）
-  // ============================================================
-  Widget _buildOptionsDialog(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-    final screenSize = MediaQuery.sizeOf(context);
-
-    double dialogWidth = 400;
-    if (_isMultiSelect) {
-      final columns = _selectColumn.clamp(1, 4);
-      dialogWidth = (columns * 120 + 60).toDouble().clamp(300.0, screenSize.width * 0.85);
-    }
-
-    final double dialogHeight = screenSize.height * 0.55;
-
-    return Dialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      backgroundColor: colorScheme.surface,
-      child: SizedBox(
-        width: dialogWidth,
-        height: dialogHeight,
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-              child: Text(
-                _isMultiSelect ? '请选择（多选）' : '请选择',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: colorScheme.onSurface,
-                ),
-              ),
-            ),
-            Expanded(
-              child: ListView(
-                physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                children: _isMultiSelect
-                    ? _options.map((option) {
-                        final isSelected = _selectedCheckboxValues.contains(option.value);
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 4),
-                          child: ChoiceChip(
-                            label: Text(
-                              option.name,
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: isSelected ? colorScheme.onPrimary : colorScheme.onSurface,
-                              ),
-                            ),
-                            selected: isSelected,
-                            onSelected: (selected) {
-                              setState(() {
-                                if (selected) {
-                                  if (!_selectedCheckboxValues.contains(option.value)) {
-                                    _selectedCheckboxValues.add(option.value);
-                                  }
-                                } else {
-                                  _selectedCheckboxValues.remove(option.value);
-                                }
-                              });
-                            },
-                            backgroundColor: colorScheme.surfaceContainerHighest,
-                            selectedColor: colorScheme.primary,
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            labelPadding: const EdgeInsets.symmetric(horizontal: 4),
-                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          ),
-                        );
-                      }).toList()
-                    : _options.map((option) {
-                        final isSelected = _selectedRadioValue == option.value;
-                        return RadioListTile<String>(
-                          title: Text(
-                            option.name,
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: colorScheme.onSurface,
-                            ),
-                          ),
-                          value: option.value,
-                          groupValue: _selectedRadioValue,
-                          onChanged: (value) {
-                            setState(() {
-                              _selectedRadioValue = value ?? '';
-                            });
-                          },
-                          contentPadding: EdgeInsets.zero,
-                          dense: true,
-                          visualDensity: VisualDensity.compact,
-                        );
-                      }).toList(),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                children: [
-                  if (_isMultiSelect)
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        TextButton(onPressed: _selectAll, child: const Text('全选')),
-                        TextButton(onPressed: _clearSelection, child: const Text('全清')),
-                        TextButton(onPressed: _invertSelection, child: const Text('反选')),
-                      ],
-                    ),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      TextButton(onPressed: _cancelOptions, child: const Text('取消')),
-                      const SizedBox(width: 8),
-                      ElevatedButton(onPressed: _confirmOptions, child: const Text('确定')),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ============================================================
-  // 底部按钮
-  // ============================================================
   Widget _buildButtons(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-
-    final children = <Widget>[];
-
-    if (_showCancelButton) {
-      children.add(
-        TextButton(
-          onPressed: _handleCancel,
-          child: const Text('取消'),
-        ),
-      );
-    }
-
-    if (_showResetButton) {
-      children.add(
-        TextButton(
-          onPressed: _handleReset,
-          child: const Text('重置'),
-        ),
-      );
-    }
-
-    if (_showOkButton) {
-      children.add(
-        ElevatedButton(
-          onPressed: _isValid ? _handleSubmit : null,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: _isValid ? colorScheme.primary : colorScheme.outline,
-            foregroundColor: _isValid ? colorScheme.onPrimary : colorScheme.onSurface,
-          ),
-          child: const Text('确定'),
-        ),
-      );
-    }
-
-    if (children.isEmpty) {
-      return const SizedBox.shrink();
-    }
-
-    return Container(
-      margin: const EdgeInsets.only(top: 16),
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.end,
-        children: children,
-      ),
+    return ActionButtonBar(
+      showCancel: _showCancelButton,
+      showReset: _showResetButton,
+      showOk: _showOkButton,
+      okEnabled: _isValid,
+      onCancel: _handleCancel,
+      onReset: _handleReset,
+      onOk: _handleSubmit,
     );
   }
 }

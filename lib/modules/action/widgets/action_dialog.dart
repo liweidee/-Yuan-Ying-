@@ -1,7 +1,6 @@
 // lib/modules/action/widgets/action_dialog.dart
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey, KeyDownEvent;
-import 'package:get/get.dart';
 
 /// Action 弹窗容器
 /// 严格对应 DrPlayer 的 ActionDialog.vue
@@ -166,7 +165,10 @@ class _ActionDialogState extends State<ActionDialog>
               onTap: _handleMaskTap,
               behavior: HitTestBehavior.opaque,
               child: Container(
-                color: Colors.black.withOpacity(widget.dimAmount),
+                color: Theme.of(context)
+                    .colorScheme
+                    .scrim
+                    .withValues(alpha: widget.dimAmount),
                 width: double.infinity,
                 height: double.infinity,
               ),
@@ -221,105 +223,101 @@ class _ActionDialogState extends State<ActionDialog>
 
     final bottomPadding = widget.bottom ?? 0.0;
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(16),
-      child: ConstrainedBox(
-        constraints: BoxConstraints(
-          maxHeight: screenSize.height * 0.85,
-          minHeight: 100.0,
-        ),
-        child: Container(
-          width: dialogWidth,
-          margin: EdgeInsets.only(bottom: bottomPadding),
-          decoration: BoxDecoration(
-            color: colorScheme.surface,
-            borderRadius: BorderRadius.circular(16),
-            boxShadow: [
-              BoxShadow(
-                color: colorScheme.shadow.withOpacity(0.25),
-                blurRadius: 50,
-                spreadRadius: -12,
-                offset: const Offset(0, 25),
-              ),
-            ],
+    // 说明：
+    // - 外层 Container 只负责阴影和圆角裁切
+    // - 内层 Material 才是 TextField / InkWell 真正需要的祖先，
+    //   同时它的 color 会自动跟随 colorScheme.surface，
+    //   亮/暗/动态色主题切换无需额外处理
+    return Container(
+      width: dialogWidth,
+      margin: EdgeInsets.only(bottom: bottomPadding),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: colorScheme.shadow.withValues(alpha: 0.25),
+            blurRadius: 50,
+            spreadRadius: -12,
+            offset: const Offset(0, 25),
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (_shouldShowHeader) _buildHeader(context, colorScheme),
-              if (widget.child != null) Flexible(child: _buildContent(context, colorScheme)),
-              if (widget.footer != null) _buildFooter(context, colorScheme),
-            ],
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: Material(
+          color: colorScheme.surface,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: screenSize.height * 0.85,
+              minHeight: 100.0,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (_shouldShowHeader) _buildHeader(context, colorScheme),
+                if (widget.child != null)
+                  Flexible(child: _buildContent(context, colorScheme)),
+                if (widget.footer != null) _buildFooter(context, colorScheme),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
+  /// 有标题 OR 需要显示关闭按钮时都渲染 header，
+  /// 修复了旧版本"无 title 时整个 header 连同关闭按钮消失"的问题。
   bool get _shouldShowHeader {
-    return widget.title != null && widget.title!.isNotEmpty;
+    final hasTitle = widget.title != null && widget.title!.isNotEmpty;
+    return hasTitle || widget.showClose;
   }
 
   Widget _buildHeader(BuildContext context, ColorScheme colorScheme) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(20, 16, 12, 12),
-      decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest.withOpacity(0.3),
-        border: Border(
-          bottom: BorderSide(
-            color: colorScheme.outline.withOpacity(0.08),
-            width: 1,
-          ),
-        ),
-      ),
+    final hasTitle = widget.title != null && widget.title!.isNotEmpty;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 12, 8, 4),
       child: Row(
         children: [
-          Expanded(
-            child: Text(
-              widget.title!,
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-                color: colorScheme.onSurface,
-                letterSpacing: -0.3,
+          if (hasTitle)
+            Expanded(
+              child: Text(
+                widget.title!,
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: colorScheme.onSurface,
+                  letterSpacing: -0.2,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
-              textAlign: TextAlign.center,
+            )
+          else
+            const Spacer(),
+          if (widget.showClose)
+            IconButton(
+              icon: Icon(
+                Icons.close,
+                size: 18,
+                color: colorScheme.outline,
+              ),
+              onPressed: _hide,
+              splashRadius: 18,
+              visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.all(6),
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              tooltip: '关闭',
             ),
-          ),
-          if (widget.showClose) _buildCloseButton(context, colorScheme),
         ],
       ),
     );
   }
 
-  Widget _buildCloseButton(BuildContext context, ColorScheme colorScheme) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: _hide,
-        borderRadius: BorderRadius.circular(8),
-        child: Padding(
-          padding: const EdgeInsets.all(6),
-          child: Icon(
-            Icons.close,
-            size: 18,
-            color: colorScheme.outline,
-          ),
-        ),
-      ),
-    );
-  }
-
   Widget _buildContent(BuildContext context, ColorScheme colorScheme) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-      decoration: BoxDecoration(
-        color: colorScheme.surface,
-        borderRadius: const BorderRadius.only(
-          bottomLeft: Radius.circular(16),
-          bottomRight: Radius.circular(16),
-        ),
-      ),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
       child: widget.child,
     );
   }
@@ -328,10 +326,10 @@ class _ActionDialogState extends State<ActionDialog>
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
       decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest.withOpacity(0.3),
+        color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
         border: Border(
           top: BorderSide(
-            color: colorScheme.outline.withOpacity(0.08),
+            color: colorScheme.outline.withValues(alpha: 0.08),
             width: 1,
           ),
         ),

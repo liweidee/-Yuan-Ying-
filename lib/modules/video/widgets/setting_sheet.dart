@@ -226,12 +226,13 @@ class _SettingSheetState extends State<SettingSheet> {
       ),
 
       // ===== 字幕设置 =====
-      _buildSettingItem(
-        icon: Icons.subtitles_outlined,
-        title: '字幕设置',
-        subtitle: '字幕样式及加载',
-        onTap: _showSubtitleSettings,
-      ),
+      if (playerController.supportsExternalSubtitle || playerController.supportsEmbeddedSubtitle)
+        _buildSettingItem(
+          icon: Icons.subtitles_outlined,
+          title: '字幕设置',
+          subtitle: '字幕样式及加载',
+          onTap: _showSubtitleSettings,
+        ),
 
       // ===== 翻译当前字幕=====
       if (playerController.supportsExternalSubtitle)

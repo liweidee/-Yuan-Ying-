@@ -1,7 +1,4 @@
 // lib/plugin/pl_player/engine/fvp_engine.dart
-// 基于 libmdk 原生接口（fvp/mdk.dart）实现的播放器引擎
-// 不依赖 video_player / video_player_platform_interface
-
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' show min;
@@ -16,6 +13,8 @@ import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:get/get.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import 'package:video_player/video_player.dart' hide VideoTrack, SubtitleTrack;
+import 'package:fvp/fvp.dart' as fvp;
 import 'package:fvp/mdk.dart' as mdk;
 import 'package:battery_plus/battery_plus.dart';
 
@@ -34,20 +33,18 @@ import '../utils/fullscreen.dart';
 import '../../../utils/platform_utils.dart';
 import 'package:yuanying/utils/image_utils.dart';
 
+/// FVP 播放器引擎实现
 class FvpEngine implements IPlayerEngine {
   // ============================================================
-  // 底层：mdk.Player
+  // 1. 私有成员
   // ============================================================
-  mdk.Player? _player;
+  VideoPlayerController? _controller;
   bool _isInitialized = false;
   bool _isDisposed = false;
-  bool _isPlaying = false;
   bool _skipEndTriggered = false;
-  bool _completionReported = false;
+  bool _isPlaying = false;
 
-  // ============================================================
-  // 状态（对外接口保持与 media_kit 引擎一致）
-  // ============================================================
+  // ---- 状态流（Rx） ----
   final playerStatus = PlPlayerStatus(PlayerStatus.paused);
   final Rx<DataStatus> dataStatus = Rx(DataStatus.none);
   final Rx<Duration> duration = Rx(Duration.zero);
@@ -55,21 +52,22 @@ class FvpEngine implements IPlayerEngine {
   final RxInt bufferedSeconds = 0.obs;
   final RxBool isBuffering = false.obs;
 
+  // ---- position 和 sliderPosition 作为公开字段 ----
   Duration position = Duration.zero;
   final RxInt positionSeconds = 0.obs;
+
   Duration sliderPosition = Duration.zero;
   final RxInt sliderPositionSeconds = 0.obs;
   final Rx<Duration> sliderTempPosition = Rx(Duration.zero);
 
-  // ============================================================
-  // 属性
-  // ============================================================
+  // ---- 播放器属性 ----
   double _playbackSpeed = 1.0;
   double _volume = 1.0;
   bool _isMuted = false;
   bool _isLooping = false;
   bool _isPipMode = false;
   bool _isFullscreen = false;
+  bool _controlsLock = false;
 
   final RxBool isFullScreen = false.obs;
   final RxBool controlsLock = false.obs;
@@ -84,33 +82,45 @@ class FvpEngine implements IPlayerEngine {
   final RxBool enableShowDanmaku = true.obs;
   final RxDouble danmakuOpacity = 1.0.obs;
 
+  final RxBool _initializedRx = false.obs;
   final RxInt _rebuildCounter = 0.obs;
 
   // ============================================================
-  // 高级特性
+  // 1.1 FVP 高级特性（官方 0.38.0+ 扩展）
   // ============================================================
+
+  /// 直播检测（FVP 扩展 `isLive()`）
   final RxBool isLive = false.obs;
+
+  /// 媒体详细信息（FVP 扩展 `getMediaInfo()`，类型为 mdk.MediaInfo）
   final Rxn<dynamic> mediaInfo = Rxn<dynamic>();
+
+  /// 当前字幕文本（FVP 扩展 `onSubtitleText()`）
   final Rxn<String> currentSubtitleText = Rxn<String>();
+
+  /// 外部音频 URL（FVP 扩展 `setMedia(MediaType.audio)`）
   String? _externalAudioUrl;
+
+  /// 截图用的 GlobalKey（包裹视频层 RepaintBoundary）
   final GlobalKey _screenshotKey = GlobalKey();
 
-  // 音量 / 亮度
+  // ---- 音量/亮度 ----
   final RxDouble volume = 1.0.obs;
   final RxDouble brightness = (-1.0).obs;
   final RxBool volumeIndicator = false.obs;
   bool volumeInterceptEventStream = false;
   Timer? volumeTimer;
 
-  // 轨道
+  // ---- 轨道数据 ----
   final RxList<AudioTrack> availableAudioTracks = <AudioTrack>[].obs;
   final RxList<VideoTrack> availableVideoTracks = <VideoTrack>[].obs;
   final RxList<SubtitleTrack> availableSubtitleTracks = <SubtitleTrack>[].obs;
+
   final Rx<AudioTrack?> currentAudioTrack = Rx<AudioTrack?>(null);
   final Rx<VideoTrack?> currentVideoTrack = Rx<VideoTrack?>(null);
   final Rx<SubtitleTrack?> currentSubtitleTrack = Rx<SubtitleTrack?>(null);
 
-  // 字幕样式（仅占位，libmdk 内部由 libass 渲染）
+  // ---- 字幕 ----
   late double subtitleFontScale = PlayerPref.subtitleFontScale;
   late double subtitleFontScaleFS = PlayerPref.subtitleFontScaleFS;
   late int subtitlePaddingH = PlayerPref.subtitlePaddingH;
@@ -136,130 +146,86 @@ class FvpEngine implements IPlayerEngine {
     );
   }
 
-  @override
-  void updateSubtitleStyle() => subtitleConfig.value = getSubConfig;
-  @override
+  void updateSubtitleStyle() {
+    subtitleConfig.value = getSubConfig;
+  }
+
   void putSubtitleSettings() {}
 
-  // 弹幕
-  @override
+  // ---- 弹幕 ----
   dynamic danmakuController;
-  @override
-  void toggleDanmaku() => enableShowDanmaku.value = !enableShowDanmaku.value;
-  @override
+  void toggleDanmaku() {
+    enableShowDanmaku.value = !enableShowDanmaku.value;
+  }
   void refreshDanmakuConfig() {}
 
-  // 播放模式
-  @override
+  // ---- 播放模式 ----
   PlayRepeat playRepeat = PlayRepeat.pause;
 
-  // 配置
+  // ---- 配置 ----
   late final showControlDuration = PlayerPref.enableLongShowControl
       ? const Duration(seconds: 30)
       : const Duration(seconds: 3);
-  @override
-  late final bool enableShrinkVideoSize = PlayerPref.enableShrinkVideoSize;
-  @override
-  late final bool enableSlideVolumeBrightness =
-      PlayerPref.enableSlideVolumeBrightness;
-  @override
-  late final bool enableSlideFS = PlayerPref.enableSlideFS;
-  @override
-  late final Duration fastForBackwardDuration =
-      Duration(seconds: PlayerPref.fastForBackwardDuration);
-  @override
-  late final bool showFsScreenshotBtn = PlayerPref.showFsScreenshotBtn;
-  @override
-  late final bool showFsLockBtn = PlayerPref.showFsLockBtn;
-  @override
-  late final bool fullScreenGestureReverse = PlayerPref.fullScreenGestureReverse;
-  @override
-  late final bool enableQuickDouble = PlayerPref.enableQuickDouble;
-  @override
-  late final FullScreenMode mode =
-      FullScreenMode.values[PlayerPref.fullScreenMode];
-  @override
+  late final enableShrinkVideoSize = PlayerPref.enableShrinkVideoSize;
+  late final enableSlideVolumeBrightness = PlayerPref.enableSlideVolumeBrightness;
+  late final enableSlideFS = PlayerPref.enableSlideFS;
+  late final fastForBackwardDuration = Duration(
+    seconds: PlayerPref.fastForBackwardDuration,
+  );
+  late final showFsScreenshotBtn = PlayerPref.showFsScreenshotBtn;
+  late final showFsLockBtn = PlayerPref.showFsLockBtn;
+  late final fullScreenGestureReverse = PlayerPref.fullScreenGestureReverse;
+  late final enableQuickDouble = PlayerPref.enableQuickDouble;
+  late final FullScreenMode mode = FullScreenMode.values[PlayerPref.fullScreenMode];
   late final bool horizontalScreen = PlayerPref.horizontalScreen;
-  @override
   late final bool removeSafeArea = PlayerPref.removeSafeArea;
   late final bool autoEnterFullScreen = PlayerPref.autoEnterFullScreen;
   late final bool autoExitFullscreen = PlayerPref.autoExitFullscreen;
   @override
   bool get enableTapDm => PlayerPref.enableTapDm;
 
-  @override
   final RxInt progressType = PlayerPref.btmProgressBehavior.obs;
-  @override
   final RxInt skipStartDuration = 0.obs;
-  @override
   final RxInt skipEndDuration = 0.obs;
 
+  // ---- 数据源 ----
   late DataSource dataSource;
 
-  // 工具
+  // ---- 工具 ----
   bool _processing = false;
-  @override
   bool get processing => _processing;
   String? _vodId;
-  @override
   String? get vodId => _vodId;
   int? _width;
   int? _height;
-  @override
   int? get width => _width;
-  @override
   int? get height => _height;
   bool _isCloseAll = false;
-  @override
   bool get isCloseAll => _isCloseAll;
-  @override
   bool get setSystemBrightness => false;
-  @override
   final RxString batteryLevel = '--'.obs;
 
   final Battery _battery = Battery();
   StreamSubscription<BatteryState>? _batterySubscription;
 
-  // 监听器
+  // ---- 监听器 ----
   final Set<ValueChanged<Duration>> _positionListeners = {};
   final Set<ValueChanged<PlayerStatus>> _statusListeners = {};
+  VoidCallback? _listenerCallback;
 
-  // 定时器
-  Timer? _positionTimer;
-  Timer? _timer;
-  Timer? _longPressTimer;
-
-  // Stream 订阅
-  StreamSubscription? _stateSubscription;
-  StreamSubscription? _mediaStatusSubscription;
-  StreamSubscription? _eventSubscription;
-
-  // 手势
-  @override
+  // ---- 快进快退 ----
   final RxBool mountSeekBackwardButton = false.obs;
-  @override
   final RxBool mountSeekForwardButton = false.obs;
-  @override
   bool? cancelSeek;
-  @override
   bool? hasToast;
-  @override
+  Timer? _longPressTimer;
+  Timer? _timer;
   double lastPlaybackSpeed = 1.0;
 
-  // 分辨率 / 网速
-  final RxInt _videoWidth = 0.obs;
-  final RxInt _videoHeight = 0.obs;
-  final RxDouble _downloadSpeed = 0.0.obs;
-  @override
-  RxInt get videoWidth => _videoWidth;
-  @override
-  RxInt get videoHeight => _videoHeight;
-  @override
-  RxDouble get downloadSpeed => _downloadSpeed;
+  // ============================================================
+  // 2. getter 实现（IPlayerEngine 要求）
+  // ============================================================
 
-  // ============================================================
-  // getter（IPlayerEngine）
-  // ============================================================
   @override
   double get playbackSpeed => _playbackSpeed;
   @override
@@ -273,7 +239,9 @@ class FvpEngine implements IPlayerEngine {
   @override
   set isMuted(bool value) {
     _isMuted = value;
-    _player?.mute = value;
+    if (_controller != null && _isInitialized) {
+      _controller!.setVolume(value ? 0 : _volume);
+    }
   }
   @override
   bool get isPipMode => _isPipMode;
@@ -302,6 +270,7 @@ class FvpEngine implements IPlayerEngine {
 
   @override
   num get sliderScale => duration.value.inMilliseconds * 0.001;
+
   @override
   Duration get positionValue => position;
 
@@ -311,19 +280,20 @@ class FvpEngine implements IPlayerEngine {
   Player? get videoPlayerController => null;
 
   // ============================================================
-  // 构造 & 生命周期
+  // 3. 生命周期
   // ============================================================
   FvpEngine();
 
   @override
   Future<void> init() async {
     _isDisposed = false;
-    _initBatteryListener();
+    initBatteryListener();
   }
 
-  void _initBatteryListener() {
+  void initBatteryListener() {
+    // 先取消旧的，避免重复 init 时叠加订阅
     _batterySubscription?.cancel();
-    _batterySubscription = _battery.onBatteryStateChanged.listen((_) {
+    _batterySubscription = _battery.onBatteryStateChanged.listen((state) {
       _updateBatteryLevel();
     });
     _updateBatteryLevel();
@@ -346,27 +316,14 @@ class FvpEngine implements IPlayerEngine {
     _batterySubscription?.cancel();
     _batterySubscription = null;
 
+    // 清理外部音频状态
     _externalAudioUrl = null;
 
     _removeListeners();
-    _positionTimer?.cancel();
-    _positionTimer = null;
+    _controller?.dispose();
+    _controller = null;
     _timer?.cancel();
-    _timer = null;
     _longPressTimer?.cancel();
-    _longPressTimer = null;
-
-    final p = _player;
-    _player = null;
-    _isInitialized = false;
-    try {
-      // mdk.Player.dispose() 声明为 `void dispose() async`，
-      // 内部会 await updateTexture(-1) 释放纹理。
-      // 此处不同步 await，交给 Dart 事件循环。
-      p?.dispose();
-    } catch (e) {
-      debugPrint('[FvpEngine] dispose error: $e');
-    }
   }
 
   @override
@@ -377,8 +334,31 @@ class FvpEngine implements IPlayerEngine {
   }
 
   // ============================================================
-  // 核心：setDataSource
+  // 4. 核心播放控制
   // ============================================================
+
+  /// 分辨率/网速
+  final RxInt _videoWidth = 0.obs;
+  final RxInt _videoHeight = 0.obs;
+  final RxDouble _downloadSpeed = 0.0.obs;
+
+  @override
+  RxInt get videoWidth => _videoWidth;
+  @override
+  RxInt get videoHeight => _videoHeight;
+  @override
+  RxDouble get downloadSpeed => _downloadSpeed;
+
+  void _updateVideoSize() {
+    final controller = _controller;
+    if (controller == null || !_isInitialized) return;
+    final size = controller.value.size;
+    if (size != null) {
+      _videoWidth.value = size.width.toInt();
+      _videoHeight.value = size.height.toInt();
+    }
+  }
+
   @override
   Future<void> setDataSource(
     DataSource dataSource, {
@@ -393,10 +373,14 @@ class FvpEngine implements IPlayerEngine {
     VoidCallback? onInit,
     bool autoFullScreenFlag = false,
   }) async {
-    if (_isDisposed) await init();
+    debugPrint('[FvpEngine] setDataSource called, url=${dataSource.videoSource}');
+    if (_isDisposed) {
+      debugPrint('[FvpEngine] setDataSource: engine disposed, re-initializing');
+      await init();
+    }
 
-    _skipEndTriggered = false;
-    _completionReported = false;
+    _skipEndTriggered = false;   // 重置跳过片尾标志
+
     _processing = true;
     _vodId = vodId;
     _width = width;
@@ -404,108 +388,138 @@ class FvpEngine implements IPlayerEngine {
     _playbackSpeed = speed;
     this.dataSource = dataSource;
 
-    // 状态清理
+    // 切换媒体前清理状态（避免 fvp Issue #85 外部音频 bug）
     _externalAudioUrl = null;
     mediaInfo.value = null;
     currentSubtitleText.value = null;
     isLive.value = false;
-    availableAudioTracks.clear();
-    availableVideoTracks.clear();
-    availableSubtitleTracks.clear();
-    currentAudioTrack.value = null;
-    currentVideoTrack.value = null;
-    currentSubtitleTrack.value = null;
 
-    await _disposePlayer();
+    _removeListeners();
+    await _controller?.dispose();
+    _controller = null;
+    _isInitialized = false;
+    _initializedRx.value = false;
 
     dataStatus.value = DataStatus.loading;
     isBuffering.value = true;
 
     try {
-      // 1) 创建 player
-      final player = mdk.Player();
-      _player = player;
-
-      // 2) 基础属性
-      player.volume = _volume;
-      player.playbackRate = _playbackSpeed;
-      player.mute = _isMuted;
-      player.loop = _isLooping ? -1 : 0;
-
-      // 3) buffer range
-      try {
-        player.setBufferRange(
-          min: PlayerPref.mdkBufferMin,
-          max: PlayerPref.mdkBufferMax,
-        );
-      } catch (e) {
-        debugPrint('[FvpEngine] setBufferRange failed: $e');
-      }
-
-      // 4) HTTP headers
-      final headers = dataSource.headers ?? const <String, String>{};
-      if (headers.isNotEmpty) {
-        final sb = StringBuffer();
-        headers.forEach((k, v) => sb.write('$k: $v\r\n'));
-        player.setProperty('avio.headers', sb.toString());
-      }
-
-      // 5) 设置媒体
-      String mediaUrl = dataSource.videoSource;
+      debugPrint('[FvpEngine] Creating controller...');
       if (dataSource is FileSource) {
-        // 本地文件：libmdk 支持绝对路径，也支持 file:// 前缀
-        // 若传进来的已经带 scheme 就原样使用
-        final uri = Uri.tryParse(mediaUrl);
-        if (uri == null || !uri.hasScheme) {
-          mediaUrl = Uri.file(mediaUrl).toString();
-        }
-      }
-      player.media = mediaUrl;
-
-      // 6) prepare
-      final prepareResult =
-          await player.prepare(position: seekTo?.inMilliseconds ?? 0);
-      debugPrint('[FvpEngine] prepare result=$prepareResult');
-      if (prepareResult < 0) {
-        throw Exception('prepare failed: $prepareResult');
+        final filePath = dataSource.videoSource;
+        _controller = VideoPlayerController.file(File(filePath));
+      } else if (dataSource.videoSource.startsWith('http')) {
+        final headers = dataSource.headers ?? {};
+        debugPrint('[FvpEngine] Using headers: $headers');
+        _controller = VideoPlayerController.network(
+          dataSource.videoSource,
+          httpHeaders: headers,
+        );
+      } else {
+        _controller = VideoPlayerController.network(dataSource.videoSource);
       }
 
+      if (_controller == null) {
+        dataStatus.value = DataStatus.error;
+        _processing = false;
+        return;
+      }
+
+      debugPrint('[FvpEngine] Calling initialize...');
+      if (_controller == null) {
+        dataStatus.value = DataStatus.error;
+        _processing = false;
+        return;
+      }
+      await _controller!.initialize();
+      debugPrint('[FvpEngine] Initialize completed');
       _isInitialized = true;
+      _initializedRx.value = true;
       _rebuildCounter.value++;
 
-      // 7) 刷新媒体信息与轨道
-      _refreshMediaInfo();
+      // ============================================================
+      // FVP 官方扩展初始化（必须在 initialize 之后调用）
+      // ============================================================
 
-      // 8) 创建纹理
-      final texId = await player.updateTexture(width: _width, height: _height);
-      debugPrint('[FvpEngine] textureId=$texId');
-
-      if (texId < 0) {
-        _width = 0;
-        _height = 0;
-      } else {
-        // 纹理创建后，用 mediaInfo 的真实尺寸刷新宽高
-        _updateVideoSizeFromInfo();
-        _width = _videoWidth.value > 0 ? _videoWidth.value : _width;
-        _height = _videoHeight.value > 0 ? _videoHeight.value : _height;
+      // 1) 缓冲范围（FVP 扩展 `setBufferRange`）
+      try {
+        final bufMin = PlayerPref.mdkBufferMin;
+        final bufMax = PlayerPref.mdkBufferMax;
+        _controller!.setBufferRange(min: bufMin, max: bufMax);
+        debugPrint('[FvpEngine] setBufferRange: min=$bufMin, max=$bufMax');
+      } catch (e) {
+        debugPrint('[FvpEngine] setBufferRange 失败: $e');
       }
 
-      // 9) 位置
-      position = Duration(milliseconds: prepareResult);
-      updatePositionSecond();
-      sliderPosition = position;
-      updateSliderPositionSecond();
+      // 2) 直播检测（FVP 扩展 `isLive()`）
+      try {
+        isLive.value = _controller!.isLive();
+        debugPrint('[FvpEngine] isLive = ${isLive.value}');
+      } catch (e) {
+        debugPrint('[FvpEngine] isLive 失败: $e');
+      }
 
-      // 10) 注册监听
-      _addListeners();
+      // 3) 媒体详情（FVP 扩展 `getMediaInfo()`）
+      try {
+        mediaInfo.value = _controller!.getMediaInfo();
+        debugPrint('[FvpEngine] mediaInfo 已获取');
+      } catch (e) {
+        debugPrint('[FvpEngine] getMediaInfo 失败: $e');
+      }
+
+      // 4) 字幕文本回调（FVP 扩展 `onSubtitleText()`）
+      try {
+        _controller!.onSubtitleText((start, end, text) {
+          currentSubtitleText.value = text.join('\n');
+        });
+        debugPrint('[FvpEngine] onSubtitleText 已注册');
+      } catch (e) {
+        debugPrint('[FvpEngine] onSubtitleText 注册失败: $e');
+      }
+
+      // ============================================================
+
+      _isInitialized = true;
+      this.duration.value = _controller!.value.duration;
+      position = _controller!.value.position;
+      updatePositionSecond();
+
+      if (speed != 1.0) {
+        await _controller!.setPlaybackSpeed(speed);
+      }
+      if (_volume != 1.0) {
+        await _controller!.setVolume(_volume);
+      }
+      if (_isLooping) {
+        _controller!.setLooping(true);
+      }
+
+      if (seekTo != null && seekTo.inSeconds > 0) {
+        await _controller!.seekTo(seekTo);
+        position = seekTo;
+        updatePositionSecond();
+      }
+
+      _updateTracks();
 
       dataStatus.value = DataStatus.loaded;
       isBuffering.value = false;
+      _updateVideoSize();
 
-      // 11) 播放 / 暂停
+      _addListeners();
+
       if (autoplay) {
-        await play();
+        debugPrint('[FvpEngine] Autoplay: playing');
+        if (_isPlaying) {
+          _isPlaying = false;
+        }
+        await _controller!.play();
+        _isPlaying = true;
+        playerStatus.value = PlayerStatus.playing;
+        this.duration.refresh();
+        debugPrint('[FvpEngine] Autoplay: playing done, isPlaying=$_isPlaying');
       } else {
+        debugPrint('[FvpEngine] Autoplay: paused');
         playerStatus.value = PlayerStatus.paused;
       }
 
@@ -514,482 +528,116 @@ class FvpEngine implements IPlayerEngine {
       if (autoFullScreenFlag && autoEnterFullScreen) {
         triggerFullScreen(status: true);
       }
+
+      _width = _controller!.value.size?.width.toInt() ?? width;
+      _height = _controller!.value.size?.height.toInt() ?? height;
+
+      debugPrint('[FvpEngine] setDataSource completed successfully');
+
     } catch (e, stack) {
-      debugPrint('[FvpEngine] setDataSource error: $e\n$stack');
+      debugPrint('[FvpEngine] setDataSource error: $e');
+      debugPrint(stack.toString());
       dataStatus.value = DataStatus.error;
       isBuffering.value = false;
-      final p = _player;
-      _player = null;
-      _isInitialized = false;
-      try {
-        p?.dispose();
-      } catch (_) {}
+      _initializedRx.value = false;
+      _controller?.dispose();
+      _controller = null;
+      if (kDebugMode) {
+        debugPrint('FvpEngine.setDataSource error: $e');
+      }
     } finally {
       _processing = false;
     }
   }
 
-  Future<void> _disposePlayer() async {
-    _removeListeners();
-    _positionTimer?.cancel();
-    _positionTimer = null;
-    _isInitialized = false;
-
-    final old = _player;
-    if (old != null) {
-      try {
-        old.dispose();
-      } catch (e) {
-        debugPrint('[FvpEngine] _disposePlayer error: $e');
-      }
-      // dispose 内部有 await，等待一小段时间让纹理释放完成
-      await Future<void>.delayed(const Duration(milliseconds: 30));
-      if (identical(_player, old)) _player = null;
-    }
-  }
-
-  // ============================================================
-  // 监听注册
-  // ============================================================
-  void _addListeners() {
-    final p = _player;
-    if (p == null) return;
-    _removeListeners();
-
-    _stateSubscription = p.onStateChanged.listen(_onStateChanged);
-    _mediaStatusSubscription = p.onMediaStatus.listen(_onMediaStatus);
-    _eventSubscription = p.onEvent.listen(_onEvent);
-
-    try {
-      p.onSubtitleText((start, end, texts) {
-        currentSubtitleText.value = texts.join('\n');
-      });
-    } catch (e) {
-      debugPrint('[FvpEngine] onSubtitleText register failed: $e');
-    }
-  }
-
-  void _removeListeners() {
-    _stateSubscription?.cancel();
-    _stateSubscription = null;
-    _mediaStatusSubscription?.cancel();
-    _mediaStatusSubscription = null;
-    _eventSubscription?.cancel();
-    _eventSubscription = null;
-    try {
-      _player?.onSubtitleText(null);
-    } catch (_) {}
-  }
-
-  // ============================================================
-  // 事件处理
-  // ============================================================
-  void _onStateChanged(
-      ({mdk.PlaybackState oldValue, mdk.PlaybackState newValue}) e) {
-    if (_isDisposed) return;
-    final newState = e.newValue;
-    debugPrint('[FvpEngine] state: ${e.oldValue} -> $newState');
-
-    switch (newState) {
-      case mdk.PlaybackState.playing:
-        if (!_isPlaying) {
-          _isPlaying = true;
-          playerStatus.value = PlayerStatus.playing;
-          _startPositionTimer();
-          _notifyStatusListeners(PlayerStatus.playing);
-        }
-        break;
-      case mdk.PlaybackState.paused:
-        if (_isPlaying) {
-          _isPlaying = false;
-          playerStatus.value = PlayerStatus.paused;
-          _stopPositionTimer();
-          _notifyStatusListeners(PlayerStatus.paused);
-        } else if (playerStatus.value != PlayerStatus.completed) {
-          playerStatus.value = PlayerStatus.paused;
-        }
-        break;
-      case mdk.PlaybackState.stopped:
-        _isPlaying = false;
-        _stopPositionTimer();
-        _reportCompleted();
-        break;
-      default:
-        // notRunning / running 在本插件里不会出现（PlaybackState.from 只返回 3 种）
-        break;
-    }
-  }
-
-  void _onMediaStatus(
-      ({mdk.MediaStatus oldValue, mdk.MediaStatus newValue}) e) {
-    if (_isDisposed) return;
-    final oldStatus = e.oldValue;
-    final newStatus = e.newValue;
-
-    // buffering 状态切换
-    if (!oldStatus.test(mdk.MediaStatus.buffering) &&
-        newStatus.test(mdk.MediaStatus.buffering)) {
-      isBuffering.value = true;
-    } else if (!oldStatus.test(mdk.MediaStatus.buffered) &&
-        newStatus.test(mdk.MediaStatus.buffered)) {
-      isBuffering.value = false;
-    }
-
-    // 首次 loaded → 刷新
-    if (!oldStatus.test(mdk.MediaStatus.loaded) &&
-        newStatus.test(mdk.MediaStatus.loaded)) {
-      _refreshMediaInfo();
-    }
-
-    // 播放完成标志
-    if (newStatus.test(mdk.MediaStatus.end)) {
-      _reportCompleted();
-    }
-  }
-
-  void _onEvent(mdk.MediaEvent event) {
-    if (_isDisposed) return;
-    if (event.error < 0) {
-      debugPrint(
-          '[FvpEngine] event error: ${event.category}/${event.detail} (${event.error})');
-    }
-  }
-
-  void _notifyStatusListeners(PlayerStatus s) {
-    for (final l in _statusListeners.toList()) {
-      try {
-        l(s);
-      } catch (e) {
-        debugPrint('[FvpEngine] status listener error: $e');
-      }
-    }
-  }
-
-  void _reportCompleted() {
-    if (_completionReported) return;
-    _completionReported = true;
-    playerStatus.value = PlayerStatus.completed;
-    _notifyStatusListeners(PlayerStatus.completed);
-    if (autoExitFullscreen && isFullScreen.value) {
-      triggerFullScreen(status: false);
-    }
-  }
-
-  // ============================================================
-  // Position 轮询
-  // ============================================================
-  void _startPositionTimer() {
-    _positionTimer?.cancel();
-    _positionTimer = Timer.periodic(
-      const Duration(milliseconds: 200),
-      (_) => _pollPosition(),
-    );
-  }
-
-  void _stopPositionTimer() {
-    _positionTimer?.cancel();
-    _positionTimer = null;
-  }
-
-  void _pollPosition() {
-    final p = _player;
-    if (p == null || _isDisposed || !_isInitialized) return;
-
-    try {
-      // player.position 是 int（毫秒）
-      final newPos = Duration(milliseconds: p.position);
-      if (newPos != position) {
-        position = newPos;
-        updatePositionSecond();
-        if (!isSliderMoving.value) {
-          sliderPosition = newPos;
-          updateSliderPositionSecond();
-        }
-        for (final l in _positionListeners.toList()) {
-          try {
-            l(newPos);
-          } catch (_) {}
-        }
-        _checkSkipEnd();
-      }
-
-      // player.buffered() 是 int（毫秒）
-      final newBuf = Duration(milliseconds: p.buffered());
-      if (buffered.value != newBuf) {
-        buffered.value = newBuf;
-        updateBufferedSecond();
-      }
-    } catch (e) {
-      debugPrint('[FvpEngine] pollPosition error: $e');
-    }
-  }
-
-  void _checkSkipEnd() {
-    final endSkip = skipEndDuration.value;
-    if (endSkip <= 0 || _skipEndTriggered) return;
-    final total = duration.value.inSeconds;
-    if (total <= 0) return;
-    if (position.inSeconds >= total - endSkip) {
-      if (playerStatus.value.isPlaying) {
-        _skipEndTriggered = true;
-        final nearEnd =
-            Duration(seconds: total) - const Duration(milliseconds: 500);
-        if (position < nearEnd) {
-          seekTo(nearEnd, isSeek: false);
-          SmartDialog.showToast('已跳过片尾');
-        }
-      }
-    }
-  }
-
-  // ============================================================
-  // 媒体信息 & 轨道
-  // ============================================================
-  void _refreshMediaInfo() {
-    final p = _player;
-    if (p == null) return;
-    try {
-      // mediaInfo 是同步 getter，每次访问会做一次 FFI 调用
-      final info = p.mediaInfo;
-      mediaInfo.value = info;
-      isLive.value = p.isLive;
-
-      if (info.duration > 0) {
-        duration.value = Duration(milliseconds: info.duration);
-      }
-
-      _updateVideoSizeFromInfo();
-      _updateTracks();
-    } catch (e) {
-      debugPrint('[FvpEngine] _refreshMediaInfo error: $e');
-    }
-  }
-
-  void _updateVideoSizeFromInfo() {
-    final info = mediaInfo.value;
-    if (info == null) return;
-    try {
-      // info 是 mdk.MediaInfo；video 是 List<VideoStreamInfo>?
-      final List<mdk.VideoStreamInfo>? videos = info.video;
-      if (videos != null && videos.isNotEmpty) {
-        final v = videos[0];
-        // v.codec 是 VideoCodecParameters（非 null）
-        final w = v.codec.width;
-        final h = v.codec.height;
-        final rotation = v.rotation;
-        if (w > 0 && h > 0) {
-          if (rotation % 180 == 90) {
-            _videoWidth.value = h;
-            _videoHeight.value = w;
-          } else {
-            _videoWidth.value = w;
-            _videoHeight.value = h;
-          }
-        }
-      }
-    } catch (e) {
-      debugPrint('[FvpEngine] _updateVideoSizeFromInfo error: $e');
-    }
-  }
-
-  void _updateTracks() {
-    final p = _player;
-    if (p == null || !_isInitialized) return;
-
-    try {
-      availableAudioTracks.clear();
-      availableVideoTracks.clear();
-      availableSubtitleTracks.clear();
-
-      final info = p.mediaInfo;
-
-      // ---- 音轨 ----
-      final audioList = info.audio ?? const <mdk.AudioStreamInfo>[];
-      for (int i = 0; i < audioList.length; i++) {
-        final stream = audioList[i];
-        // stream.metadata 是 Map<String, String>
-        final title = stream.metadata['title'];
-        final lang = stream.metadata['language'];
-        // stream.codec 是 AudioCodecParameters（非 null），.codec 是 String
-        final codecName = stream.codec.codec;
-
-        final buf = StringBuffer();
-        if (title != null && title.isNotEmpty) {
-          buf.write(title);
-        } else if (lang != null && lang.isNotEmpty) {
-          buf.write('音轨 ${i + 1} ($lang)');
-        } else {
-          buf.write('音轨 ${i + 1}');
-        }
-        if (codecName.isNotEmpty) buf.write(' · ${codecName.toUpperCase()}');
-
-        availableAudioTracks.add(
-          AudioTrack('fvp_audio_$i', buf.toString(), lang ?? ''),
-        );
-      }
-
-      // ---- 视轨 ----
-      final videoList = info.video ?? const <mdk.VideoStreamInfo>[];
-      for (int i = 0; i < videoList.length; i++) {
-        final stream = videoList[i];
-        final codecName = stream.codec.codec;
-        final rotation = stream.rotation;
-
-        final buf = StringBuffer('视轨 ${i + 1}');
-        if (codecName.isNotEmpty) buf.write(' · ${codecName.toUpperCase()}');
-        if (rotation != 0) buf.write(' · $rotation°');
-
-        availableVideoTracks.add(
-          VideoTrack('fvp_video_$i', buf.toString(), ''),
-        );
-      }
-
-      // ---- 字幕轨（过滤空占位轨） ----
-      final subtitleList = info.subtitle ?? const <mdk.SubtitleStreamInfo>[];
-      for (int i = 0; i < subtitleList.length; i++) {
-        final stream = subtitleList[i];
-        final meta = stream.metadata;
-
-        int? frameCount;
-        int? byteCount;
-        final framesStr = meta['NUMBER_OF_FRAMES'];
-        final bytesStr = meta['NUMBER_OF_BYTES'];
-        if (framesStr != null) frameCount = int.tryParse(framesStr);
-        if (bytesStr != null) byteCount = int.tryParse(bytesStr);
-
-        final isEmpty = (frameCount != null && frameCount < 2) ||
-            (byteCount != null && byteCount < 100);
-        if (isEmpty) continue;
-
-        final title = meta['title'];
-        final lang = meta['language'];
-
-        final buf = StringBuffer();
-        if (title != null && title.isNotEmpty) {
-          buf.write(title);
-        } else if (lang != null && lang.isNotEmpty) {
-          buf.write('字幕 ${i + 1} ($lang)');
-        } else {
-          buf.write('字幕 ${i + 1}');
-        }
-
-        final pos = availableSubtitleTracks.length;
-        availableSubtitleTracks.add(
-          SubtitleTrack('fvp_subtitle_$pos', buf.toString(), lang ?? '',
-              uri: false),
-        );
-      }
-
-      // ---- 同步当前激活轨道 ----
-      // activeAudioTracks / activeVideoTracks / activeSubtitleTracks
-      // 返回 List<int>（激活轨在对应列表中的索引）
-      final activeAudio = p.activeAudioTracks;
-      if (activeAudio.isNotEmpty) {
-        final pos = activeAudio.first;
-        if (pos >= 0 && pos < availableAudioTracks.length) {
-          currentAudioTrack.value = availableAudioTracks[pos];
-        } else {
-          currentAudioTrack.value = null;
-        }
-      } else {
-        currentAudioTrack.value = null;
-      }
-
-      final activeVideo = p.activeVideoTracks;
-      if (activeVideo.isNotEmpty) {
-        final pos = activeVideo.first;
-        if (pos >= 0 && pos < availableVideoTracks.length) {
-          currentVideoTrack.value = availableVideoTracks[pos];
-        } else {
-          currentVideoTrack.value = null;
-        }
-      } else {
-        currentVideoTrack.value = null;
-      }
-
-      final activeSubtitle = p.activeSubtitleTracks;
-      if (activeSubtitle.isNotEmpty) {
-        final pos = activeSubtitle.first;
-        if (pos >= 0 && pos < availableSubtitleTracks.length) {
-          currentSubtitleTrack.value = availableSubtitleTracks[pos];
-        } else {
-          currentSubtitleTrack.value = null;
-        }
-      } else {
-        currentSubtitleTrack.value = null;
-      }
-    } catch (e, st) {
-      debugPrint('[FvpEngine] _updateTracks error: $e\n$st');
-    }
-  }
-
-  // ============================================================
-  // 播放控制
-  // ============================================================
   @override
   Future<void> play({bool repeat = false, bool hideControls = true}) async {
-    final p = _player;
-    if (p == null || !_isInitialized) return;
-    if (_isPlaying && playerStatus.value.isPlaying) return;
+    debugPrint('[FvpEngine] play() called, repeat=$repeat, current _isPlaying=$_isPlaying');
+    if (_controller == null || !_isInitialized) {
+      debugPrint('[FvpEngine] play() skipped: controller=$_controller, isInitialized=$_isInitialized');
+      return;
+    }
+
+    // 幂等性保护：如果已经在播放，直接返回
+    if (_isPlaying && _controller!.value.isPlaying) {
+      debugPrint('[FvpEngine] play() skipped: already playing, no-op');
+      return;
+    }
 
     controls = !hideControls;
-    _completionReported = false;
-
     if (repeat) {
-      try {
-        await p.seek(position: 0);
-      } catch (_) {}
+      await _controller!.seekTo(Duration.zero);
     }
-    p.state = mdk.PlaybackState.playing;
-    // 状态由 onStateChanged 事件驱动
+    await _controller!.play();
+    _isPlaying = true;
+    playerStatus.value = PlayerStatus.playing;
+    duration.refresh();
+    debugPrint('[FvpEngine] play() completed, _isPlaying=$_isPlaying');
   }
 
   @override
   Future<void> pause({bool notify = true, bool isInterrupt = false}) async {
-    final p = _player;
-    if (p == null || !_isInitialized) return;
-    p.state = mdk.PlaybackState.paused;
+    debugPrint('[FvpEngine] pause() called');
+    if (_controller == null || !_isInitialized) return;
+    await _controller!.pause();
+    _isPlaying = false;
+    playerStatus.value = PlayerStatus.paused;
+    debugPrint('[FvpEngine] pause() completed');
   }
 
   @override
   Future<void> seekTo(Duration position, {bool isSeek = true}) async {
-    final p = _player;
-    if (p == null || !_isInitialized) return;
-
-    var target = position < Duration.zero ? Duration.zero : position;
-    final dur = duration.value;
-    if (dur != Duration.zero && target > dur) target = dur;
-
-    try {
-      // mdk.Player.seek 返回 Future<int>（实际位置毫秒，< 0 失败）
-      final result = await p.seek(position: target.inMilliseconds);
-      if (result >= 0) {
-        this.position = Duration(milliseconds: result);
-      } else {
-        this.position = target;
-      }
-      updatePositionSecond();
-      if (!isSliderMoving.value) {
-        sliderPosition = this.position;
-        updateSliderPositionSecond();
-      }
-    } catch (e) {
-      debugPrint('[FvpEngine] seek error: $e');
+    if (_controller == null || !_isInitialized) return;
+    final target = position < Duration.zero ? Duration.zero : position;
+    if (target > duration.value) {
+      return;
     }
+    try {
+      await _controller!.seekTo(target);
+    } catch (_) {
+      await _controller!.seekTo(target);
+    }
+
+    // ============================================================
+    // 参考：FVP 扩展方法 fastSeekTo 用法（默认不启用）
+    // ============================================================
+    // 官方文档：fast seek to a key frame
+    // 特点：跳转更快，但结果位置可能与请求位置有偏差（不精确）
+    // 适用场景：快速预览、长按倍速前进
+    // 注意：会导致跳过片头片尾不准、拖拽进度条偏移
+    //
+    // 接入方式：
+    //   try {
+    //     await _controller!.fastSeekTo(target);
+    //   } catch (_) {
+    //     await _controller!.seekTo(target);
+    //   }
+
+    this.position = target;
+    updatePositionSecond();
   }
 
   @override
   Future<void> refreshPlayer() async {
-    if (dataSource == null) return;
-    final currentPos = position;
+    if (_controller == null || dataSource == null) return;
+    final currentPosition = position;
     final wasPlaying = _isPlaying;
-    await setDataSource(dataSource, autoplay: false, seekTo: currentPos);
-    if (wasPlaying) await play();
+
+    await setDataSource(
+      dataSource,
+      autoplay: false,
+      seekTo: currentPosition,
+    );
+
+    if (wasPlaying) {
+      await play();
+    }
   }
 
   // ============================================================
-  // 音量 / 倍速
+  // 5. 音量
   // ============================================================
+
   @override
   double get maxVolume => 1.0;
 
@@ -997,7 +645,9 @@ class FvpEngine implements IPlayerEngine {
   Future<void> setVolume(double volume, {bool showIndicator = true}) async {
     _volume = volume.clamp(0.0, 1.0);
     this.volume.value = _volume;
-    _player?.volume = _volume;
+    if (_controller != null && _isInitialized) {
+      await _controller!.setVolume(_volume);
+    }
     if (showIndicator) {
       volumeIndicator.value = true;
       volumeTimer?.cancel();
@@ -1007,11 +657,17 @@ class FvpEngine implements IPlayerEngine {
     }
   }
 
+  // ============================================================
+  // 6. 倍速
+  // ============================================================
+
   @override
   Future<void> setPlaybackSpeed(double speed) async {
     lastPlaybackSpeed = _playbackSpeed;
     _playbackSpeed = speed;
-    _player?.playbackRate = speed;
+    if (_controller != null && _isInitialized) {
+      await _controller!.setPlaybackSpeed(speed);
+    }
   }
 
   @override
@@ -1020,11 +676,14 @@ class FvpEngine implements IPlayerEngine {
   }
 
   @override
-  void setLongPressStatus(bool val) => longPressStatus.value = val;
+  void setLongPressStatus(bool val) {
+    longPressStatus.value = val;
+  }
 
   // ============================================================
-  // 全屏
+  // 7. 全屏
   // ============================================================
+
   @override
   Future<void> triggerFullScreen({
     bool status = true,
@@ -1033,6 +692,7 @@ class FvpEngine implements IPlayerEngine {
     bool isManualFS = true,
   }) async {
     if (isFullScreen.value == status) return;
+
     if (PlatformUtils.isMobile) {
       if (status) {
         hideSystemBar();
@@ -1041,7 +701,9 @@ class FvpEngine implements IPlayerEngine {
           DeviceOrientation.landscapeRight,
         ]);
       } else {
-        if (!removeSafeArea) showSystemBar();
+        if (!removeSafeArea) {
+          showSystemBar();
+        }
         await SystemChrome.setPreferredOrientations([
           DeviceOrientation.portraitUp,
           DeviceOrientation.portraitDown,
@@ -1055,9 +717,10 @@ class FvpEngine implements IPlayerEngine {
           await exitDesktopFullScreen();
         }
       } catch (e) {
-        debugPrint('[FvpEngine] fullscreen error: $e');
+        debugPrint('FvpEngine triggerFullScreen error: $e');
       }
     }
+
     _isFullscreen = status;
     isFullScreen.value = status;
   }
@@ -1069,136 +732,387 @@ class FvpEngine implements IPlayerEngine {
   }
 
   // ============================================================
-  // 轨道切换
+  // 8. 轨道控制
   // ============================================================
-  @override
-  Future<void> setAudioTrack(AudioTrack track) async {
-    final p = _player;
-    if (p == null || !_isInitialized) return;
-    final id = track.id;
+
+  /// 刷新轨道列表
+  ///
+  /// 关键点 1：`getActiveAudioTracks()` / `getActiveSubtitleTracks()`
+  /// 返回的是"轨道在列表中的位置"（0-indexed），不是流的全局 index。
+  /// 因此 track.id 后缀必须用列表位置 i。
+  ///
+  /// 关键点 2：MKV 压制常留下空占位字幕轨（只有 1 帧 / 几十字节），
+  /// 切换这类轨道无任何视觉效果。需通过 metadata 里的
+  /// NUMBER_OF_FRAMES / NUMBER_OF_BYTES 过滤掉它们，
+  /// 与 MPV 内核的 _isValidSubtitleTrack 行为对齐。
+  void _updateTracks() {
+    if (_controller == null || !_isInitialized) return;
 
     try {
-      if (id == 'no' || id.isEmpty) {
-        p.activeAudioTracks = <int>[];
-      } else if (id == 'auto') {
-        p.activeAudioTracks = <int>[0];
-      } else if (id.startsWith('fvp_audio_')) {
-        final pos = int.tryParse(id.substring('fvp_audio_'.length));
-        if (pos != null) p.activeAudioTracks = <int>[pos];
+      availableAudioTracks.clear();
+      availableVideoTracks.clear();
+      availableSubtitleTracks.clear();
+
+      final info = _controller!.getMediaInfo();
+
+      if (info != null) {
+        // ===== 音轨 =====
+        final audioList = info.audio ?? [];
+        for (int i = 0; i < audioList.length; i++) {
+          final stream = audioList[i];
+          String? title;
+          String? lang;
+          try {
+            final m = stream.metadata;
+            if (m is Map) {
+              title = m['title']?.toString();
+              lang = m['language']?.toString();
+            }
+          } catch (_) {}
+
+          String codecName = '';
+          final codecObj = stream.codec;
+          if (codecObj != null) {
+            try {
+              codecName = (codecObj as dynamic).codec?.toString() ?? '';
+            } catch (_) {}
+          }
+
+          final buf = StringBuffer();
+          if (title != null && title.isNotEmpty) {
+            buf.write(title);
+          } else if (lang != null && lang.isNotEmpty) {
+            buf.write('音轨 ${i + 1} ($lang)');
+          } else {
+            buf.write('音轨 ${i + 1}');
+          }
+          if (codecName.isNotEmpty) buf.write(' · ${codecName.toUpperCase()}');
+
+          availableAudioTracks.add(
+            AudioTrack('fvp_audio_$i', buf.toString(), lang ?? ''),
+          );
+        }
+
+        // ===== 视轨 =====
+        final videoList = info.video ?? [];
+        for (int i = 0; i < videoList.length; i++) {
+          final stream = videoList[i];
+          String codecName = '';
+          final codecObj = stream.codec;
+          if (codecObj != null) {
+            try {
+              codecName = (codecObj as dynamic).codec?.toString() ?? '';
+            } catch (_) {}
+          }
+          final rotation = stream.rotation;
+          final buf = StringBuffer('视轨 ${i + 1}');
+          if (codecName.isNotEmpty) buf.write(' · ${codecName.toUpperCase()}');
+          if (rotation != null && rotation != 0) buf.write(' · ${rotation}°');
+
+          availableVideoTracks.add(
+            VideoTrack('fvp_video_$i', buf.toString(), ''),
+          );
+        }
+
+        // ===== 字幕轨 =====
+        final subtitleList = info.subtitle ?? [];
+        for (int i = 0; i < subtitleList.length; i++) {
+          final stream = subtitleList[i];
+
+          // ---- 空占位字幕轨过滤 ----
+          // MKV 压制常留下只有 1 帧/几十字节的空字幕轨，
+          // 切换时无任何视觉效果，会造成"点了没反应"的困惑。
+          int? frameCount;
+          int? byteCount;
+          try {
+            final m = stream.metadata;
+            if (m is Map) {
+              frameCount = int.tryParse(m['NUMBER_OF_FRAMES']?.toString() ?? '');
+              byteCount = int.tryParse(m['NUMBER_OF_BYTES']?.toString() ?? '');
+            }
+          } catch (_) {}
+
+          final isEmptyTrack =
+              (frameCount != null && frameCount < 2) ||
+              (byteCount != null && byteCount < 100);
+
+          if (isEmptyTrack) {
+            debugPrint('[FvpEngine] 跳过空占位字幕轨 '
+                'index=${stream.index} (frames=$frameCount, bytes=$byteCount)');
+            continue;
+          }
+
+          String? title;
+          String? lang;
+          try {
+            final m = stream.metadata;
+            if (m is Map) {
+              title = m['title']?.toString();
+              lang = m['language']?.toString();
+            }
+          } catch (_) {}
+
+          final buf = StringBuffer();
+          if (title != null && title.isNotEmpty) {
+            buf.write(title);
+          } else if (lang != null && lang.isNotEmpty) {
+            buf.write('字幕 ${i + 1} ($lang)');
+          } else {
+            buf.write('字幕 ${i + 1}');
+          }
+
+          // 用过滤后列表的长度作为 id 后缀，
+          // 保证 id 连续（0,1,2...），与 setSubtitleTracks 的位置语义匹配。
+          final pos = availableSubtitleTracks.length;
+          availableSubtitleTracks.add(
+            SubtitleTrack('fvp_subtitle_$pos', buf.toString(), lang ?? '', uri: false),
+          );
+        }
+      }
+
+      // ===== 降级：仅在 mediaInfo 完全读取失败时触发 =====
+      // 关键：不能用"过滤后列表是否为空"作为降级条件，
+      //      否则"所有字幕轨都被过滤掉"的正常情况会被降级路径重新填充假轨道。
+      if (info == null) {
+        if (availableAudioTracks.isEmpty) {
+          final active = _controller!.getActiveAudioTracks() ?? [];
+          for (int i = 0; i < active.length; i++) {
+            availableAudioTracks.add(
+              AudioTrack('fvp_audio_${active[i]}', '音轨 ${i + 1}', ''),
+            );
+          }
+        }
+        if (availableSubtitleTracks.isEmpty) {
+          final active = _controller!.getActiveSubtitleTracks() ?? [];
+          for (int i = 0; i < active.length; i++) {
+            availableSubtitleTracks.add(
+              SubtitleTrack('fvp_subtitle_${active[i]}', '字幕 ${i + 1}', '', uri: false),
+            );
+          }
+        }
+      }
+
+      // ===== 同步当前激活 =====
+      final activeAudio = _controller!.getActiveAudioTracks() ?? [];
+      if (activeAudio.isNotEmpty) {
+        final pos = activeAudio.first;
+        if (pos >= 0 && pos < availableAudioTracks.length) {
+          currentAudioTrack.value = availableAudioTracks[pos];
+        } else {
+          currentAudioTrack.value = null;
+        }
+      } else {
+        currentAudioTrack.value = null;
+      }
+
+      final activeVideo = _controller!.getActiveVideoTracks() ?? [];
+      if (activeVideo.isNotEmpty) {
+        final pos = activeVideo.first;
+        if (pos >= 0 && pos < availableVideoTracks.length) {
+          currentVideoTrack.value = availableVideoTracks[pos];
+        } else {
+          currentVideoTrack.value = null;
+        }
+      } else {
+        currentVideoTrack.value = null;
+      }
+
+      final activeSubtitle = _controller!.getActiveSubtitleTracks() ?? [];
+      if (activeSubtitle.isNotEmpty) {
+        final pos = activeSubtitle.first;
+        if (pos >= 0 && pos < availableSubtitleTracks.length) {
+          currentSubtitleTrack.value = availableSubtitleTracks[pos];
+        } else {
+          // 底层说有激活轨，但过滤后列表为空 → 视为"无字幕"
+          currentSubtitleTrack.value = null;
+        }
+      } else {
+        currentSubtitleTrack.value = null;
+      }
+    } catch (e, st) {
+      debugPrint('[FvpEngine] _updateTracks error: $e\n$st');
+    }
+  }
+
+  @override
+  Future<void> setAudioTrack(AudioTrack track) async {
+    if (_controller == null || !_isInitialized) return;
+    final id = track.id;
+
+    // 关闭音轨
+    if (id == 'no' || id.isEmpty) {
+      try {
+        _controller!.setAudioTracks([]);
+      } catch (e) {
+        debugPrint('[FvpEngine] 关闭音轨失败: $e');
       }
       currentAudioTrack.value = track;
+      return;
+    }
+
+    // 自动选择
+    if (id == 'auto') {
+      try {
+        _controller!.setAudioTracks([0]);
+      } catch (e) {
+        debugPrint('[FvpEngine] 自动选择失败: $e');
+      }
+      currentAudioTrack.value = track;
+      return;
+    }
+
+    // 指定音轨
+    if (!id.startsWith('fvp_audio_')) return;
+    final position = int.tryParse(id.substring('fvp_audio_'.length));
+    if (position == null) return;
+
+    try {
+      _controller!.setAudioTracks([position]);
+      currentAudioTrack.value = track;
     } catch (e) {
-      debugPrint('[FvpEngine] setAudioTrack error: $e');
+      debugPrint('[FvpEngine] 音轨切换失败: $e');
     }
   }
 
   @override
   Future<void> setVideoTrack(VideoTrack track) async {
-    // libmdk 不提供运行时切换视频轨的 API
-    debugPrint('[FvpEngine] 不支持切换视频轨');
+    // FVP 不支持运行时切换视频轨
+    // 原因：FVPControllerExtensions 只提供 getActiveVideoTracks() 查询，
+    //      没有对应的 setVideoTracks() 切换 API
+    debugPrint('[FvpEngine] FVP 不支持切换视频轨，操作已忽略');
   }
 
   @override
   Future<void> setSubtitleTrack(SubtitleTrack track) async {
-    final p = _player;
-    if (p == null || !_isInitialized) return;
+    if (_controller == null || !_isInitialized) return;
     final id = track.id;
 
-    try {
-      // ============================================================
-      // 关闭字幕
-      // ------------------------------------------------------------
-      // 需要同时做两件事：
-      //   1) 关闭主媒体源的内嵌字幕轨道
-      //   2) unload 独立挂载的外挂字幕源
-      // libmdk 通过 setMedia("", Subtitle) 实现 unload
-      // ============================================================
-      if (id == 'no' || id.isEmpty) {
-        p.activeSubtitleTracks = <int>[];
-        try {
-          p.setMedia('', mdk.MediaType.subtitle);
-        } catch (e) {
-          debugPrint('[FvpEngine] unload external subtitle failed: $e');
-        }
-        currentSubtitleTrack.value = track;
-        return;
+    // 关闭字幕
+    if (id == 'no' || id.isEmpty) {
+      // 1) 卸载外挂字幕源（必须先做）
+      //    setExternalSubtitle('') 会清空外挂媒体源；
+      //    这是 FVPControllerExtensions 提供的官方接口。
+      try {
+        _controller!.setExternalSubtitle('');
+        debugPrint('[FvpEngine] 外挂字幕源已卸载');
+      } catch (e) {
+        debugPrint('[FvpEngine] 卸载外挂字幕失败: $e');
       }
 
-      // ============================================================
-      // 自动选择：优先内嵌第一轨，同时清掉外挂
-      // ============================================================
-      if (id == 'auto') {
-        try {
-          p.setMedia('', mdk.MediaType.subtitle);
-        } catch (_) {}
-        p.activeSubtitleTracks = <int>[0];
-        currentSubtitleTrack.value = track;
-        return;
-      }
-
-      // ============================================================
-      // 内嵌字幕：切换前先 unload 外挂，避免两路同时渲染
-      // ============================================================
-      if (id.startsWith('fvp_subtitle_')) {
-        try {
-          p.setMedia('', mdk.MediaType.subtitle);
-        } catch (_) {}
-        final pos = int.tryParse(id.substring('fvp_subtitle_'.length));
-        if (pos != null) {
-          p.activeSubtitleTracks = <int>[pos];
-          currentSubtitleTrack.value = track;
-        }
-        return;
-      }
-
-      // ============================================================
-      // 外挂字幕：先关闭内嵌，再挂载外挂源
-      // ============================================================
-      final isExternal = track.uri ||
-          id.startsWith('http') ||
-          id.startsWith('file://') ||
-          id.startsWith('/') ||
-          (Platform.isWindows && (id.contains(':\\') || id.startsWith('\\\\')));
-
-      if (isExternal) {
-        // 关闭内嵌字幕（否则可能会和外挂一起显示）
-        p.activeSubtitleTracks = <int>[];
-
-        String subPath = id;
-        if (subPath.startsWith('file://')) {
-          String pathPart = subPath.substring('file://'.length);
-          if (Platform.isWindows && pathPart.startsWith('/')) {
-            pathPart = pathPart.substring(1);
-          }
-          subPath = Uri.decodeComponent(pathPart);
-        }
-        // 重复调用 setMedia 会替换上一个外挂源，无需先 unload
-        p.setMedia(subPath, mdk.MediaType.subtitle);
-        currentSubtitleTrack.value = track;
-
-        // mediaInfo.subtitle 不含外挂字幕，手动加入可选列表
-        if (!availableSubtitleTracks.any((t) => t.id == track.id)) {
-          availableSubtitleTracks.add(track);
-        }
-        return;
+      // 2) 清空内嵌字幕激活轨
+      try {
+        _controller!.setSubtitleTracks([]);
+      } catch (e) {
+        debugPrint('[FvpEngine] 清空内嵌字幕失败: $e');
       }
 
       currentSubtitleTrack.value = track;
-    } catch (e) {
-      debugPrint('[FvpEngine] setSubtitleTrack error: $e');
+      return;
     }
+
+    // 自动选择
+    if (id == 'auto') {
+      // ============================================================
+      // 对齐 MPV 行为：
+      //   MPV 下 `sid=no` 只是隐藏，外挂仍在 mpv 轨道列表，
+      //   `sid=auto` 会重新选中它。
+      //   FVP 下外挂关闭时被卸载，无法自动恢复，因此这里
+      //   优先从 availableSubtitleTracks 里找回用户挂过的外挂，
+      //   重新挂载。
+      // ============================================================
+      SubtitleTrack? externalTrack;
+      for (final t in availableSubtitleTracks) {
+        if (t.id.isNotEmpty &&
+            t.id != 'no' &&
+            t.id != 'auto' &&
+            !t.id.startsWith('fvp_subtitle_')) {
+          externalTrack = t;
+          break;
+        }
+      }
+
+      if (externalTrack != null) {
+        // 递归调用，走"外挂加载"分支，重新 setExternalSubtitle
+        await setSubtitleTrack(externalTrack);
+        return;
+      }
+
+      // 无外挂：走内嵌轨
+      try {
+        _controller!.setSubtitleTracks([0]);
+      } catch (e) {
+        debugPrint('[FvpEngine] 自动选择字幕失败: $e');
+      }
+      currentSubtitleTrack.value = track;
+      return;
+    }
+
+    // 内嵌字幕轨
+    if (id.startsWith('fvp_subtitle_')) {
+      final position = int.tryParse(id.substring('fvp_subtitle_'.length));
+      if (position != null) {
+        try {
+          _controller!.setExternalSubtitle('');   // 先卸载外挂
+        } catch (_) {}
+        try {
+          _controller!.setSubtitleTracks([position]);
+          currentSubtitleTrack.value = track;
+        } catch (e) {
+          debugPrint('[FvpEngine] 切换内嵌字幕失败: $e');
+        }
+        return;
+      }
+    }
+
+    // 外部字幕文件
+    bool isExternal = track.uri ||
+        id.startsWith('http') ||
+        id.startsWith('file://') ||
+        id.startsWith('/') ||
+        (Platform.isWindows && (id.contains(':\\') || id.startsWith('\\\\')));
+
+    if (isExternal) {
+      try {
+        String subtitleId = id;
+        if (subtitleId.startsWith('file://')) {
+          String pathPart = subtitleId.substring('file://'.length);
+          if (Platform.isWindows && pathPart.startsWith('/')) {
+            pathPart = pathPart.substring(1);
+          }
+          subtitleId = Uri.decodeComponent(pathPart);
+        }
+        _controller!.setExternalSubtitle(subtitleId);
+        currentSubtitleTrack.value = track;
+
+        // ===== 关键补充 =====
+        // FVP 的 getMediaInfo() 不返回外挂字幕，需要手动加入可选列表，
+        // 否则底部 CC 按钮因 availableSubtitleTracks 为空而隐藏，
+        // 用户无法在多个外挂字幕（含 AI 翻译）之间切换。
+        if (!availableSubtitleTracks.any((t) => t.id == track.id)) {
+          availableSubtitleTracks.add(track);
+        }
+      } catch (e) {
+        debugPrint('[FvpEngine] 加载外部字幕失败: $e');
+      }
+      return;
+    }
+
+    currentSubtitleTrack.value = track;
   }
 
   // ============================================================
-  // 截图
+  // 9. 截图
   // ============================================================
+
   @override
   Future<void> takeScreenshot() async {
-    if (_isDisposed || _player == null || !_isInitialized) {
+    if (_isDisposed || _controller == null || !_isInitialized) {
       SmartDialog.showToast('播放器未就绪');
       return;
     }
+
     SmartDialog.showToast('截图中');
+
     try {
       final boundary = _screenshotKey.currentContext?.findRenderObject()
           as RenderRepaintBoundary?;
@@ -1206,14 +1120,19 @@ class FvpEngine implements IPlayerEngine {
         SmartDialog.showToast('截图失败：界面未就绪');
         return;
       }
+
+      // pixelRatio 决定分辨率，2.0 = 两倍图
       final ui.Image image = await boundary.toImage(pixelRatio: 2.0);
       final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
       image.dispose();
+
       if (byteData == null) {
         SmartDialog.showToast('截图失败');
         return;
       }
-      final bytes = byteData.buffer.asUint8List();
+
+      final Uint8List imageBytes = byteData.buffer.asUint8List();
+
       SmartDialog.showToast('点击弹窗保存截图');
       showDialog(
         context: Get.context!,
@@ -1221,7 +1140,7 @@ class FvpEngine implements IPlayerEngine {
           onTap: () async {
             try {
               await ImageUtils.saveByteImg(
-                bytes: bytes,
+                bytes: imageBytes,
                 fileName: 'screenshot_${ImageUtils.time}',
               );
             } catch (e) {
@@ -1246,7 +1165,7 @@ class FvpEngine implements IPlayerEngine {
                   ),
                   child: Padding(
                     padding: const EdgeInsets.all(5),
-                    child: Image.memory(bytes),
+                    child: Image.memory(imageBytes),
                   ),
                 ),
               ),
@@ -1260,48 +1179,90 @@ class FvpEngine implements IPlayerEngine {
   }
 
   // ============================================================
-  // 录制 / 外部音频
+  // 9.1 录制（FVP 扩展 `record`）
   // ============================================================
+  //
+  // 说明：
+  //   - iOS 显式指定 h264_videotoolbox（Apple 硬件编码器）
+  //   - Android 优先尝试 h264_mediacodec，失败则回退默认编码器
+  //   - 其他平台（桌面端）保持默认编码器（已验证正常）
+  //   - FVP API 不支持指定分辨率，录制跟随源视频分辨率
+  //
   @override
   void record(String? path) {
-    final p = _player;
-    if (p == null || !_isInitialized) return;
-    try {
-      if (path == null || path.isEmpty) {
-        p.record(to: null);
+    if (_controller == null || !_isInitialized) {
+      debugPrint('[FvpEngine] record skipped: player not ready');
+      return;
+    }
+
+    // 停止录制
+    if (path == null || path.isEmpty) {
+      try {
+        _controller!.record(to: null);
         debugPrint('[FvpEngine] 录制停止');
-      } else {
-        p.record(to: path);
-        debugPrint('[FvpEngine] 录制启动: $path');
+      } catch (e) {
+        debugPrint('[FvpEngine] 停止录制失败: $e');
       }
+      return;
+    }
+
+    // 开始录制：先用默认编码器验证
+    try {
+      _controller!.record(to: path);
+      debugPrint('[FvpEngine] 录制启动（默认）: $path');
     } catch (e) {
-      debugPrint('[FvpEngine] record error: $e');
+      debugPrint('[FvpEngine] 录制启动失败: $e');
     }
   }
 
+  // ============================================================
+  // 9.2 外部音频（FVP 扩展，用于无音轨视频）
+  // ============================================================
+  //
+  // 已知风险：fvp 官方 Issue #85 记录了外部音频的 bug，
+  //   视频无音轨时加载外部音频后切换到普通视频可能卡顿/死锁。
+  //   兜底策略：切换媒体源前清理外部音频（见 setDataSource 顶部）。
+  //
   @override
   void setExternalAudio(String? url) {
     _externalAudioUrl = url;
-    final p = _player;
-    if (p == null || !_isInitialized) return;
-    if (url == null || url.isEmpty) return;
+    if (_controller == null || !_isInitialized) {
+      debugPrint('[FvpEngine] setExternalAudio deferred: $url');
+      return;
+    }
+
+    if (url == null || url.isEmpty) {
+      debugPrint('[FvpEngine] 外部音频已清除');
+      return;
+    }
+
     try {
-      p.setMedia(url, mdk.MediaType.audio);
-      debugPrint('[FvpEngine] 外部音频已加载: $url');
+      final platform = (_controller as dynamic).platform;
+      if (platform != null) {
+        (platform as dynamic).setMedia(url, mdk.MediaType.audio);
+        debugPrint('[FvpEngine] 外部音频已加载: $url');
+      } else {
+        debugPrint('[FvpEngine] 无法获取底层 Player');
+      }
     } catch (e) {
-      debugPrint('[FvpEngine] setExternalAudio error: $e');
+      debugPrint('[FvpEngine] 外部音频加载异常: $e');
     }
   }
 
   // ============================================================
-  // 画中画 / 翻转 / 其他
+  // 10. 画中画（FVP 不支持）
   // ============================================================
+
   @override
   Future<void> enterDesktopPip() async {}
   @override
   Future<void> exitDesktopPip() async {}
   @override
   void toggleDesktopPip() {}
+
+  // ============================================================
+  // 11. 其他控制
+  // ============================================================
 
   @override
   void toggleFlipX() => flipX.value = !flipX.value;
@@ -1315,7 +1276,9 @@ class FvpEngine implements IPlayerEngine {
   @override
   void onLockControl(bool val) {
     controlsLock.value = val;
-    if (!val && showControls.value) showControls.refresh();
+    if (!val && showControls.value) {
+      showControls.refresh();
+    }
     controls = !val;
   }
 
@@ -1356,7 +1319,9 @@ class FvpEngine implements IPlayerEngine {
 
   @override
   void onChangedSliderStart([Duration? value]) {
-    if (value != null) sliderTempPosition.value = value;
+    if (value != null) {
+      sliderTempPosition.value = value;
+    }
     isSliderMoving.value = true;
   }
 
@@ -1369,7 +1334,9 @@ class FvpEngine implements IPlayerEngine {
 
   @override
   void onChangedSliderEnd() {
-    if (cancelSeek != true) feedBack();
+    if (cancelSeek != true) {
+      feedBack();
+    }
     cancelSeek = null;
     hasToast = null;
     isSliderMoving.value = false;
@@ -1378,7 +1345,7 @@ class FvpEngine implements IPlayerEngine {
 
   @override
   void updateSliderPositionSecond() {
-    final newSecond = sliderPosition.inSeconds;
+    int newSecond = sliderPosition.inSeconds;
     if (sliderPositionSeconds.value != newSecond) {
       sliderPositionSeconds.value = newSecond;
     }
@@ -1386,7 +1353,7 @@ class FvpEngine implements IPlayerEngine {
 
   @override
   void updatePositionSecond() {
-    final newSecond = position.inSeconds;
+    int newSecond = position.inSeconds;
     if (positionSeconds.value != newSecond) {
       positionSeconds.value = newSecond;
     }
@@ -1394,13 +1361,9 @@ class FvpEngine implements IPlayerEngine {
 
   @override
   void updateBufferedSecond() {
-    final newSecond = buffered.value.inSeconds;
-    if (bufferedSeconds.value != newSecond) {
-      bufferedSeconds.value = newSecond;
-    }
+    bufferedSeconds.value = 0;
   }
 
-  @override
   set controls(bool visible) {
     showControls.value = visible;
     _timer?.cancel();
@@ -1410,12 +1373,13 @@ class FvpEngine implements IPlayerEngine {
     }
   }
 
-  @override
   void hideTaskControls() {
     _timer?.cancel();
     if (isSliderMoving.value) return;
     _timer = Timer(showControlDuration, () {
-      if (!isSliderMoving.value) controls = false;
+      if (!isSliderMoving.value) {
+        controls = false;
+      }
       _timer = null;
     });
   }
@@ -1429,7 +1393,9 @@ class FvpEngine implements IPlayerEngine {
   @override
   void onPopInvokedWithResult(bool didPop, Object? result) {
     if (didPop) {
-      if (_isPlaying) pause();
+      if (_isPlaying) {
+        pause();
+      }
       return;
     }
     if (controlsLock.value) {
@@ -1448,10 +1414,10 @@ class FvpEngine implements IPlayerEngine {
     playRepeat = type;
     if (type == PlayRepeat.singleCycle) {
       _isLooping = true;
-      _player?.loop = -1;
+      _controller?.setLooping(true);
     } else {
       _isLooping = false;
-      _player?.loop = 0;
+      _controller?.setLooping(false);
     }
   }
 
@@ -1475,27 +1441,151 @@ class FvpEngine implements IPlayerEngine {
   }
 
   @override
-  void toggleVideoFit(VideoFitType value) => videoFit.value = value;
+  void toggleVideoFit(VideoFitType value) {
+    videoFit.value = value;
+  }
 
   // ============================================================
-  // 监听器
+  // 12. 监听器管理
   // ============================================================
+
+  void _addListeners() {
+    if (_controller == null) return;
+    _listenerCallback = () {
+      // 防止在销毁后继续处理回调
+      if (_isDisposed) return;
+      final controller = _controller;
+      if (controller == null || !_isInitialized) return;
+      final value = controller.value;
+
+      if (value.hasError) {
+        debugPrint('[FvpEngine] 播放错误: ${value.errorDescription}');
+      }
+
+      if (position != value.position) {
+        position = value.position;
+        updatePositionSecond();
+        if (!isSliderMoving.value) {
+          sliderPosition = value.position;
+          updateSliderPositionSecond();
+        }
+        for (final listener in _positionListeners) {
+          listener(value.position);
+        }
+      }
+
+      if (duration.value != value.duration) {
+        duration.value = value.duration;
+
+        if (_videoWidth.value == 0 || _videoHeight.value == 0) {
+          _updateVideoSize();
+        }
+      }
+
+      // 缓冲计算
+      if (value.buffered.isNotEmpty) {
+        Duration totalBuffered = Duration.zero;
+        for (final range in value.buffered) {
+          totalBuffered += range.end - range.start;
+        }
+        if (buffered.value != totalBuffered) {
+          buffered.value = totalBuffered;
+          updateBufferedSecond();
+        }
+      }
+
+      isBuffering.value = value.isBuffering;
+
+      // ===== 轨道懒刷新：媒体完全加载后拉取 =====
+      if (value.isInitialized &&
+          availableAudioTracks.isEmpty &&
+          availableSubtitleTracks.isEmpty) {
+        _updateTracks();
+      }
+
+      // 播放状态变化
+      if (value.isPlaying && !_isPlaying) {
+        _isPlaying = true;
+        playerStatus.value = PlayerStatus.playing;
+        debugPrint('[FvpEngine] _listener: playing -> true');
+        for (final listener in _statusListeners) {
+          listener(PlayerStatus.playing);
+        }
+      } else if (!value.isPlaying && _isPlaying) {
+        _isPlaying = false;
+        playerStatus.value = PlayerStatus.paused;
+        debugPrint('[FvpEngine] _listener: playing -> false');
+        for (final listener in _statusListeners) {
+          listener(PlayerStatus.paused);
+        }
+      }
+
+      if (value.isCompleted) {
+        playerStatus.value = PlayerStatus.completed;
+        for (final listener in _statusListeners) {
+          listener(PlayerStatus.completed);
+        }
+        if (autoExitFullscreen && isFullScreen.value) {
+          triggerFullScreen(status: false);
+        }
+      }
+
+      // ===== 跳过片尾 =====
+      // 关键：不能 pause，否则 completed 事件不会触发，自动切集会失效。
+      // 改为 seek 到末尾前 500ms，让播放器自然播完，走正常切集流程。
+      final endSkip = skipEndDuration.value;
+      if (endSkip > 0 && !_skipEndTriggered) {
+        final total = duration.value.inSeconds;
+        if (total > 0 && value.position.inSeconds >= total - endSkip) {
+          if (_isPlaying) {
+            _skipEndTriggered = true;
+            final nearEnd = Duration(seconds: total) -
+                const Duration(milliseconds: 500);
+            if (value.position < nearEnd) {
+              seekTo(nearEnd, isSeek: false);
+              SmartDialog.showToast('已跳过片尾');
+            }
+          }
+        }
+      }
+    };
+
+    _controller!.addListener(_listenerCallback!);
+  }
+
+  void _removeListeners() {
+    if (_controller != null && _listenerCallback != null) {
+      _controller!.removeListener(_listenerCallback!);
+      _listenerCallback = null;
+    }
+    _positionListeners.clear();
+    _statusListeners.clear();
+  }
+
   @override
-  void addPositionListener(ValueChanged<Duration> listener) =>
-      _positionListeners.add(listener);
+  void addPositionListener(ValueChanged<Duration> listener) {
+    _positionListeners.add(listener);
+  }
+
   @override
-  void removePositionListener(ValueChanged<Duration> listener) =>
-      _positionListeners.remove(listener);
+  void removePositionListener(ValueChanged<Duration> listener) {
+    _positionListeners.remove(listener);
+  }
+
   @override
-  void addStatusLister(ValueChanged<PlayerStatus> listener) =>
-      _statusListeners.add(listener);
+  void addStatusLister(ValueChanged<PlayerStatus> listener) {
+    _statusListeners.add(listener);
+  }
+
   @override
-  void removeStatusLister(ValueChanged<PlayerStatus> listener) =>
-      _statusListeners.remove(listener);
+  void removeStatusLister(ValueChanged<PlayerStatus> listener) {
+    _statusListeners.remove(listener);
+  }
 
   // ============================================================
-  // 渲染：Texture
+  // 13. 渲染
   // ============================================================
+
   @override
   Widget buildVideoWidget({
     required BoxFit fit,
@@ -1505,55 +1595,57 @@ class FvpEngine implements IPlayerEngine {
     return RepaintBoundary(
       key: _screenshotKey,
       child: Obx(() {
-        // 依赖重建计数器
-        final _ = _rebuildCounter.value;
+        // 1. 强制依赖重建计数器
+        final rebuild = _rebuildCounter.value;
 
-        final p = _player;
-        if (_isDisposed || p == null || !_isInitialized) {
+        // 2. 显式读取播放器状态
+        bool isInitialized = false;
+        try {
+          if (_controller != null) {
+            isInitialized = _controller!.value.isInitialized;
+          }
+        } catch (_) {}
+
+        if (_isDisposed || _controller == null || !isInitialized) {
           return const ColoredBox(color: Colors.black);
         }
 
-        // mdk.Player.textureId 是 ValueNotifier<int?>
-        return ValueListenableBuilder<int?>(
-          valueListenable: p.textureId,
-          builder: (context, texId, _) {
-            if (texId == null || texId < 0) {
-              return const ColoredBox(color: Colors.black);
-            }
-            Widget video = Texture(textureId: texId);
+        try {
+          final controller = _controller!;
+          final videoSize = controller.value.size;
+          final double width = videoSize?.width ?? 640;
+          final double height = videoSize?.height ?? 360;
 
-            if (flipX || flipY) {
-              video = Transform(
-                transform: Matrix4.identity()
-                  ..setEntry(0, 0, flipX ? -1 : 1)
-                  ..setEntry(1, 1, flipY ? -1 : 1),
-                alignment: Alignment.center,
-                child: video,
-              );
-            }
+          Widget video = VideoPlayer(
+            controller,
+            key: ValueKey(rebuild),
+          );
 
-            final w = _videoWidth.value;
-            final h = _videoHeight.value;
-            if (w <= 0 || h <= 0) {
-              return FittedBox(fit: fit, child: video);
-            }
-            return FittedBox(
-              fit: fit,
-              child: SizedBox(
-                width: w.toDouble(),
-                height: h.toDouble(),
-                child: video,
-              ),
+          if (flipX || flipY) {
+            video = Transform(
+              transform: Matrix4.identity()
+                ..setEntry(0, 0, flipX ? -1 : 1)
+                ..setEntry(1, 1, flipY ? -1 : 1),
+              alignment: Alignment.center,
+              child: video,
             );
-          },
-        );
+          }
+
+          return FittedBox(
+            fit: fit,
+            child: SizedBox(width: width, height: height, child: video),
+          );
+        } catch (e) {
+          return const ColoredBox(color: Colors.black);
+        }
       }),
     );
   }
 
   // ============================================================
-  // 跳过片头
+  // 14. 跳过片头片尾
   // ============================================================
+
   @override
   Future<void> applySkipStart() async {
     final start = skipStartDuration.value;
@@ -1564,16 +1656,17 @@ class FvpEngine implements IPlayerEngine {
   }
 
   // ============================================================
-  // 功能标志
+  // 15. 功能标志
   // ============================================================
+
   @override
   bool get supportsAudioTrack => true;
   @override
   bool get supportsVideoTrack => false;
   @override
-  bool get supportsEmbeddedSubtitle => true;
+  bool get supportsEmbeddedSubtitle => false;
   @override
-  bool get supportsHardwareAcceleration => true;
+  bool get supportsHardwareAcceleration => false;
   @override
   bool get supportsScreenshot => true;
   @override
@@ -1583,19 +1676,14 @@ class FvpEngine implements IPlayerEngine {
 
   @override
   bool get supportsRecording => true;
-
   @override
   bool get supportsExternalSubtitle => true;
-
   @override
   bool get supportsSubtitleExport => false;
-
   @override
   bool get supportsOnlyPlayAudio => false;
-
   @override
   bool get supportsHardwareDecodingSetting => false;
-
   @override
   bool get supportsExternalAudio => true;
 }

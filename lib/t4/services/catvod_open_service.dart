@@ -6,11 +6,14 @@ import 'package:dio/io.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_js/flutter_js.dart';
 import 'package:get/get.dart';
+import 'package:flutter/foundation.dart';
 import 'package:yuanying/utils/storage.dart';
 import '../models/play_url.dart';
 import '../models/video_detail.dart';
 import 'i_spider_service.dart';
 import 'package:yuanying/services/debug_log_service.dart';
+import 'package:yuanying/utils/error_formatter.dart';
+import 'site_switch_result.dart';
 
 class CatvodOpenService implements ISpiderService {
   String? _currentKey;
@@ -26,6 +29,9 @@ class CatvodOpenService implements ISpiderService {
 
   /// switchSite 之间的简单互斥，防止两个切站打架
   Future<void>? _switchMutex;
+
+  /// 防止 _resetRuntime 重入的标志
+  bool _resetting = false;
 
   CatvodOpenService() {
     _runtime = getJavascriptRuntime();
@@ -61,6 +67,21 @@ class CatvodOpenService implements ISpiderService {
     _runtime = getJavascriptRuntime();
     _initRuntime();
     print('[CatvodOpen] New runtime created and initialized.');
+  }
+
+  void _safeResetRuntime([Object? expectedRuntime]) {
+    if (_resetting) return;
+    // 如果调用方提供了快照 runtime，且当前 _runtime 已被他人替换，
+    // 则不再重置，避免覆盖其他流程刚建立的新 runtime。
+    if (expectedRuntime != null && !identical(_runtime, expectedRuntime)) {
+      return;
+    }
+    _resetting = true;
+    try {
+      _resetRuntime();
+    } finally {
+      _resetting = false;
+    }
   }
 
   void _initRuntime() {
@@ -572,6 +593,23 @@ class CatvodOpenService implements ISpiderService {
     }
   }
 
+  @override
+  Future<SiteSwitchResult> switchSiteSafe(
+    String apiUrl,
+    String siteKey, {
+    dynamic ext,
+  }) async {
+    try {
+      await switchSite(apiUrl, siteKey, ext: ext);
+      if (_isBroken) {
+        return SiteSwitchResult.failure('规则加载失败', siteKey: siteKey);
+      }
+      return SiteSwitchResult.success(siteKey: siteKey);
+    } catch (e) {
+      return SiteSwitchResult.failure(e.toString(), siteKey: siteKey);
+    }
+  }
+
   Future<void> _switchSiteInternal(String apiUrl, String siteKey, {dynamic ext}) async {
     print('[CatvodOpen] 🔄 switchSite: $siteKey');
 
@@ -614,6 +652,14 @@ class CatvodOpenService implements ISpiderService {
           throw Exception('规则内容为空');
         }
         await _loadRule(content);
+      } else if (File(apiUrl).existsSync()) {
+        // 本地文件源
+        final content = await File(apiUrl).readAsString();
+        if (content.isEmpty) {
+          throw Exception('本地规则文件为空: $apiUrl');
+        }
+        print('[CatvodOpen] 本地源文件: $apiUrl (${content.length} chars)');
+        await _loadRule(content);
       } else {
         await _loadRule(apiUrl);
       }
@@ -650,11 +696,10 @@ class CatvodOpenService implements ISpiderService {
   }
 
   Future<Map<String, dynamic>> _callAsync(String method, List<dynamic> args) async {
-    // 快照 _runtime 和 _methodMap，防止 await 期间被 switchSite 替换
     final runtime = _runtime;
     final methodMap = _methodMap;
     if (methodMap == null || !methodMap.containsKey(method)) {
-      return {'error': 'Method not found: $method'};
+      return {'error': ErrorFormatter.formatScriptError('方法不存在: $method')};
     }
 
     final actualMethod = methodMap[method]!;
@@ -695,29 +740,46 @@ class CatvodOpenService implements ISpiderService {
       })();
     ''';
 
-    final jsResult = await runtime.evaluateAsync(jsCode);
-    runtime.executePendingJob();
-    final finalResult = await runtime.handlePromise(jsResult);
-    final raw = finalResult.stringResult;
-
     try {
-      dynamic parsed = jsonDecode(raw);
-      if (parsed is String) parsed = jsonDecode(parsed);
-      if (parsed is Map<String, dynamic>) {
-        if (parsed.containsKey('error')) {
-          return {'error': parsed['error'].toString()};
+      final jsResult = await runtime.evaluateAsync(jsCode);
+      runtime.executePendingJob();
+
+      // 关键：handlePromise 加超时，防止挂起的 Promise 永久阻塞业务调用
+      final finalResult = await runtime
+          .handlePromise(jsResult)
+          .timeout(
+            const Duration(seconds: 20),
+            onTimeout: () => throw TimeoutException('JS Promise 超时（20s）'),
+          );
+
+      final raw = finalResult.stringResult;
+      try {
+        dynamic parsed = jsonDecode(raw);
+        if (parsed is String) parsed = jsonDecode(parsed);
+        if (parsed is Map<String, dynamic>) {
+          if (parsed.containsKey('error')) {
+            return {'error': parsed['error'].toString()};
+          }
+          return parsed;
         }
-        return parsed;
+        return {'error': '脚本执行失败：响应格式异常'};
+      } catch (e) {
+        return {'error': '脚本执行失败：响应解析失败'};
       }
-      return {'error': 'Unexpected response'};
+    } on TimeoutException catch (e) {
+      // 挂起的 Promise 会污染当前 runtime，标记 broken 并重建
+      _isBroken = true;
+      debugPrint('[CatvodOpen] _callAsync 超时: $e');
+      _safeResetRuntime(runtime);
+      return {'error': ErrorFormatter.formatScriptError('脚本执行超时')};
     } catch (e) {
-      return {'error': '响应解析失败: $e'};
+      return {'error': ErrorFormatter.formatScriptError(e)};
     }
   }
 
   Future<Map<String, dynamic>> _callApi(String method, {List<dynamic> args = const []}) async {
     if (_isBroken) {
-      return {'error': '规则加载失败，请切换其他源'};
+      return {'error': '脚本执行失败：规则未加载，请切换其他源'};
     }
     try {
       return await _callAsync(method, args);

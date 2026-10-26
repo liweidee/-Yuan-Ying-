@@ -4,6 +4,7 @@ import 'package:yuanying/http/init.dart';
 import 'package:yuanying/t4/models/play_url.dart';
 import 'package:yuanying/t4/models/video_detail.dart';
 import 'package:yuanying/t4/services/i_spider_service.dart';
+import 'package:yuanying/utils/error_formatter.dart';
 
 class T4ApiService implements ISpiderService {
   late Dio _dio;
@@ -82,28 +83,11 @@ class T4ApiService implements ISpiderService {
   }
 
   /// 格式化 HTTP 错误信息
-  String _formatHttpError(int statusCode) {
-    if (statusCode >= 500) return '服务器错误 ($statusCode)';
-    if (statusCode == 404) return '接口不存在 (404)';
-    if (statusCode == 403) return '接口拒绝访问 (403)';
-    if (statusCode == 401) return '接口需要认证 (401)';
-    if (statusCode >= 400) return '请求错误 ($statusCode)';
-    return 'HTTP 错误 ($statusCode)';
-  }
+  String _formatHttpError(int statusCode) =>
+    ErrorFormatter.formatHttpError(statusCode);
 
-  String _formatException(Object e) {
-    final str = e.toString();
-    if (str.contains('TimeoutException') || str.contains('timeout')) {
-      return '请求超时';
-    }
-    if (str.contains('SocketException') || str.contains('Connection')) {
-      return '网络连接失败';
-    }
-    if (str.contains('FormatException')) {
-      return '响应解析失败';
-    }
-    return '请求失败';   // 兜底
-  }
+  String _formatException(Object e) =>
+      ErrorFormatter.formatException(e);
 
   Future<Map<String, dynamic>> _get(Map<String, dynamic> params) async {
     if (!hasSite) {
@@ -188,7 +172,7 @@ class T4ApiService implements ISpiderService {
             throw Exception('配置数据格式错误：期望 Map 类型');
           }
         } catch (e) {
-          throw Exception('JSON解析失败: $e');
+          throw Exception('数据解析失败: $e');
         }
       } else {
         throw Exception('HTTP ${response.statusCode}');
