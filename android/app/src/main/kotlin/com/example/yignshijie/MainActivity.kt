@@ -113,11 +113,27 @@ class MainActivity : AudioServiceActivity(), MethodCallHandler {
                         result.success(false)
                     } else {
                         try {
-                            val intent = Intent(Intent.ACTION_DELETE)
-                            intent.data = Uri.parse("package:$pkgName")
-                            startActivity(intent)
-                            result.success(true)
+                            // 优先 ACTION_UNINSTALL_PACKAGE：弹系统卸载确认框
+                            // ACTION_DELETE 在 Android 11+ 部分 ROM（含 MuMu）会被静默处理
+                            val uninstallIntent = Intent(Intent.ACTION_UNINSTALL_PACKAGE).apply {
+                                data = Uri.parse("package:$pkgName")
+                                putExtra(Intent.EXTRA_RETURN_RESULT, false)
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            if (uninstallIntent.resolveActivity(packageManager) != null) {
+                                startActivity(uninstallIntent)
+                                result.success(true)
+                            } else {
+                                // 兜底：回退 ACTION_DELETE
+                                val fallback = Intent(Intent.ACTION_DELETE).apply {
+                                    data = Uri.parse("package:$pkgName")
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                startActivity(fallback)
+                                result.success(true)
+                            }
                         } catch (e: Exception) {
+                            android.util.Log.w("MainActivity", "uninstallPackage failed: $e")
                             result.success(false)
                         }
                     }

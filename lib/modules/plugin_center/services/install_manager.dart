@@ -143,11 +143,13 @@ class InstallManager {
   static const _pkgToId = <String, String>{
     'com.dsplayer.plugin.qjs': 'qjs',
     'com.dsplayer.plugin.agent': 'agent',
+    'com.dsplayer.plugin.python': 'py',
   };
 
   static const _pkgToTitle = <String, String>{
     'com.dsplayer.plugin.qjs': 'QJS 爬虫引擎插件',
     'com.dsplayer.plugin.agent': 'AI 助手界面插件',
+    'com.dsplayer.plugin.python': 'Python 爬虫引擎插件',
   };
 
   Box get _box => Hive.box(PluginStorageKeys.installedBox);
@@ -389,7 +391,14 @@ class InstallManager {
   Future<List<SystemInstalledPlugin>> scanSystemImportPlugins() async {
     if (!Platform.isAndroid) return [];
     final result = <SystemInstalledPlugin>[];
-    for (final pkg in knownImportPackages) {
+
+    // 合并 import 型（qjs/agent）和 apk 型（python）所有已知包
+    final allPackages = <String>[
+      ...knownImportPackages,
+      ...knownApkPackages,
+    ];
+
+    for (final pkg in allPackages) {
       final installed = await _isPackageInstalled(pkg);
       if (!installed) continue;
       final id = _pkgToId[pkg] ?? pkg;
@@ -432,7 +441,37 @@ class InstallManager {
       } catch (_) {
         return false;
       }
-      if (pluginJson['installMode']?.toString() != 'import') return false;
+      final installMode = pluginJson['installMode']?.toString();
+
+      // ===== installMode = apk：系统安装型插件（如 python）=====
+      // 这类插件必须保持 APK 系统安装形态（需要 AIDL / Service 桥接），
+      // 无法固化到应用内。这里只做"登记"，让插件中心能识别到；
+      // 卸载时必须走系统卸载（ACTION_UNINSTALL_PACKAGE）。
+      if (installMode == 'apk') {
+        await register(InstalledPlugin(
+          id: info.pluginId,
+          version: info.version.isEmpty ? '0.0.0' : info.version,
+          source: '系统应用',
+          installPath: '',
+          enabled: true,
+          pinned: false,
+          installedAtMs: DateTime.now().millisecondsSinceEpoch,
+          type: 'apk',
+          desc: pluginJson['desc']?.toString() ??
+              '系统安装型插件（通过 APK 安装，卸载需走系统卸载）',
+          extras: {
+            'platform': 'android',
+            'installMode': 'apk',
+            'apkPackage': info.packageName,
+          },
+        ));
+        debugPrint('[InstallManager] 已登记系统安装型插件：${info.pluginId} '
+            '(pkg=${info.packageName}, v=${info.version})');
+        return true;
+      }
+
+      // ===== installMode = import：可固化的插件（qjs/agent）=====
+      if (installMode != 'import') return false;
 
       final fakeEntry = MarketEntry(
         id: info.pluginId,

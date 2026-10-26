@@ -340,7 +340,11 @@ class _SystemInstalledPluginCard extends StatelessWidget {
               child: FilledButton.icon(
                 onPressed: () => _onSolidify(context),
                 icon: const Icon(Icons.save_alt, size: 18),
-                label: const Text('固化 APK 资源到应用内并卸载 APK'),
+                label: Text(
+                  info.pluginId == 'py'
+                      ? '登记为已安装（系统安装型）'
+                      : '固化 APK 资源到应用内并卸载 APK',
+                ),
                 style: FilledButton.styleFrom(
                   backgroundColor: const Color(0xFFFCE9E9),
                   foregroundColor: const Color(0xFF6B3F1F),
@@ -408,21 +412,31 @@ class _SystemInstalledPluginCard extends StatelessWidget {
   }
 
   Future<void> _onSolidify(BuildContext context) async {
-    SmartDialog.showLoading(msg: '正在固化资源…');
+    // 系统安装型插件（py）只能"登记"，不能"固化"（需保持 APK 形态以维持 AIDL/Service 桥接）
+    final isSystemApk = info.pluginId == 'py';
+    SmartDialog.showLoading(
+      msg: isSystemApk ? '正在登记…' : '正在固化资源…',
+    );
     try {
       final ok = await InstallManager.instance.solidifySystemPlugin(info);
       SmartDialog.dismiss();
       if (!ok) {
-        SmartDialog.showToast('固化失败，请重试');
+        SmartDialog.showToast('操作失败，请重试');
         return;
       }
-      // 固化成功后自动拉起系统卸载
+      if (isSystemApk) {
+        // 系统安装型：只登记，不卸载 APK
+        onSolidified();
+        SmartDialog.showToast('已登记为已安装（卸载请走插件卡卸载按钮）');
+        return;
+      }
+      // import 型（qjs/agent）：固化后拉起系统卸载
       await InstallManager.instance.uninstallSystemPackage(info.packageName);
       onSolidified();
       SmartDialog.showToast('资源已固化；若未卸载系统应用，可稍后在插件卡卸载');
     } catch (e) {
       SmartDialog.dismiss();
-      SmartDialog.showToast('固化失败：$e');
+      SmartDialog.showToast('操作失败：$e');
     }
   }
 
@@ -861,7 +875,9 @@ class _InstalledPluginCard extends StatelessWidget {
   Future<void> _confirmUninstall(BuildContext context) async {
     final colorScheme = Theme.of(context).colorScheme;
     final installMode = plugin.extras['installMode']?.toString();
-    final isSystemApk = plugin.type == 'apk' && installMode == 'apk';
+    final isSystemApk = Platform.isAndroid &&
+        plugin.type == 'apk' &&
+        installMode == 'apk';
 
     final allServices = ServiceManager.instance
         .getAll()
@@ -1027,16 +1043,26 @@ class _InstalledPluginCard extends StatelessWidget {
     );
     if (ok != true) return;
 
+    // ===== 系统安装型：拉起系统卸载框 + 立即清注册表 =====
+    // 不等待卸载结果：用户点确定/取消/直接关掉都不阻塞 UI，
+    // 卸载成功与否下次打开插件中心会自动重新扫描（成功→不再出现，失败→重新出现为待固化卡片）
+    if (isSystemApk) {
+      final pkg = plugin.extras['apkPackage']?.toString();
+      if (pkg == null || pkg.isEmpty) {
+        SmartDialog.showToast('找不到 APK 包名，无法拉起系统卸载');
+        return;
+      }
+      await InstallManager.instance.uninstallSystemPackage(pkg);
+      await controller.uninstall(plugin);
+      SmartDialog.showToast('已弹出系统卸载框，请完成卸载操作');
+      return;
+    }
+
+    // ===== 非系统安装型：原有流程（停服务 + 卸载）=====
     for (final s in activeServices) {
       await ServiceManager.instance.stop(s.id);
     }
     await controller.uninstall(plugin);
-    if (isSystemApk) {
-      final pkg = plugin.extras['apkPackage']?.toString();
-      if (pkg != null && pkg.isNotEmpty) {
-        await InstallManager.instance.uninstallSystemPackage(pkg);
-      }
-    }
   }
 
   String _titleForPlugin(String id) {

@@ -16,6 +16,16 @@
 
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
 
+    <!-- 卸载 APK（Android 14+ 部分 ROM 需要此权限才能弹系统卸载框） -->
+    <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
+
+    <!-- 显式声明要查询的插件包名（Android 11+ Package Visibility 要求） -->
+    <queries>
+        <package android:name="com.dsplayer.plugin.python" />
+        <package android:name="com.dsplayer.plugin.qjs" />
+        <package android:name="com.dsplayer.plugin.agent" />
+    </queries>
+
     <queries>
         <intent>
             <action android:name="android.intent.action.VIEW" />
@@ -101,23 +111,8 @@
 
                 <data android:scheme="http" />
                 <data android:scheme="https" />
-                <data android:host="*.bilibili.com" />
-                <data android:host="*.bilibili.cn" />
-                <data android:host="*.bilibili.tv" />
-                <data android:host="bilibili.com" />
-                <data android:host="bilibili.cn" />
-                <data android:host="bilibili.tv" />
-                <data android:host="b23.tv" />
-                <!--<data android:host="live.bilibili.com"/>-->
-                <!--<data android:host="www.bilibili.com"/>-->
-                <!--<data android:host="www.bilibili.tv"/>-->
-                <!--<data android:host="www.bilibili.cn"/>-->
-                <!--<data android:host="m.bilibili.cn"/>-->
-                <!--<data android:host="m.bilibili.com"/>-->
-                <!--<data android:host="bilibili.cn"/>-->
-                <!--<data android:host="bilibili.com"/>-->
-                <!--<data android:host="bangumi.bilibili.com"/>-->
-                <!--<data android:host="space.bilibili.com"/>-->
+                <!-- <data android:host="*.bilibili.com" /> -->
+                <!-- <data android:host="*.bilibili.cn" /> -->
             </intent-filter>
             <intent-filter android:label="源影">
                 <action android:name="android.intent.action.VIEW" />
