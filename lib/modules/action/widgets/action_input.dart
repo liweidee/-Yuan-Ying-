@@ -315,17 +315,21 @@ class _InputActionState extends State<InputAction> {
       return Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // 内容区域 - 自适应高度，不会强制拉伸，内容多时可滚动
+          // 用 Flexible + SingleChildScrollView + Column(mainAxisSize.min)：
+          // 内容少时收缩到内容高度，内容多时占满分配空间并滚动。
+          // 注意：不能用 ListView(shrinkWrap)，它在 Flexible 里会撑满分配空间。
           Flexible(
-            child: ListView(
+            child: SingleChildScrollView(
               physics: const BouncingScrollPhysics(),
-              shrinkWrap: true,
-              children: contentChildren,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: contentChildren,
+              ),
             ),
           ),
-          // 超时提示（固定在底部）
-          if (widget.config.timeout > 0 && _timeLeft > 0) _buildTimeout(context),
-          // 按钮区（固定在底部）
+          if (widget.config.timeout > 0 && _timeLeft > 0)
+            _buildTimeout(context),
           _buildButtons(context),
         ],
       );

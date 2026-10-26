@@ -242,17 +242,18 @@ class _MsgBoxActionState extends State<MsgBoxAction> {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        // 内容区域 - 自适应高度，不会强制拉伸，内容多时可滚动
         Flexible(
-          child: ListView(
+          child: SingleChildScrollView(
             physics: const BouncingScrollPhysics(),
-            shrinkWrap: true,
-            children: contentChildren,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: contentChildren,
+            ),
           ),
         ),
-        // 超时提示（固定在底部）
-        if (widget.config.timeout > 0 && _timeLeft > 0) _buildTimeout(context),
-        // 按钮区（固定在底部）
+        if (widget.config.timeout > 0 && _timeLeft > 0)
+          _buildTimeout(context),
         _buildButtons(context),
       ],
     );
