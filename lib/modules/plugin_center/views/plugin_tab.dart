@@ -8,6 +8,7 @@ import 'package:get/get.dart';
 import 'package:flutter/services.dart' show MethodChannel;
 
 import 'package:yuanying/core/theme/style.dart';
+import 'package:yuanying/core/routes/app_pages.dart';
 import 'package:yuanying/modules/plugin_center/controllers/plugin_center_controller.dart';
 import 'package:yuanying/modules/plugin_center/models/installed_plugin.dart';
 import 'package:yuanying/modules/plugin_center/models/market_entry.dart';
@@ -769,10 +770,7 @@ class _InstalledPluginCard extends StatelessWidget {
         actions.add(_ActionBtn(
           icon: Icons.search_outlined,
           label: 'py 源管理',
-          onTap: () {
-            // 预留入口，路由暂未实现
-            SmartDialog.showToast('py 源管理功能开发中');
-          },
+          onTap: () => Get.toNamed(AppPages.pySource),
         ));
         break;
 

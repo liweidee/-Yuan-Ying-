@@ -71,7 +71,7 @@ class _StoragePermissionButtonState extends State<StoragePermissionButton> {
       return IconButton(
         tooltip: granted ? '文件访问已授权' : '文件访问未授权（用于导入本地包/备份恢复）',
         icon: Icon(
-          granted ? Icons.folder_shared : Icons.folder_shared_outlined,
+          granted ? Icons.gpp_good : Icons.gpp_bad,
           size: 20,
           color: granted ? colorScheme.primary : colorScheme.outline,
         ),

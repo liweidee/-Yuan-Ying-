@@ -87,24 +87,90 @@ class _PythonDepsSheetState extends State<_PythonDepsSheet> {
   }
 
   // ============================================================
-  // 路径 / 环境
+  // 路径 / 环境（平台自适应）
   // ============================================================
 
-  /// python.exe 路径：{installPath}/bin/python.exe
-  String get _pythonExePath =>
-      p.join(widget.plugin.installPath, 'bin', 'python.exe');
+  bool get _isAndroid => Platform.isAndroid;
 
-  /// site-packages 路径：{installPath}/bin/Lib/site-packages
-  String get _sitePackagesPath =>
-      p.join(widget.plugin.installPath, 'bin', 'Lib', 'site-packages');
+  /// python 主程序路径
+  /// - Android（musl 插件）：{installPath}/bin/python3.12
+  /// - Windows（embeddable）：{installPath}/bin/python.exe
+  String get _pythonExePath {
+    if (_isAndroid) {
+      return p.join(widget.plugin.installPath, 'bin', 'python3.12');
+    }
+    return p.join(widget.plugin.installPath, 'bin', 'python.exe');
+  }
 
-  Map<String, String> _buildEnv() {
-    return {
-      ...Platform.environment,
-      'PYTHONPATH': _sitePackagesPath,
-      'PYTHONIOENCODING': 'utf-8',
-      'PYTHONUTF8': '1',
-    };
+  /// Android musl 的 ld loader（仅 Android 用，作为 interp 兼容引导）
+  String get _ldMuslPath =>
+      p.join(widget.plugin.installPath, 'bin', 'ld-musl-aarch64.so.1');
+
+  /// site-packages 路径
+  /// - Android（musl 插件）：{installPath}/lib/python3.12/site-packages
+  /// - Windows（embeddable）：{installPath}/bin/Lib/site-packages
+  String get _sitePackagesPath {
+    if (_isAndroid) {
+      return p.join(widget.plugin.installPath, 'lib', 'python3.12', 'site-packages');
+    }
+    return p.join(widget.plugin.installPath, 'bin', 'Lib', 'site-packages');
+  }
+
+  /// 构建环境变量：
+  /// 1) 优先读取 plugin.json 的 pyRuntime.env（PYTHONHOME / LD_LIBRARY_PATH 等），
+  ///    并把 "__plugin:<当前插件id>__" 占位符替换为插件真实安装路径。
+  /// 2) 老版本插件未声明 env 时，按平台兜底：
+  ///    - Android：PYTHONHOME=插件根，LD_LIBRARY_PATH=插件根/lib
+  ///    - Windows：PYTHONPATH=site-packages
+  Future<Map<String, String>> _buildEnv() async {
+    final env = Map<String, String>.from(Platform.environment);
+    env['PYTHONIOENCODING'] = 'utf-8';
+    env['PYTHONUTF8'] = '1';
+
+    // 读取 plugin.json 声明的 pyRuntime.env
+    final pluginJson = File(p.join(widget.plugin.installPath, 'plugin.json'));
+    if (pluginJson.existsSync()) {
+      try {
+        final raw = await pluginJson.readAsString();
+        final j = jsonDecode(raw) as Map<String, dynamic>;
+        final pyRuntime = j['pyRuntime'];
+        if (pyRuntime is Map) {
+          final rawEnv = pyRuntime['env'];
+          if (rawEnv is Map) {
+            for (final e in rawEnv.entries) {
+              final key = e.key.toString();
+              var value = e.value.toString();
+              // 把 __plugin:<id>__ 占位符替换为实际安装路径
+              value = value.replaceAll(
+                '__plugin:${widget.plugin.id}__',
+                widget.plugin.installPath,
+              );
+              env[key] = value;
+            }
+            debugPrint('[python_deps] 已注入 plugin.json env: '
+                '${rawEnv.keys.join(", ")}');
+          }
+        }
+      } catch (e) {
+        debugPrint('[python_deps] 读取 plugin.json 失败：$e');
+      }
+    }
+
+    // 兜底：老版本插件未声明 env 时手动补齐
+    if (_isAndroid) {
+      env.putIfAbsent('PYTHONHOME', () => widget.plugin.installPath);
+      final libDir = p.join(widget.plugin.installPath, 'lib');
+      final existing = env['LD_LIBRARY_PATH'] ?? '';
+      env['LD_LIBRARY_PATH'] =
+          existing.isEmpty ? libDir : '$libDir:$existing';
+    } else {
+      env['PYTHONPATH'] = _sitePackagesPath;
+    }
+
+    debugPrint('[python_deps] env PYTHONHOME=${env["PYTHONHOME"]} '
+        'LD_LIBRARY_PATH=${env["LD_LIBRARY_PATH"]} '
+        'PYTHONPATH=${env["PYTHONPATH"]}');
+    return env;
   }
 
   // ============================================================
@@ -113,6 +179,8 @@ class _PythonDepsSheetState extends State<_PythonDepsSheet> {
 
   Future<void> _loadInstalled() async {
     setState(() => _loading = true);
+    debugPrint('[python_deps] 扫描 site-packages：$_sitePackagesPath '
+        '存在=${Directory(_sitePackagesPath).existsSync()}');
     final items = <_DepItem>[];
     try {
       final sitePackages = Directory(_sitePackagesPath);
@@ -225,36 +293,104 @@ class _PythonDepsSheetState extends State<_PythonDepsSheet> {
   }
 
   // ============================================================
-  // pip 执行
+  // pip 执行（平台自适应）
   // ============================================================
 
   /// 执行 pip 命令，返回 (success, outputText)
+  /// - Windows：直接跑 bin/python.exe
+  /// - Android：先 chmod 755，再尝试直接执行 bin/python3.12；
+  ///   若报 "No such file or directory / bad interpreter / Exec format error"
+  ///   （典型 musl interp 缺路径），自动降级为 ld-musl-aarch64.so.1 引导。
   Future<({bool success, String output})> _runPip(
     List<String> args,
   ) async {
     final pythonExe = File(_pythonExePath);
     if (!pythonExe.existsSync()) {
-      return (success: false, output: '找不到 python.exe：$_pythonExePath');
+      return (success: false, output: '找不到 Python 解释器：$_pythonExePath');
     }
-    try {
-      final result = await Process.run(
-        _pythonExePath,
-        ['-m', 'pip', ...args],
-        workingDirectory: p.join(widget.plugin.installPath, 'bin'),
-        environment: _buildEnv(),
-        stdoutEncoding: Utf8Codec(allowMalformed: true),
-        stderrEncoding: Utf8Codec(allowMalformed: true),
-      );
-      final stdoutText = result.stdout.toString().trim();
-      final stderrText = result.stderr.toString().trim();
-      final combined = [
-        if (stdoutText.isNotEmpty) stdoutText,
-        if (stderrText.isNotEmpty) stderrText,
-      ].join('\n');
-      return (success: result.exitCode == 0, output: combined);
-    } catch (e) {
-      return (success: false, output: 'pip 执行异常：$e');
+
+    final env = await _buildEnv();
+    final workingDir = p.join(widget.plugin.installPath, 'bin');
+
+    // 候选执行方式（按顺序尝试，失败自动切换）
+    final candidates = <({String exe, List<String> preArgs, String label})>[];
+
+    if (_isAndroid) {
+      // 确保 python3.12 可执行
+      try {
+        await Process.run('chmod', ['755', _pythonExePath]);
+        debugPrint('[python_deps] chmod 755 $_pythonExePath');
+      } catch (e) {
+        debugPrint('[python_deps] chmod 失败（可忽略）：$e');
+      }
+
+      // 候选 1：直接执行 python3.12
+      candidates.add((exe: _pythonExePath, preArgs: [], label: '直接执行'));
+
+      // 候选 2：通过 ld-musl 引导（musl interp 兼容）
+      if (File(_ldMuslPath).existsSync()) {
+        candidates.add((
+          exe: _ldMuslPath,
+          preArgs: [
+            '--library-path',
+            p.join(widget.plugin.installPath, 'lib'),
+            _pythonExePath,
+          ],
+          label: 'ld-musl 引导',
+        ));
+      }
+    } else {
+      candidates.add((exe: _pythonExePath, preArgs: [], label: '直接执行'));
     }
+
+    String lastOutput = '';
+
+    for (final c in candidates) {
+      try {
+        debugPrint('[python_deps] 尝试 ${c.label}: ${c.exe} '
+            '${c.preArgs.join(" ")} -m pip ${args.join(" ")}');
+        final result = await Process.run(
+          c.exe,
+          [...c.preArgs, '-m', 'pip', ...args],
+          workingDirectory: workingDir,
+          environment: env,
+          stdoutEncoding: Utf8Codec(allowMalformed: true),
+          stderrEncoding: Utf8Codec(allowMalformed: true),
+        );
+
+        final stdoutText = result.stdout.toString().trim();
+        final stderrText = result.stderr.toString().trim();
+        final combined = [
+          if (stdoutText.isNotEmpty) stdoutText,
+          if (stderrText.isNotEmpty) stderrText,
+        ].join('\n');
+
+        // 判断是否是 interp / 执行格式问题 → 试下一个候选
+        final isInterpError = result.exitCode != 0 &&
+            (combined.contains('No such file or directory') ||
+                combined.contains('bad interpreter') ||
+                combined.contains('Exec format error') ||
+                combined.contains('Executable file not found'));
+
+        if (isInterpError) {
+          debugPrint('[python_deps] ${c.label} 失败（疑似 interp 问题），切换下一候选');
+          lastOutput = combined;
+          continue;
+        }
+
+        debugPrint('[python_deps] ${c.label} 退出码=${result.exitCode}');
+        return (success: result.exitCode == 0, output: combined);
+      } catch (e) {
+        debugPrint('[python_deps] ${c.label} 异常：$e');
+        lastOutput = '${c.label} 异常：$e';
+        continue;
+      }
+    }
+
+    return (
+      success: false,
+      output: lastOutput.isEmpty ? '所有 pip 执行方式均失败' : lastOutput,
+    );
   }
 
   /// 安装依赖

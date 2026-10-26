@@ -2,6 +2,7 @@
 
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 
 import 'package:yuanying/modules/plugin_center/services/install_manager.dart';
 import 'package:yuanying/t4/models/play_url.dart';
@@ -117,19 +118,90 @@ class Py3SpiderService implements ISpiderService {
       args: args,
     );
 
+    // ========== 诊断日志 ==========
+    debugPrint('[PY-CALL] method=$method raw_len=${raw.length}');
+    debugPrint('[PY-CALL] raw_head=${raw.length > 300 ? "${raw.substring(0, 300)}..." : raw}');
+
     final Map<String, dynamic> envelope;
     try {
       envelope = jsonDecode(raw) as Map<String, dynamic>;
     } catch (e) {
+      debugPrint('[PY-CALL] ✗ raw 不是合法 JSON');
       throw Exception('py 返回非 JSON: $raw');
     }
+
+    // ========== 诊断日志：result 的真实类型 ==========
+    final dynamic r = envelope['result'];
+    debugPrint('[PY-CALL] success=${envelope["success"]} result_type=${r.runtimeType}');
+    final rStr = r?.toString() ?? 'null';
+    debugPrint('[PY-CALL] result_head=${rStr.length > 400 ? "${rStr.substring(0, 400)}..." : rStr}');
+
     if (envelope['success'] != true) {
       throw Exception(
         ErrorFormatter.formatScriptError(envelope['error'] ?? envelope),
       );
     }
-    final result = envelope['result'];
-    if (result is Map) return Map<String, dynamic>.from(result);
+
+    // ========== 核心修复：处理 result 是 String / Map / List / null ==========
+    final dynamic result = envelope['result'];
+
+    // 情况 1：String（Python 侧 json.dumps 了一层，需二次解码）
+    if (result is String) {
+      if (result.isEmpty || result == 'null' || result == 'None') {
+        debugPrint('[PY-CALL] result 是空字符串，返回空 Map');
+        return {};
+      }
+      try {
+        final decoded = jsonDecode(result);
+        if (decoded is Map) {
+          debugPrint('[PY-CALL] ✓ String 二次解码成功（Map），字段数=${decoded.length}');
+          return Map<String, dynamic>.from(decoded);
+        }
+        if (decoded is List) {
+          debugPrint('[PY-CALL] ✓ String 二次解码成功（List），条数=${decoded.length}');
+          return {'list': decoded};
+        }
+        debugPrint('[PY-CALL] String 二次解码结果既非 Map 也非 List：${decoded.runtimeType}');
+        return {};
+      } catch (e) {
+        debugPrint('[PY-CALL] ✗ result 二次 jsonDecode 失败: $e');
+        // 兜底：Python dict 的 str() 用单引号，粗转换为 JSON
+        try {
+          final normalized = result
+              .replaceAll("'", '"')
+              .replaceAll('True', 'true')
+              .replaceAll('False', 'false')
+              .replaceAll('None', 'null');
+          final decoded = jsonDecode(normalized);
+          if (decoded is Map) {
+            debugPrint('[PY-CALL] ✓ 粗转换成功（Map），字段数=${decoded.length}');
+            return Map<String, dynamic>.from(decoded);
+          }
+          if (decoded is List) {
+            debugPrint('[PY-CALL] ✓ 粗转换成功（List），条数=${decoded.length}');
+            return {'list': decoded};
+          }
+        } catch (e2) {
+          debugPrint('[PY-CALL] ✗ 粗转换也失败: $e2');
+        }
+        return {};
+      }
+    }
+
+    // 情况 2：Map（旧逻辑，直接返回）
+    if (result is Map) {
+      debugPrint('[PY-CALL] ✓ result 直接是 Map，字段数=${result.length}');
+      return Map<String, dynamic>.from(result);
+    }
+
+    // 情况 3：List（包一层 list 字段）
+    if (result is List) {
+      debugPrint('[PY-CALL] ✓ result 直接是 List，条数=${result.length}');
+      return {'list': result};
+    }
+
+    // 情况 4：null / 其他类型
+    debugPrint('[PY-CALL] result 类型未知：${result.runtimeType}，返回空 Map');
     return {};
   }
 
