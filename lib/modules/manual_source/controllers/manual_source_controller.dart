@@ -250,10 +250,17 @@ class ManualSourceController extends GetxController {
     final result = <Map<String, dynamic>>[];
     for (final item in all) {
       if (item.disabled) continue;
+      // html 类型仅由 Web Tab 使用，不进 SourceManager
+      if (item.type == ManualSourceType.html) continue;
       result.add(_toSite(item));
     }
     return result;
   }
+
+  /// Web Tab 用的 html 源（不含禁用）
+  List<ManualSourceItem> get htmlSources => all
+      .where((e) => e.type == ManualSourceType.html && !e.disabled)
+      .toList();
 
   Map<String, dynamic> _toSite(ManualSourceItem item) {
     final key = 'manual_${item.type.name}_${item.name}';

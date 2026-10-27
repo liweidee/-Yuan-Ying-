@@ -207,6 +207,7 @@ class FvpEngine implements IPlayerEngine {
 
   final Battery _battery = Battery();
   StreamSubscription<BatteryState>? _batterySubscription;
+  Timer? _batteryTimer;
 
   // ---- 监听器 ----
   final Set<ValueChanged<Duration>> _positionListeners = {};
@@ -287,19 +288,42 @@ class FvpEngine implements IPlayerEngine {
   @override
   Future<void> init() async {
     _isDisposed = false;
-    initBatteryListener();
+    // 电池监听改为懒启动，见 _syncBatteryListener / _startBatteryListener
   }
 
-  void initBatteryListener() {
-    // 先取消旧的，避免重复 init 时叠加订阅
-    _batterySubscription?.cancel();
-    _batterySubscription = _battery.onBatteryStateChanged.listen((state) {
-      _updateBatteryLevel();
-    });
+  /// 根据当前状态（是否全屏 + 是否显示电池图标）同步电池监听的启停。
+  void _syncBatteryListener() {
+    final shouldRun = isFullScreen.value && PlayerPref.showBatteryLevel;
+    if (shouldRun) {
+      _startBatteryListener();
+    } else {
+      _stopBatteryListener();
+    }
+  }
+
+  void _startBatteryListener() {
+    if (_batterySubscription == null) {
+      _batterySubscription = _battery.onBatteryStateChanged.listen((_) {
+        _updateBatteryLevel();
+      });
+    }
     _updateBatteryLevel();
+    if (_batteryTimer == null) {
+      _batteryTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+        _updateBatteryLevel();
+      });
+    }
+  }
+
+  void _stopBatteryListener() {
+    _batterySubscription?.cancel();
+    _batterySubscription = null;
+    _batteryTimer?.cancel();
+    _batteryTimer = null;
   }
 
   Future<void> _updateBatteryLevel() async {
+    if (_isDisposed) return;
     try {
       final level = await _battery.batteryLevel;
       batteryLevel.value = '$level%';
@@ -312,6 +336,8 @@ class FvpEngine implements IPlayerEngine {
   void dispose() {
     if (_isDisposed) return;
     _isDisposed = true;
+
+    _stopBatteryListener(); // 统一清理订阅 + 定时器，避免内存泄漏
 
     _batterySubscription?.cancel();
     _batterySubscription = null;
@@ -723,6 +749,7 @@ class FvpEngine implements IPlayerEngine {
 
     _isFullscreen = status;
     isFullScreen.value = status;
+    _syncBatteryListener();
   }
 
   @override

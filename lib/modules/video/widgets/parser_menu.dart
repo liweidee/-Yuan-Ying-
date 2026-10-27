@@ -22,18 +22,16 @@ class ParserMenu extends StatelessWidget {
       context: Get.context!,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) {
+            builder: (context) {
         final colorScheme = ColorScheme.of(context);
         final theme = Theme.of(context);
 
         return Container(
           margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
+          child: Material(
             color: colorScheme.surface,
             borderRadius: const BorderRadius.all(Radius.circular(12)),
-          ),
-          child: ClipRRect(
-            borderRadius: const BorderRadius.all(Radius.circular(12)),
+            clipBehavior: Clip.antiAlias,
             child: SizedBox(
               height: 280,
               child: Column(
@@ -51,7 +49,10 @@ class ParserMenu extends StatelessWidget {
                     ),
                   ),
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 4,
+                    ),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [

@@ -161,6 +161,9 @@ void main() async {
   await Hive.openBox('app_settings');
   await Hive.openBox('video_settings');
 
+  // ===== Web Tab 桥接存储 =====
+  await Hive.openBox('web_ds_default');
+
   // ===== 插件中心 Box =====
   await Hive.openBox(PluginStorageKeys.marketBox);
   await Hive.openBox(PluginStorageKeys.installedBox);

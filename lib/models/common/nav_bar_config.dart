@@ -6,6 +6,7 @@ import 'package:yuanying/modules/live/views/live_page.dart';
 import 'package:yuanying/modules/setting/views/setting_page.dart';
 import 'package:yuanying/modules/emby/views/lab_page.dart';
 import 'package:yuanying/modules/download/views/cache_manager_page.dart';
+import 'package:yuanying/modules/web_tab/views/web_tab_page.dart';
 
 /// 导航栏类型枚举
 enum NavigationBarType implements EnumWithLabel {
@@ -20,6 +21,12 @@ enum NavigationBarType implements EnumWithLabel {
     Icon(Icons.live_tv_outlined, size: 24),
     Icon(Icons.live_tv, size: 24),
     LivePage(),
+  ),
+  web(
+    'Web',
+    Icon(Icons.language_outlined, size: 24),
+    Icon(Icons.language, size: 24),
+    WebTabPage(),
   ),
   localFile(
     '文件',

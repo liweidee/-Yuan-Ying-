@@ -120,17 +120,51 @@ class MediaKitEngine implements IPlayerEngine {
   // ===== 电池电量 =====
   final RxString batteryLevel = '--'.obs;
   final Battery _battery = Battery();
+  StreamSubscription<BatteryState>? _batterySubscription;
+  Timer? _batteryTimer;
 
-  /// 初始化电池电量监听
-  void initBatteryListener() {
-    _battery.onBatteryStateChanged.listen((state) {
-      _updateBatteryLevel();
-    });
+  /// 根据当前状态（是否全屏 + 是否显示电池图标）同步电池监听的启停。
+  ///
+  /// 电池图标只在 UI 层 `isFullScreen && PlayerPref.showBatteryLevel`
+  /// 为真时展示，因此监听与轮询也只在该条件下运行，避免无谓开销。
+  void _syncBatteryListener() {
+    final shouldRun = isFullScreen.value && PlayerPref.showBatteryLevel;
+    if (shouldRun) {
+      _startBatteryListener();
+    } else {
+      _stopBatteryListener();
+    }
+  }
+
+  void _startBatteryListener() {
+    // 幂等：已在运行时直接复用，避免重复订阅造成泄漏
+    if (_batterySubscription == null) {
+      _batterySubscription = _battery.onBatteryStateChanged.listen((_) {
+        _updateBatteryLevel();
+      });
+    }
+    // 立即刷新一次，避免等待 30s 才显示
     _updateBatteryLevel();
+
+    // battery_plus 的 onBatteryStateChanged 不随电量百分比变化触发，
+    // 必须定时轮询，否则电量数字永远停在首次读取值
+    if (_batteryTimer == null) {
+      _batteryTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+        _updateBatteryLevel();
+      });
+    }
+  }
+
+  void _stopBatteryListener() {
+    _batterySubscription?.cancel();
+    _batterySubscription = null;
+    _batteryTimer?.cancel();
+    _batteryTimer = null;
   }
 
   /// 更新电池电量
   Future<void> _updateBatteryLevel() async {
+    if (_isDisposed) return; // 已销毁则丢弃异步回调
     try {
       final level = await _battery.batteryLevel;
       batteryLevel.value = '$level%';
@@ -386,7 +420,8 @@ class MediaKitEngine implements IPlayerEngine {
   @override
   Future<void> init() async {
     _isDisposed = false;
-    initBatteryListener();
+    // 电池监听改为懒启动：仅在进入全屏且开启显示电池图标时启动，
+    // 见 _syncBatteryListener / _startBatteryListener。
     if (PlatformUtils.isMobile) {
       _orientationListener = NativeDeviceOrientationPlatform.instance
           .onOrientationChanged(
@@ -530,6 +565,7 @@ class MediaKitEngine implements IPlayerEngine {
   void _setFullScreen(bool val) {
     isFullScreen.value = val;
     updateSubtitleStyle();
+    _syncBatteryListener();
   }
 
   bool get _isCompleted =>
@@ -1675,6 +1711,8 @@ class MediaKitEngine implements IPlayerEngine {
     // 防止重复销毁
     if (_isDisposed) return;
     _isDisposed = true;
+
+    _stopBatteryListener(); // 清理电池监听与轮询，避免内存泄漏
 
     // 重置听视频状态，避免污染下一个视频
     onlyPlayAudio.value = false;

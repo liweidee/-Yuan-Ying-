@@ -97,6 +97,21 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
   /// 仅在 isPush 模式下有效；非推送模式保持 null，不影响原逻辑。
   Map<String, String>? _initHeaders;
 
+  /// Web 源推送的播放地址解析器（pageUrl → 真实直链）
+  /// 仅 Web Tab 的 openVod 会注入；其它入口为 null
+  Future<String?> Function(String url)? _webResolver;
+
+  /// 判断 URL 是否已是可直接播放的媒体地址
+  bool _isDirectMediaUrl(String url) {
+    // 常见流媒体扩展名 + 带 .m3u8?xxx 参数 + .ts/.webm/.strm
+    return RegExp(
+      r'\.(m3u8|mp4|flv|mpd|mkv|mov|m4v|ts|webm|strm)(\?|#|$)',
+      caseSensitive: false,
+    ).hasMatch(url) ||
+    // 兜底：任何 http(s) URL 且无 ".html"/".htm"/页面特征 → 视为直链候选
+    (url.startsWith('http') && !url.contains('.html'));
+  }
+
   // 播放完成监听器（保存函数引用，用于移除）
   void Function(PlayerStatus)? _playCompletedListener;
   // 防止重复处理完成事件的标志
@@ -872,6 +887,19 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     _locateCurrentEpisodeInPushMode(detail, url, title);
 
     _playDirect(url);
+
+    // Web 源解析器注入（可选）
+    final resolver = args['webResolver'];
+    if (resolver is Function) {
+      _webResolver = (url) async {
+        try {
+          final r = await resolver(url);
+          return r?.toString();
+        } catch (_) {
+          return null;
+        }
+      };
+    }
   }
 
   /// 合并列表模式初始化
@@ -1066,12 +1094,17 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
             if (autoPlay) {
               _showPlayLoading();
             }
-            await _playEpisode(
-              firstEpisode,
-              sourceIndex: 0,
-              episodeIndex: 0,
-              autoPlay: autoPlay,
-            );
+            try {
+              await _playEpisode(
+                firstEpisode,
+                sourceIndex: 0,
+                episodeIndex: 0,
+                autoPlay: autoPlay,
+              );
+            } finally {
+              // 兜底关闭"获取播放信息"弹窗。
+              SmartDialog.dismiss(tag: 'play_loading', force: true);
+            }
             // 如果关闭自动播放，确保加载状态结束
             if (!autoPlay) {
               isLoadingDetail.value = false;
@@ -1099,6 +1132,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     SmartDialog.show(
       tag: 'play_loading', // 唯一标识
       maskColor: Colors.black54,
+      clickMaskDismiss: false,
       animationType: SmartAnimationType.scale,
       builder: (_) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
@@ -1302,11 +1336,37 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
 
     // 直链推送模式：直接用 episode.url 播放，不走 _apiService
     // 适用于 Emby / AList 等外部来源，其 Episode.url 已是完整 HTTP 直链
+    // if (_isDirectPushMode) {
+    //   final directPlayUrl = PlayUrl(
+    //     parse: 0,
+    //     qualities: [PlayQuality(label: '直链', url: episode.url)],
+    //     headers: _initHeaders, // ← 新增：透传 headers（null 时与原逻辑一致）
+    //   );
+    //   await _startPlay(directPlayUrl, autoPlay, seekTo: seekTo);
+    //   return;
+    // }
+
     if (_isDirectPushMode) {
+      var playUrl = episode.url;
+      // Web 源懒解析：url 非直链且有 resolver → 页面内实时解析
+      if (!_isDirectMediaUrl(playUrl) && _webResolver != null) {
+        try {
+          final resolved = await _webResolver!(playUrl);
+          if (resolved != null && resolved.isNotEmpty) {
+            playUrl = resolved;
+          } else {
+            _handlePlayFailure('解析播放地址失败，请重试');
+            return;
+          }
+        } catch (e) {
+          _handlePlayFailure('解析异常: $e');
+          return;
+        }
+      }
       final directPlayUrl = PlayUrl(
         parse: 0,
-        qualities: [PlayQuality(label: '直链', url: episode.url)],
-        headers: _initHeaders, // ← 新增：透传 headers（null 时与原逻辑一致）
+        qualities: [PlayQuality(label: '直链', url: playUrl)],
+        headers: _initHeaders,
       );
       await _startPlay(directPlayUrl, autoPlay, seekTo: seekTo);
       return;
@@ -1365,9 +1425,12 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
         // 关闭残留弹窗
         SmartDialog.dismiss(force: true);
 
-        // 显示解析弹窗
+        // 显示解析弹窗（唯一 tag + 禁止点击遮罩关闭）
+        const parserTag = 'parser_loading';
         SmartDialog.show(
+          tag: parserTag,
           maskColor: Colors.black54,
+          clickMaskDismiss: false,
           animationType: SmartAnimationType.scale,
           builder: (_) => Container(
             padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
@@ -1401,12 +1464,16 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
           ),
         );
 
-        final result = await _parseWithAllParsers(
-          playUrl,
-          preferredParser: isManualParser.value ? currentParser.value : null,
-        );
-
-        SmartDialog.dismiss(force: true);
+        PlayUrl? result;
+        try {
+          result = await _parseWithAllParsers(
+            playUrl,
+            preferredParser: isManualParser.value ? currentParser.value : null,
+          );
+        } finally {
+          // 只关闭本次解析弹窗，避免误伤其它层（如再上层的 WebView 弹窗）
+          SmartDialog.dismiss(tag: parserTag, force: true);
+        }
 
         if (result != null) {
           await _startPlay(result, autoPlay, seekTo: seekTo);
@@ -1452,8 +1519,11 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
           return;
         }
 
+        const sniffTag = 'sniff_loading';
         SmartDialog.show(
+          tag: sniffTag,
           maskColor: Colors.black54,
+          clickMaskDismiss: false, // 禁止点遮罩关闭
           animationType: SmartAnimationType.scale,
           builder: (_) => Container(
             padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
@@ -1461,29 +1531,33 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
               color: Colors.black87,
               borderRadius: BorderRadius.circular(12),
             ),
-            child: Column(
+            child: const Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const SizedBox(
-                  width: 36,
-                  height: 36,
+                SizedBox(
+                  width: 36, height: 36,
                   child: CircularProgressIndicator(strokeWidth: 3, color: Colors.white),
                 ),
-                const SizedBox(height: 14),
-                const Text('正在嗅探播放地址...', style: TextStyle(color: Colors.white, fontSize: 14)),
+                SizedBox(height: 14),
+                Text('正在嗅探播放地址...', style: TextStyle(color: Colors.white, fontSize: 14)),
               ],
             ),
           ),
         );
 
-        final sniffedUrl = await ResourceSniffer.sniff(
-          url: sniffUrl,
-          headers: playUrl.headers,
-          script: playUrl.script,
-          useWebView: true,
-        );
+        String? sniffedUrl;
+        try {
+          sniffedUrl = await ResourceSniffer.sniff(
+            url: sniffUrl,
+            headers: playUrl.headers,
+            script: playUrl.script,
+            useWebView: true,
+          );
+        } finally {
+          SmartDialog.dismiss(tag: sniffTag, force: true);   // ← 只关这一个
+        }
 
-        SmartDialog.dismiss();
+        if (isClosed) return;
 
         if (sniffedUrl != null) {
           final sniffedPlayUrl = PlayUrl(
@@ -2032,8 +2106,15 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
       return;
     }
 
+    // 保留解析选择：切集沿用本详情页此前选定的解析站。
+    // - 手动模式（isManualParser == true）继续用 currentParser；
+    // - 自动模式（isManualParser == false）继续走自动（currentParser 为上次成功的源，
+    //   但 isManualParser 为 false 时不会被当作 preferredParser，仍按 parseMode 走）。
+    // 若手动模式下的解析站对当前集失败，由 _handlePlayFailure 提示，
+    // 由用户主动切换，不自动回退
+
     // 切换剧集时重置为自动模式
-    isManualParser.value = false;
+    // isManualParser.value = false;
 
     // ===== 立即视觉反馈：先切到"封面 + 播放按钮"状态 =====
     // 让用户点击后立刻看到反应，而不是旧视频继续播几秒。
@@ -2059,7 +2140,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     introController.switchEpisode(newIndex);
 
     // 上一集时重置为自动模式
-    isManualParser.value = false;
+    // isManualParser.value = false;
 
     // ===== 立即视觉反馈 =====
     await _switchToPendingState();
@@ -2085,7 +2166,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     introController.switchEpisode(newIndex);
 
     // 下一集时重置为自动模式
-    isManualParser.value = false;
+    // isManualParser.value = false;
 
     // ===== 立即视觉反馈 =====
     await _switchToPendingState();
@@ -2843,31 +2924,49 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     final mode = PlayerPref.parseMode;
 
     if (mode == 0) {
-      // 顺序解析
+      // 顺序解析（保持原状）
       for (final parser in sources) {
         final result = await _processWithParser(playUrl, parser);
         if (result != null) {
-          currentParser.value = parser;  // 标记解析成功的源
+          currentParser.value = parser;
           return result;
         }
       }
       return null;
     } else {
-      // 并发解析
-      final futures = sources.map((parser) async {
-        final result = await _processWithParser(playUrl, parser);
-        return (parser: parser, result: result);
-      }).toList();
+      // 并发解析：谁先成功用谁；全部失败才返回 null。
+      final completer = Completer<PlayUrl?>();
+      var remaining = sources.length;
 
-      while (futures.isNotEmpty) {
-        final completed = await Future.any(futures);
-        if (completed.result != null) {
-          currentParser.value = completed.parser;  // 标记解析成功的源
-          return completed.result;
-        }
-        futures.removeWhere((f) => f == completed);
+      if (remaining == 0) {
+        return null;
       }
-      return null;
+
+      for (final parser in sources) {
+        _processWithParser(playUrl, parser).then((result) {
+          if (result != null) {
+            if (!completer.isCompleted) {
+              currentParser.value = parser;
+              completer.complete(result);
+            }
+          } else {
+            remaining--;
+            if (remaining == 0 && !completer.isCompleted) {
+              completer.complete(null);
+            }
+          }
+        }).catchError((_) {
+          // _processWithParser 内部已有 try-catch 兜底，实际不会抛。
+          // 这里保留 catchError 是为了防止未来改动后出现未捕获异常导致
+          // completer 永不完成（调用方挂起）。
+          remaining--;
+          if (remaining == 0 && !completer.isCompleted) {
+            completer.complete(null);
+          }
+        });
+      }
+
+      return completer.future;
     }
   }
 
