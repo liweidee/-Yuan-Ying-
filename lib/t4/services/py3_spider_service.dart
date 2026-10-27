@@ -100,15 +100,27 @@ class Py3SpiderService implements ISpiderService {
 
   Future<Map<String, dynamic>> _callAndroid(String method, List<dynamic> args) async {
     if (_androidKey == null) {
-      final file = File(_apiUrl!);
+      // 归一化为本地路径：支持 http(s) 远程 URL（自动下载到临时目录）
+      final localPath = await PythonRuntime.resolveSourcePath(_apiUrl!);
+      final file = File(localPath);
       if (!await file.exists()) {
         throw BusinessException('py 源文件不存在: $_apiUrl');
       }
       final bytes = await file.readAsBytes();
-      _androidKey = await PythonRuntime.androidLoadSource(bytes, _apiUrl!.split('/').last);
+      // name 用 URL 的最后一段（去掉 query），避免非法字符
+      String baseName;
+      final uri = Uri.tryParse(_apiUrl!);
+      if (uri != null && uri.pathSegments.isNotEmpty) {
+        baseName = uri.pathSegments.last;
+      } else {
+        baseName = _apiUrl!.split('/').last.split('?').first;
+      }
+      _androidKey = await PythonRuntime.androidLoadSource(bytes, baseName);
       if (_androidKey == null) {
         throw const BusinessException('py 源加载失败（请确认已安装 DsPlayer-Python-plugin）');
       }
+      debugPrint('[PY-PERF] loadSource 完成 key=$_androidKey '
+          '本地路径=$localPath name=$baseName');
     }
 
     final raw = await PythonRuntime.androidCall(

@@ -19,6 +19,7 @@ import 'package:yuanying/modules/plugin_center/widgets/media_proxy_actions.dart'
 import 'package:yuanying/modules/plugin_center/widgets/plugin_icon.dart';
 import 'package:yuanying/modules/plugin_center/widgets/python_deps_sheet.dart';
 import 'package:yuanying/modules/plugin_center/widgets/qjs_concurrency_dialog.dart';
+import 'package:yuanying/modules/plugin_center/widgets/py_keep_alive_dialog.dart';
 
 class PluginTab extends StatefulWidget {
   const PluginTab({super.key});
@@ -785,6 +786,17 @@ class _InstalledPluginCard extends StatelessWidget {
           icon: Icons.search_outlined,
           label: 'py 源管理',
           onTap: () => Get.toNamed(AppPages.pySource),
+        ));
+        break;
+        // 保活开关：从 extras['pyKeepAlive'] 读状态，label 上带状态标识
+        actions.add(_ActionBtn(
+          icon: plugin.extras['pyKeepAlive'] == true
+              ? Icons.favorite
+              : Icons.favorite_border,
+          label: plugin.extras['pyKeepAlive'] == true
+              ? '保活(已开)'
+              : '保活设置',
+          onTap: () => showPyKeepAliveDialog(context, plugin),
         ));
         break;
 

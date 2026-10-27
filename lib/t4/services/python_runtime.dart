@@ -8,6 +8,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/services.dart' show MethodChannel, Uint8List;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:flutter/foundation.dart';
 import 'package:yuanying/modules/plugin_center/services/install_manager.dart';
 import 'package:yuanying/utils/business_exception.dart';
 
@@ -16,6 +17,9 @@ import 'package:yuanying/utils/business_exception.dart';
 /// - 桌面端：走插件中心 python-win 插件（常驻 HTTP worker）
 class PythonRuntime {
   static const _channel = MethodChannel('com.example.yuanying/pyplugin');
+
+  static const _configChannel =
+      MethodChannel('com.example.yuanying/pyplugin/config');
 
   // ============================================================
   // Android: AIDL 通道
@@ -28,6 +32,20 @@ class PythonRuntime {
       return j['success'] == true;
     } catch (_) {
       return false;
+    }
+  }
+
+  /// 设置 py 插件保活开关（仅 Android 生效）
+  /// - true：bindService 带 BIND_IMPORTANT，进程优先级提升到前台级
+  /// - false：普通 BIND_AUTO_CREATE
+  /// 切换后原生侧会主动 unbind，下次调用自动重连（约 100-300ms）
+  static Future<void> androidSetKeepAlive(bool enabled) async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _configChannel.invokeMethod('setKeepAlive', {'enabled': enabled});
+      debugPrint('[PY-KEEPALIVE] setKeepAlive = $enabled');
+    } catch (e) {
+      debugPrint('[PY-KEEPALIVE] setKeepAlive 失败: $e');
     }
   }
 
@@ -262,6 +280,13 @@ class PythonRuntime {
       dio.close();
     }
   }
+
+  /// 公开包装：把 apiUrl 归一化为本地文件路径
+  /// - 本地绝对路径：原样返回
+  /// - http(s) URL：下载到临时目录，返回临时文件路径（带 sha1 缓存）
+  /// 供 Py3SpiderService（Android）复用桌面端已实现的远程下载逻辑。
+  static Future<String> resolveSourcePath(String apiUrl) =>
+      _resolveSourcePath(apiUrl);
 
   static String _hashUrl(String url) {
     // 简单 hash：用 hashCode 不够稳定，用 url 的 md5 更稳

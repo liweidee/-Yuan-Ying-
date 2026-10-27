@@ -22,8 +22,8 @@ class MainActivity : AudioServiceActivity(), MethodCallHandler {
     private var nodeJSChannel: MethodChannel? = null
     private var nodeJSEventChannel: EventChannel? = null
     private var eventSink: EventChannel.EventSink? = null
-
     private lateinit var nodeJSManager: NodeJSManager
+    private var pyBridge: PythonPluginBridge? = null
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
@@ -178,10 +178,26 @@ class MainActivity : AudioServiceActivity(), MethodCallHandler {
             }
         }
 
-        val pyBridge = PythonPluginBridge(applicationContext)
-        pyBridge.registerChannel(
+        val bridge = PythonPluginBridge(applicationContext)
+        bridge.registerChannel(
             MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.example.yuanying/pyplugin")
         )
+        pyBridge = bridge
+
+        // py 插件配置 channel（保活等非业务开关，与业务 channel 解耦）
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "com.example.yuanying/pyplugin/config"
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "setKeepAlive" -> {
+                    val enabled = call.argument<Boolean>("enabled") ?: false
+                    bridge.setKeepAlive(enabled)
+                    result.success(true)
+                }
+                else -> result.notImplemented()
+            }
+        }
 
         // ===== 1) 初始化 NodeJSManager =====
         nodeJSManager = NodeJSManager.getInstance(applicationContext)
@@ -250,6 +266,12 @@ class MainActivity : AudioServiceActivity(), MethodCallHandler {
     override fun onDestroy() {
         if (::nodeJSManager.isInitialized) {
             nodeJSManager.stopNodeJS()
+        }
+        // 断开 py 插件绑定，避免 ServiceConnection 泄漏
+        try {
+            pyBridge?.unbind()
+        } catch (e: Exception) {
+            android.util.Log.w("MainActivity", "pyBridge.unbind failed: $e")
         }
         stopService(Intent(this, com.ryanheise.audioservice.AudioService::class.java))
         super.onDestroy()

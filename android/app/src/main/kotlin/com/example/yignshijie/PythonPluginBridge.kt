@@ -23,6 +23,10 @@ class PythonPluginBridge(private val context: Context) {
     private var bound = false
     private val pending = mutableListOf<(IPySpiderService?) -> Unit>()
 
+    /** 保活开关：true 时 bindService 使用 BIND_IMPORTANT，提升进程优先级 */
+    @Volatile
+    private var keepAlive = false
+
     private val conn = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
             service = IPySpiderService.Stub.asInterface(binder)
@@ -57,14 +61,42 @@ class PythonPluginBridge(private val context: Context) {
         pending.add(callback)
         if (!bound) {
             try {
+                val flags = Context.BIND_AUTO_CREATE or
+                        (if (keepAlive) Context.BIND_IMPORTANT else 0)
+                Log.i(TAG, "bindService flags=0x${Integer.toHexString(flags)} keepAlive=$keepAlive")
                 bound = context.bindService(
-                    Intent(ACTION).setPackage(PKG), conn, Context.BIND_AUTO_CREATE
+                    Intent(ACTION).setPackage(PKG), conn, flags
                 )
             } catch (e: Exception) {
                 Log.w(TAG, "bind failed: $e")
                 pending.remove(callback)
                 callback(null)
             }
+        }
+    }
+
+    /**
+     * 设置保活开关。
+     *
+     * BIND_IMPORTANT 只在 bindService 调用时生效，对已 bound 的连接无法动态升级，
+     * 所以切换后主动 unbind，下次请求进来时按新的 flags 重新 bind。
+     *
+     * 不清空 pending：pending 里的回调会在下次 bind 成功后执行
+     * （与原代码 onServiceDisconnected 的行为保持一致，旧调用可能因超时已过期，
+     *  但迟到的回调不会引发新问题）。
+     */
+    fun setKeepAlive(enabled: Boolean) {
+        if (keepAlive == enabled) return
+        keepAlive = enabled
+        Log.i(TAG, "setKeepAlive -> $enabled, bound=$bound")
+        if (bound) {
+            try {
+                context.unbindService(conn)
+            } catch (e: Exception) {
+                Log.w(TAG, "unbindService failed: $e")
+            }
+            bound = false
+            service = null
         }
     }
 
