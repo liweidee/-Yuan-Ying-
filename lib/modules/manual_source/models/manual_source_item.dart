@@ -5,10 +5,10 @@ enum ManualSourceType {
   dr2,
   dr3,
   js,
-  html,
   xbpq,
   xyq,
-  t4;
+  t4,
+  html,;
 
   String get dirName {
     switch (this) {
@@ -23,6 +23,8 @@ enum ManualSourceType {
     }
   }
 
+  /// 单文件选择模式下的默认扩展名
+  /// （HTML 类型多选时由 edit dialog 单独指定 ['html', 'json', 'js']）
   String get ext {
     switch (this) {
       case ManualSourceType.py: return 'py';
@@ -48,6 +50,9 @@ enum ManualSourceType {
     }
   }
 
+  /// HTML 类型是否支持多文件选择
+  bool get isMultiFile => this == ManualSourceType.html;
+
   bool get isFileBased => this != ManualSourceType.t4;
 
   static ManualSourceType? fromDir(String dir) {
@@ -70,6 +75,10 @@ class ManualSourceItem {
   final int quickSearch;
   final String ext;
 
+  /// 自定义显示名（优先级高于默认 `name(label)` 格式）
+  /// 用于 `.web.json` 源从 json 中读取真实名称
+  final String? customDisplayName;
+
   ManualSourceItem({
     required this.type,
     required this.name,
@@ -81,11 +90,12 @@ class ManualSourceItem {
     this.filterable = 1,
     this.quickSearch = 1,
     this.ext = '',
+    this.customDisplayName,
   });
 
   String get id => 'manual_${type.name}_$name';
 
-  String get displayName => '$name(${type.label})';
+  String get displayName => customDisplayName ?? '$name(${type.label})';
 
   String get sizeText {
     if (!type.isFileBased) return '';

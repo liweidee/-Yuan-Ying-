@@ -16,7 +16,6 @@ class ManualSourceController extends GetxController {
   final RxBool uploading = false.obs;
   final RxString search = ''.obs;
 
-  /// 筛选类型，null 表示「全部」
   final Rx<ManualSourceType?> filterType = Rx<ManualSourceType?>(null);
 
   final RxBool selectionMode = false.obs;
@@ -41,8 +40,6 @@ class ManualSourceController extends GetxController {
   }
 
   // ===== 筛选 & 排序 =====
-
-  /// 当前筛选下的源（保留全列表顺序）
   List<ManualSourceItem> get filtered {
     final q = search.value.trim().toLowerCase();
     final t = filterType.value;
@@ -54,7 +51,6 @@ class ManualSourceController extends GetxController {
     }).toList();
   }
 
-  /// 全部视图下才允许拖拽
   bool get canReorder =>
       filterType.value == null && !selectionMode.value;
 
@@ -63,7 +59,6 @@ class ManualSourceController extends GetxController {
     return all.where((e) => e.type == t).length;
   }
 
-  /// 拖拽排序：仅在「全部」视图使用
   Future<void> reorder(int oldIndex, int newIndex) async {
     if (!canReorder) return;
     final list = all.toList();
@@ -81,33 +76,6 @@ class ManualSourceController extends GetxController {
     if (filterType.value == t) return;
     filterType.value = t;
     search.value = '';
-  }
-
-  // ===== 添加文件源 =====
-  Future<void> pickAndUpload(ManualSourceType type) async {
-    if (uploading.value) return;
-    if (!type.isFileBased) return;
-    uploading.value = true;
-    try {
-      final picked = await FilePicker.pickFile(
-        type: FileType.custom,
-        allowedExtensions: [type.ext],
-      );
-      if (picked == null || picked.path == null) return;
-      final path = picked.path!;
-      final bytes = await File(path).readAsBytes();
-      await ManualSourceScanner.saveBytes(
-        type,
-        File(path).uri.pathSegments.last,
-        bytes,
-      );
-      SmartDialog.showToast('已上传到 ${type.dirName}/');
-      await refresh();
-    } catch (e) {
-      SmartDialog.showToast('上传失败: $e');
-    } finally {
-      uploading.value = false;
-    }
   }
 
   // ===== 添加 T4 源 =====
@@ -147,7 +115,6 @@ class ManualSourceController extends GetxController {
     return '${base}_$i';
   }
 
-  /// 按 id 写 meta（不要求已存在 InstalledPlugin 登记）
   Future<void> updateSourceById(String id, ManualSourceMeta meta) async {
     await ManualSourceStore.write(id, meta);
   }
@@ -175,6 +142,10 @@ class ManualSourceController extends GetxController {
       await ManualSourceScanner.deleteFile(item);
     }
     await ManualSourceStore.remove(item.id);
+    // 兼容清理旧 id
+    if (item.type == ManualSourceType.html) {
+      await ManualSourceStore.remove('manual_web_${item.name}');
+    }
     await refresh();
     SmartDialog.showToast('已删除 ${item.name}');
   }
@@ -196,6 +167,9 @@ class ManualSourceController extends GetxController {
           await ManualSourceScanner.deleteFile(item);
         }
         await ManualSourceStore.remove(item.id);
+        if (item.type == ManualSourceType.html) {
+          await ManualSourceStore.remove('manual_web_${item.name}');
+        }
         ok++;
       } catch (_) {}
     }
@@ -245,22 +219,16 @@ class ManualSourceController extends GetxController {
   List<ManualSourceItem> get selectedItems =>
       all.where((e) => selectedIds.contains(e.id)).toList();
 
-  // ===== 生成 Site 列表（按 all 顺序）=====
+  // ===== 生成 Site 列表（html 不进 SourceManager）=====
   List<Map<String, dynamic>> buildSites() {
     final result = <Map<String, dynamic>>[];
     for (final item in all) {
       if (item.disabled) continue;
-      // html 类型仅由 Web Tab 使用，不进 SourceManager
       if (item.type == ManualSourceType.html) continue;
       result.add(_toSite(item));
     }
     return result;
   }
-
-  /// Web Tab 用的 html 源（不含禁用）
-  List<ManualSourceItem> get htmlSources => all
-      .where((e) => e.type == ManualSourceType.html && !e.disabled)
-      .toList();
 
   Map<String, dynamic> _toSite(ManualSourceItem item) {
     final key = 'manual_${item.type.name}_${item.name}';
@@ -314,6 +282,7 @@ class ManualSourceController extends GetxController {
           'ext': '',
         };
       case ManualSourceType.html:
+        // 不会走到（buildSites 已过滤）
         return {
           'key': key,
           'name': '${item.name}(HTML)',
@@ -354,7 +323,7 @@ class ManualSourceController extends GetxController {
           'key': key,
           'name': '${item.name}(T4)',
           'api': item.path,
-          'type': 3,
+          'type': 4,
           'searchable': item.searchable,
           'filterable': item.filterable,
           'quickSearch': item.quickSearch,

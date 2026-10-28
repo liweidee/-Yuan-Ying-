@@ -61,6 +61,7 @@ class _WebSourceSwitchDialogState extends State<WebSourceSwitchDialog> {
                       ),
                     ),
                     const Spacer(),
+                    // 唯一入口：去手动源管理
                     IconButton(
                       tooltip: '管理',
                       icon: const Icon(Icons.settings_outlined, size: 20),
@@ -141,15 +142,6 @@ class _WebSourceSwitchDialogState extends State<WebSourceSwitchDialog> {
                           );
                         },
                       ),
-              ),
-              const Divider(height: 1),
-              ListTile(
-                leading: Icon(Icons.add_circle_outline, color: cs.primary),
-                title: const Text('去手动源管理上传'),
-                onTap: () {
-                  Navigator.pop(context);
-                  Get.toNamed(AppPages.manualSource);
-                },
               ),
             ],
           ),

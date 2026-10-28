@@ -11,13 +11,16 @@ import 'package:get/get.dart';
 import 'package:yuanying/core/routes/app_pages.dart';
 import 'package:yuanying/http/browser_ua.dart';
 import 'package:yuanying/main.dart' show webViewEnvironment;
+import 'package:yuanying/modules/main/controllers/main_controller.dart';
 import 'package:yuanying/modules/manual_source/controllers/manual_source_controller.dart';
 import 'package:yuanying/modules/manual_source/models/manual_source_item.dart';
+import 'package:yuanying/modules/manual_source/models/web_source_meta.dart';
 import 'package:yuanying/modules/web_tab/models/ds_env.dart';
 import 'package:yuanying/modules/web_tab/services/ds_bridge_service.dart';
 import 'package:yuanying/modules/web_tab/services/ds_handlers.dart';
 import 'package:yuanying/modules/web_tab/widgets/web_source_switch_dialog.dart';
 import 'package:yuanying/modules/web_tab/widgets/web_tab_topbar.dart';
+import 'package:yuanying/t4/services/source_manager.dart';
 import 'package:yuanying/utils/storage_manager.dart';
 
 class WebTabPage extends StatefulWidget {
@@ -34,6 +37,19 @@ class _WebTabPageState extends State<WebTabPage>
   InAppWebViewController? _web;
   DsHandlers? _handlers;
 
+  final _isFullscreen = false.obs;
+
+  /// 网盘链接列表
+  final _cloudLinks = <Map<String, dynamic>>[].obs;
+
+  /// 嗅探到的媒体资源列表（多视频，去重）
+  final _sniffedVideos = <Map<String, String>>[].obs;
+
+  ({String loadUrl, String? injectJs})? _entry;
+  String? _entryForId;
+  String? _pendingInjectJs;
+  bool _injected = false;
+
   final _pageTitle = ''.obs;
   final _pageUrl = ''.obs;
   final _progress = 0.0.obs;
@@ -48,15 +64,442 @@ class _WebTabPageState extends State<WebTabPage>
   void initState() {
     super.initState();
     _currentId = StorageManager.getSetting<String>(_currentIdKey);
+
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      try {
+        await _mgr.refresh();
+      } catch (_) {}
+      if (!mounted) return;
+      _scheduleEntryResolve();
+    });
   }
 
   void _setCurrent(String id) {
     if (_currentId == id) return;
-    setState(() => _currentId = id);
+
+    final oldWeb = _web;
+    _web = null;
+    _handlers = null;
+    if (oldWeb != null) {
+      try {
+        oldWeb.dispose();
+      } catch (_) {}
+    }
+
+    _entry = null;
+    _entryForId = null;
+    _pendingInjectJs = null;
+    _injected = false;
+    _isFullscreen.value = false;
+    _cloudLinks.clear();
+    _sniffedVideos.clear();
+
+    _pageTitle.value = '';
+    _pageUrl.value = '';
+    _progress.value = 0;
+    _isLoading.value = false;
+
+    setState(() {
+      _currentId = id;
+    });
     StorageManager.setSetting(_currentIdKey, id);
+
+    _scheduleEntryResolve();
   }
 
-  // ===== 通用底部弹窗外壳（带拖拽条 + 标题 + 圆角） =====
+  void _scheduleEntryResolve() {
+    final id = _currentId;
+    if (id == null || id.isEmpty) return;
+
+    final cur = _mgr.all.firstWhereOrNull((e) => e.id == id);
+    if (cur == null) return;
+
+    _resolveEntry(cur).then((r) {
+      if (!mounted) return;
+      if (_currentId != id) return;
+
+      _pendingInjectJs = r?.injectJs;
+      _injected = false;
+
+      setState(() {
+        _entry = r;
+        _entryForId = id;
+      });
+    }).catchError((e) {
+      debugPrint('[WebTab] resolve entry failed: $e');
+      if (!mounted) return;
+      if (_currentId != id) return;
+      setState(() {
+        _entry = null;
+        _entryForId = id;
+      });
+    });
+  }
+
+  Future<({String loadUrl, String? injectJs})?> _resolveEntry(
+    ManualSourceItem cur) async {
+    try {
+      final path = cur.path.toLowerCase();
+
+      if (path.endsWith('.web.json')) {
+        final content = await File(cur.path).readAsString();
+        final meta = WebSourceMeta.parse(content);
+        if (meta == null || meta.homePage.isEmpty) return null;
+
+        String? js;
+        final jsPath = cur.path.replaceAll('.web.json', '.js');
+        final jsFile = File(jsPath);
+        if (await jsFile.exists()) {
+          js = await jsFile.readAsString();
+        }
+        return (loadUrl: meta.homePage, injectJs: js);
+      }
+
+      if (path.endsWith('.html')) {
+        String? js;
+        final jsPath = cur.path.replaceAll('.html', '.js');
+        final jsFile = File(jsPath);
+        if (await jsFile.exists()) {
+          js = await jsFile.readAsString();
+        }
+        return (loadUrl: Uri.file(cur.path).toString(), injectJs: js);
+      }
+
+      return null;
+    } catch (e) {
+      debugPrint('[WebTab] resolve entry failed: $e');
+      return null;
+    }
+  }
+
+  // ================== 媒体/网盘检测 ==================
+  bool _isMediaUrl(String url) {
+    if (url.isEmpty) return false;
+    final lower = url.toLowerCase();
+    if (lower.startsWith('blob:') || lower.startsWith('data:')) return false;
+    // 排除干扰
+    if (lower.contains('.js') ||
+        lower.contains('.css') ||
+        lower.contains('.png') ||
+        lower.contains('.jpg') ||
+        lower.contains('.jpeg') ||
+        lower.contains('.gif') ||
+        lower.contains('.webp') ||
+        lower.contains('.svg') ||
+        lower.contains('.woff') ||
+        lower.contains('.ttf')) {
+      return false;
+    }
+    return RegExp(
+      r'\.(m3u8|mp4|flv|mpd|mkv|mov|m4v|ts|webm)(\?|#|$)',
+      caseSensitive: false,
+    ).hasMatch(lower) ||
+        lower.contains('videoplayback') ||
+        lower.contains('/video/') ||
+        lower.contains('/stream/');
+  }
+
+  void _onSniffedVideo(String url, String title) {
+    if (url.isEmpty) return;
+    if (!_isMediaUrl(url)) return;
+
+    // 去重
+    for (final v in _sniffedVideos) {
+      if (v['url'] == url) return;
+    }
+
+    _sniffedVideos.insert(0, {
+      'url': url,
+      'title': title.isNotEmpty ? title : _pageTitle.value,
+    });
+  }
+
+  void _onCloudLinks(List<Map<String, dynamic>> links) {
+    if (links.isEmpty) return;
+    final existing =
+        _cloudLinks.map((e) => e['url']?.toString() ?? '').toSet();
+    for (final l in links) {
+      final u = l['url']?.toString() ?? '';
+      if (u.isEmpty) continue;
+      if (existing.contains(u)) continue;
+      existing.add(u);
+      _cloudLinks.add(l);
+    }
+  }
+
+  // ================== 播放行为 ==================
+  void _playSniffedVideo(Map<String, String> video) {
+    final url = video['url'] ?? '';
+    if (url.isEmpty) return;
+    Get.toNamed(
+      AppPages.detail,
+      arguments: {
+        'isPush': true,
+        'directUrl': url,
+        'directTitle': video['title']?.isNotEmpty == true
+            ? video['title']!
+            : '嗅探视频',
+        'sourceName': 'Web 嗅探',
+        'isDirectPushMode': true,
+      },
+    );
+  }
+
+  /// 参考 web_sniffer_page 的弹窗样式
+  void _showSniffedVideosSheet() {
+    if (_sniffedVideos.isEmpty) return;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(ctx).size.height * 0.6,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                child: Row(
+                  children: [
+                    const Icon(Icons.videocam, size: 20),
+                    const SizedBox(width: 8),
+                    Text(
+                      '嗅探到 ${_sniffedVideos.length} 个资源',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const Spacer(),
+                    IconButton(
+                      tooltip: '清空',
+                      icon: const Icon(Icons.delete_sweep_outlined, size: 20),
+                      onPressed: () {
+                        _sniffedVideos.clear();
+                        Navigator.pop(ctx);
+                      },
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close, size: 20),
+                      onPressed: () => Navigator.pop(ctx),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              Flexible(
+                child: Obx(() => ListView.separated(
+                      shrinkWrap: true,
+                      itemCount: _sniffedVideos.length,
+                      separatorBuilder: (_, __) => const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 16),
+                        child: Divider(height: 1),
+                      ),
+                      itemBuilder: (_, i) {
+                        final v = _sniffedVideos[i];
+                        return _buildMediaTile(ctx, v);
+                      },
+                    )),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 单个媒体 Tile（参考 web_sniffer_page 样式）
+  Widget _buildMediaTile(BuildContext ctx, Map<String, String> video) {
+    final theme = Theme.of(ctx);
+    final url = video['url'] ?? '';
+    final title = video['title'] ?? '';
+    final type = _detectMediaType(url);
+
+    return ListTile(
+      leading: Icon(
+        Icons.play_circle_fill,
+        color: theme.colorScheme.primary,
+        size: 36,
+      ),
+      title: Text(
+        title.isNotEmpty ? title : '视频资源',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(fontSize: 14),
+      ),
+      subtitle: Text(
+        url,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(fontSize: 11, color: theme.colorScheme.outline),
+      ),
+      trailing: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.primaryContainer,
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Text(
+          type,
+          style: TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+            color: theme.colorScheme.onPrimaryContainer,
+          ),
+        ),
+      ),
+      onTap: () {
+        Navigator.pop(ctx);
+        _playSniffedVideo(video);
+      },
+    );
+  }
+
+  String _detectMediaType(String url) {
+    final lower = url.toLowerCase();
+    if (lower.contains('.m3u8')) return 'm3u8';
+    if (lower.contains('.mp4')) return 'mp4';
+    if (lower.contains('.flv')) return 'flv';
+    if (lower.contains('.mpd')) return 'mpd';
+    if (lower.contains('.m4v')) return 'm4v';
+    if (lower.contains('.mkv')) return 'mkv';
+    if (lower.contains('.mov')) return 'mov';
+    if (lower.contains('.ts')) return 'ts';
+    if (lower.contains('.webm')) return 'webm';
+    return 'video';
+  }
+
+  void _pushCloudLink(Map<String, dynamic> link) {
+    final url = link['url']?.toString() ?? '';
+    if (url.isEmpty) return;
+
+    final sm = Get.find<SourceManager>();
+    final pushAgent = sm.pushAgentSite;
+    if (pushAgent == null) {
+      SmartDialog.showToast('请先在源配置中添加 push_agent 源');
+      return;
+    }
+
+    final api = pushAgent['api']?.toString() ?? '';
+    final pwd = Uri.tryParse(api)?.queryParameters['pwd'] ?? 'tinydust';
+
+    Get.toNamed(
+      AppPages.detail,
+      arguments: {
+        'vodId': url,
+        'pwd': pwd,
+        'site': pushAgent,
+      },
+    );
+  }
+
+  void _showCloudLinksSheet() {
+    if (_cloudLinks.isEmpty) return;
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => _buildSheet(
+        context: ctx,
+        title: '网盘链接 (${_cloudLinks.length})',
+        maxSize: 0.7,
+        child: ListView.separated(
+          shrinkWrap: true,
+          itemCount: _cloudLinks.length,
+          separatorBuilder: (_, __) => const Divider(height: 1),
+          itemBuilder: (_, i) {
+            final link = _cloudLinks[i];
+            final url = link['url']?.toString() ?? '';
+            final label = link['label']?.toString() ?? '';
+            final code = link['extractCode']?.toString() ?? '';
+            final type = _detectCloudType(url);
+            return ListTile(
+              leading: Icon(
+                Icons.cloud_outlined,
+                size: 28,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+              title: Text(
+                type.isNotEmpty ? type : '网盘链接',
+                style: const TextStyle(
+                    fontSize: 14, fontWeight: FontWeight.w500),
+              ),
+              subtitle: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SizedBox(height: 2),
+                  Text(
+                    url,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 11),
+                  ),
+                  if (code.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(
+                        '提取码：$code',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Theme.of(context).colorScheme.primary,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              trailing: FilledButton(
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  _pushCloudLink(link);
+                },
+                style: FilledButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                ),
+                child: const Text('推送'),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  String _detectCloudType(String url) {
+    if (url.contains('pan.quark.cn')) return '夸克网盘';
+    if (url.contains('pan.baidu.com')) return '百度网盘';
+    if (url.contains('pan.xunlei.com')) return '迅雷云盘';
+    if (url.contains('aliyundrive.com') || url.contains('alipan.com')) {
+      return '阿里云盘';
+    }
+    if (url.contains('115.com')) return '115 网盘';
+    if (url.contains('123pan.com')) return '123 云盘';
+    if (url.contains('cloud.189.cn')) return '天翼云盘';
+    if (url.contains('drive.uc.cn')) return 'UC 网盘';
+    return '';
+  }
+
+  // ================== 弹窗 ==================
+  void _showSwitchDialog(List<ManualSourceItem> items) {
+    if (items.isEmpty) return;
+    showDialog(
+      context: context,
+      builder: (_) => WebSourceSwitchDialog(
+        currentId: _currentId ?? '',
+        items: items,
+        onSelect: (src) => _setCurrent(src.id),
+      ),
+    );
+  }
+
   Widget _buildSheet({
     required BuildContext context,
     String? title,
@@ -108,7 +551,9 @@ class _WebTabPageState extends State<WebTabPage>
                   ],
                 ),
               ),
-              Divider(height: 0.5, thickness: 0.5,
+              Divider(
+                  height: 0.5,
+                  thickness: 0.5,
                   color: cs.outline.withValues(alpha: 0.15)),
             ],
             Flexible(child: child),
@@ -118,7 +563,6 @@ class _WebTabPageState extends State<WebTabPage>
     );
   }
 
-  // ===== 更多菜单 =====
   void _showMenu() {
     final cs = Theme.of(context).colorScheme;
     showModalBottomSheet(
@@ -192,7 +636,6 @@ class _WebTabPageState extends State<WebTabPage>
     );
   }
 
-  // ===== UA 切换 =====
   void _showUaPicker() {
     showModalBottomSheet(
       context: context,
@@ -216,8 +659,7 @@ class _WebTabPageState extends State<WebTabPage>
               ListTile(
                 contentPadding:
                     const EdgeInsets.symmetric(horizontal: 20, vertical: 2),
-                title: Text(entry.key,
-                    style: const TextStyle(fontSize: 14)),
+                title: Text(entry.key, style: const TextStyle(fontSize: 14)),
                 subtitle: Text(
                   entry.value,
                   maxLines: 1,
@@ -227,8 +669,7 @@ class _WebTabPageState extends State<WebTabPage>
                 onTap: () async {
                   Navigator.pop(ctx);
                   await _web?.setSettings(
-                    settings:
-                        InAppWebViewSettings(userAgent: entry.value),
+                    settings: InAppWebViewSettings(userAgent: entry.value),
                   );
                   await _web?.reload();
                 },
@@ -239,7 +680,6 @@ class _WebTabPageState extends State<WebTabPage>
     );
   }
 
-  // ===== 查看源码（service_log_sheet 风格：外壳主题色 + 内容区黑色） =====
   Future<void> _showSourceDialog() async {
     final c = _web;
     if (c == null) return;
@@ -273,7 +713,6 @@ class _WebTabPageState extends State<WebTabPage>
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // 拖拽条
             Container(
               margin: const EdgeInsets.only(top: 8, bottom: 4),
               width: 40,
@@ -283,7 +722,6 @@ class _WebTabPageState extends State<WebTabPage>
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
-            // 标题栏
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 8, 8, 12),
               child: Row(
@@ -310,7 +748,6 @@ class _WebTabPageState extends State<WebTabPage>
               ),
             ),
             const Divider(height: 1),
-            // 内容区：黑色容器（参考 service_log_sheet）
             Flexible(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
@@ -349,7 +786,6 @@ class _WebTabPageState extends State<WebTabPage>
               ),
             ),
             const Divider(height: 1),
-            // 底部操作栏
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
               child: Row(
@@ -376,18 +812,18 @@ class _WebTabPageState extends State<WebTabPage>
     );
   }
 
-  void _showSwitchDialog(List<ManualSourceItem> items) {
-    if (items.isEmpty) return;
-    showDialog(
-      context: context,
-      builder: (_) => WebSourceSwitchDialog(
-        currentId: _currentId ?? '',
-        items: items,
-        onSelect: (src) => _setCurrent(src.id),
-      ),
-    );
+  // ================== 底栏避让 ==================
+  double _getBottomAvoidHeight(BuildContext context) {
+    if (Get.isRegistered<MainController>()) {
+      final mc = Get.find<MainController>();
+      if (!mc.hideBottomBar.value && mc.bottomBarHeight.value > 0) {
+        return mc.bottomBarHeight.value;
+      }
+    }
+    return MediaQuery.viewPaddingOf(context).bottom;
   }
 
+  // ================== build ==================
   @override
   Widget build(BuildContext context) {
     super.build(context);
@@ -403,125 +839,273 @@ class _WebTabPageState extends State<WebTabPage>
         );
       }
 
-      final htmls = all
-          .where((e) => e.type == ManualSourceType.html && !e.disabled)
+      final sources = all
+          .where((e) =>
+              e.type == ManualSourceType.html && !e.disabled)
           .toList();
 
-      if (htmls.isEmpty) return _buildEmptyState();
+      if (sources.isEmpty) return _buildEmptyState();
 
       var cur =
-          htmls.firstWhereOrNull((e) => e.id == _currentId) ?? htmls.first;
+          sources.firstWhereOrNull((e) => e.id == _currentId) ?? sources.first;
       if (cur.id != _currentId) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) _setCurrent(cur.id);
         });
       }
 
-      return _buildContent(cur, htmls);
+      return _buildContent(cur, sources);
     });
   }
 
   Widget _buildContent(ManualSourceItem cur, List<ManualSourceItem> all) {
-    final full = _handlers?.isFullscreen.value == true;
-    final fileUri = Uri.file(cur.path).toString();
+    final entry = _entry;
+    final entryReady = entry != null && _entryForId == cur.id;
 
-    final body = InAppWebView(
-      key: ValueKey('webview_${cur.id}'),
-      webViewEnvironment: webViewEnvironment,
-      initialSettings: InAppWebViewSettings(
-        javaScriptEnabled: true,
-        javaScriptCanOpenWindowsAutomatically: false,
-        mediaPlaybackRequiresUserGesture: true,
-        allowsInlineMediaPlayback: true,
-        cacheEnabled: false,
-        useShouldOverrideUrlLoading: false,
-        useOnLoadResource: false,
-        useShouldInterceptAjaxRequest: false,
-        useShouldInterceptFetchRequest: false,
-        mixedContentMode: MixedContentMode.MIXED_CONTENT_ALWAYS_ALLOW,
-        supportMultipleWindows: false,
-        userAgent: BrowserUa.platform,
-        allowFileAccessFromFileURLs: true,
-        allowUniversalAccessFromFileURLs: true,
-        disableContextMenu: true,
-      ),
-      onWebViewCreated: (c) async {
-        _web = c;
-        _handlers = DsHandlers(c);
+    return KeyedSubtree(
+      key: ValueKey('tab_${cur.id}'),
+      child: Obx(() {
+        final full = _isFullscreen.value;
+        final hasCloud = _cloudLinks.isNotEmpty;
+        final hasSniffed = _sniffedVideos.isNotEmpty;
+        final showFab = full || hasCloud || hasSniffed;
 
-        c.addJavaScriptHandler(
-          handlerName: DsBridgeService.handlerName,
-          callback: (args) => _handlers!.dispatchRaw(args),
-        );
+        final bottomAvoid = _getBottomAvoidHeight(context);
 
-        final env = DsEnv.fromContext(context);
-        await c.addUserScript(
-          userScript: UserScript(
-            source: DsBridgeService.buildSkeleton(env),
-            injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+        return Scaffold(
+          resizeToAvoidBottomInset: false,
+          backgroundColor: Theme.of(context).colorScheme.surface,
+          body: Stack(
+            children: [
+              Column(
+                children: [
+                  if (!full) _buildNormalBar(cur, all),
+                  Expanded(
+                    child: entryReady
+                        ? _buildWebView(cur, entry)
+                        : const Center(child: CircularProgressIndicator()),
+                  ),
+                ],
+              ),
+              if (showFab)
+                Positioned(
+                  right: 16,
+                  bottom: 16 + bottomAvoid,
+                  child: _buildFabGroup(
+                    full: full,
+                    hasCloud: hasCloud,
+                    hasSniffed: hasSniffed,
+                  ),
+                ),
+            ],
           ),
         );
-
-        await c.loadUrl(
-          urlRequest: URLRequest(url: WebUri(fileUri)),
-        );
-      },
-      onLoadStart: (c, url) {
-        _isLoading.value = true;
-        _progress.value = 0;
-        _pageUrl.value = url?.toString() ?? '';
-      },
-      onLoadStop: (c, url) async {
-        _isLoading.value = false;
-        _progress.value = 1;
-        _pageUrl.value = url?.toString() ?? '';
-        final t = await c.getTitle() ?? '';
-        _pageTitle.value = t;
-      },
-      onProgressChanged: (c, p) => _progress.value = p / 100,
-      onTitleChanged: (c, t) => _pageTitle.value = t ?? '',
-      onUpdateVisitedHistory: (c, url, _) {
-        _pageUrl.value = url?.toString() ?? '';
-      },
+      }),
     );
+  }
 
-    return Scaffold(
-      resizeToAvoidBottomInset: false,
-      body: Column(
-        children: [
-          if (!full)
-            WebTabTopBar(
-              sourceName: cur.name,
-              pageTitle: _pageTitle.value,
-              pageUrl: _pageUrl.value,
-              isLoading: _isLoading.value,
-              progress: _progress.value,
-              onSwitchSource: () => _showSwitchDialog(all),
-              onBack: () async {
-                if (await _web?.canGoBack() == true) {
-                  await _web?.goBack();
-                }
-              },
-              onForward: () async {
-                if (await _web?.canGoForward() == true) {
-                  await _web?.goForward();
-                }
-              },
-              onReload: () => _web?.reload(),
-              onFullscreen: () => _handlers?.isFullscreen.value = true,
-              onMenu: _showMenu,
-            ),
-          Expanded(child: body),
+  Widget _buildNormalBar(ManualSourceItem cur, List<ManualSourceItem> all) {
+    return WebTabTopBar(
+      sourceName: cur.name,
+      pageTitle: _pageTitle.value,
+      pageUrl: _pageUrl.value,
+      isLoading: _isLoading.value,
+      progress: _progress.value,
+      onSwitchSource: () => _showSwitchDialog(all),
+      onBack: () async {
+        if (await _web?.canGoBack() == true) {
+          await _web?.goBack();
+        }
+      },
+      onForward: () async {
+        if (await _web?.canGoForward() == true) {
+          await _web?.goForward();
+        }
+      },
+      onReload: () => _web?.reload(),
+      onFullscreen: () => _isFullscreen.value = true,
+      onMenu: _showMenu,
+    );
+  }
+
+  Widget _buildFabGroup({
+    required bool full,
+    required bool hasCloud,
+    required bool hasSniffed,
+  }) {
+    final buttons = <Widget>[];
+
+    if (hasSniffed) {
+      buttons.add(_fabButton(
+        icon: Icons.play_circle_fill_rounded,
+        tooltip: '嗅探到 ${_sniffedVideos.length} 个视频',
+        onTap: _showSniffedVideosSheet,
+      ));
+    }
+    if (hasCloud) {
+      buttons.add(_fabButton(
+        icon: Icons.cloud_outlined,
+        tooltip: '网盘链接（${_cloudLinks.length}）',
+        onTap: _showCloudLinksSheet,
+      ));
+    }
+    if (full) {
+      buttons.add(_fabButton(
+        icon: Icons.fullscreen_exit_rounded,
+        tooltip: '退出全屏',
+        onTap: () => _isFullscreen.value = false,
+      ));
+    }
+
+    if (buttons.isEmpty) return const SizedBox.shrink();
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        for (int i = 0; i < buttons.length; i++) ...[
+          if (i > 0) const SizedBox(height: 8),
+          buttons[i],
         ],
+      ],
+    );
+  }
+
+  Widget _fabButton({
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback onTap,
+  }) {
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: Colors.black.withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(12),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: SizedBox(
+            width: 44,
+            height: 44,
+            child: Icon(icon, size: 22, color: Colors.white),
+          ),
+        ),
       ),
-      floatingActionButton: full
-          ? FloatingActionButton(
-              mini: true,
-              backgroundColor: Colors.black54,
-              onPressed: () => _handlers?.isFullscreen.value = false,
-              child: const Icon(Icons.fullscreen_exit, color: Colors.white),
-            )
-          : null,
+    );
+  }
+
+  // ================== WebView（核心：补齐所有嗅探回调） ==================
+  Widget _buildWebView(
+    ManualSourceItem cur,
+    ({String loadUrl, String? injectJs}) entry,
+  ) {
+    return SizedBox.expand(
+      child: InAppWebView(
+        key: ValueKey('webview_${cur.id}'),
+        webViewEnvironment: webViewEnvironment,
+        initialSettings: InAppWebViewSettings(
+          javaScriptEnabled: true,
+          javaScriptCanOpenWindowsAutomatically: false,
+          mediaPlaybackRequiresUserGesture: false,
+          allowsInlineMediaPlayback: true,
+          cacheEnabled: true,
+          useShouldOverrideUrlLoading: true,
+          useOnLoadResource: true,
+          useShouldInterceptAjaxRequest: true,
+          useShouldInterceptFetchRequest: true,
+          interceptOnlyAsyncAjaxRequests: false,
+          mixedContentMode: MixedContentMode.MIXED_CONTENT_ALWAYS_ALLOW,
+          supportMultipleWindows: false,
+          userAgent: BrowserUa.platform,
+          allowFileAccessFromFileURLs: true,
+          allowUniversalAccessFromFileURLs: true,
+          disableContextMenu: true,
+        ),
+        onWebViewCreated: (c) async {
+          _web = c;
+          _handlers = DsHandlers(c, isFullscreen: _isFullscreen);
+
+          _handlers!.setSniffedVideoCallback(_onSniffedVideo);
+          _handlers!.setCloudLinksCallback(_onCloudLinks);
+
+          c.addJavaScriptHandler(
+            handlerName: DsBridgeService.handlerName,
+            callback: (args) => _handlers!.dispatchRaw(args),
+          );
+
+          final env = DsEnv.fromContext(context);
+          await c.addUserScript(
+            userScript: UserScript(
+              source: DsBridgeService.buildSkeleton(env),
+              injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+              forMainFrameOnly: false,
+            ),
+          );
+
+          await c.loadUrl(
+            urlRequest: URLRequest(url: WebUri(entry.loadUrl)),
+          );
+        },
+        onLoadStart: (c, url) {
+          _isLoading.value = true;
+          _progress.value = 0;
+          _pageUrl.value = url?.toString() ?? '';
+          _injected = false;
+        },
+        onLoadStop: (c, url) async {
+          _isLoading.value = false;
+          _progress.value = 1;
+          _pageUrl.value = url?.toString() ?? '';
+          final t = await c.getTitle() ?? '';
+          _pageTitle.value = t;
+
+          if (!_injected &&
+              _pendingInjectJs != null &&
+              _pendingInjectJs!.isNotEmpty) {
+            try {
+              await c.evaluateJavascript(source: _pendingInjectJs!);
+              _injected = true;
+            } catch (e) {
+              debugPrint('[WebTab] 注入 js 失败: $e');
+            }
+          }
+        },
+        onProgressChanged: (c, p) => _progress.value = p / 100,
+        onTitleChanged: (c, t) => _pageTitle.value = t ?? '',
+        onUpdateVisitedHistory: (c, url, _) {
+          _pageUrl.value = url?.toString() ?? '';
+        },
+
+        // 核心：四层回调，任何一层能触发就捕获
+        // 层 1：网络资源加载（Android/iOS 完整，Windows 可能不工作）
+        onLoadResource: (c, resource) {
+          final url = resource.url?.toString() ?? '';
+          if (_isMediaUrl(url)) _onSniffedVideo(url, _pageTitle.value);
+        },
+        // 层 2：XHR 拦截（跨平台，Windows 有效）
+        shouldInterceptAjaxRequest: (c, request) async {
+          final url = request.url?.toString() ?? '';
+          if (_isMediaUrl(url)) _onSniffedVideo(url, _pageTitle.value);
+          return request;
+        },
+        // 层 3：Fetch 拦截（跨平台，Windows 有效）
+        shouldInterceptFetchRequest: (c, request) async {
+          final url = request.url?.toString() ?? '';
+          if (_isMediaUrl(url)) _onSniffedVideo(url, _pageTitle.value);
+          return request;
+        },
+        // 层 4：URL 跳转拦截（兜底）
+        shouldOverrideUrlLoading: (c, action) async {
+          final url = action.request.url?.toString() ?? '';
+          if (_isMediaUrl(url)) _onSniffedVideo(url, _pageTitle.value);
+          return NavigationActionPolicy.ALLOW;
+        },
+        // 层 5：HTTP 错误拦截（有些 CDN 返回 404 但也可能是媒体）
+        onReceivedHttpError: (c, request, response) {
+          final url = request.url.toString();
+          if (_isMediaUrl(url)) _onSniffedVideo(url, _pageTitle.value);
+        },
+      ),
     );
   }
 
@@ -546,7 +1130,7 @@ class _WebTabPageState extends State<WebTabPage>
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  '请前往「设置 → 手动源管理」上传 .html 源文件',
+                  '请前往「设置 → 手动源管理」上传 .html 或 .web.json 源文件',
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 13, color: cs.outline),
                 ),

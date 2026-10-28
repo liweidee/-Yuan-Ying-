@@ -22,12 +22,27 @@ import 'package:yuanying/utils/storage.dart';
 
 class DsHandlers {
   final InAppWebViewController controller;
-  final isFullscreen = false.obs;
+  final RxBool isFullscreen;
 
-  final _resolveCompleters = <String, Completer<String?>>{};
   final _boxCache = <String, Future<Box>>{};
 
-  DsHandlers(this.controller);
+  /// 嗅探到的视频回调（由 WebTabPage 注入）
+  void Function(String url, String title)? _onSniffedVideoCb;
+
+  /// 网盘链接列表回调（由 WebTabPage 注入）
+  void Function(List<Map<String, dynamic>> links)? _onCloudLinksCb;
+
+  DsHandlers(this.controller, {RxBool? isFullscreen})
+      : isFullscreen = isFullscreen ?? false.obs;
+
+  /// 由 WebTabPage 接线
+  void setSniffedVideoCallback(
+          void Function(String url, String title)? cb) =>
+      _onSniffedVideoCb = cb;
+
+  void setCloudLinksCallback(
+          void Function(List<Map<String, dynamic>> links)? cb) =>
+      _onCloudLinksCb = cb;
 
   Future<Map<String, dynamic>> dispatchRaw(List<dynamic> args) async {
     if (args.isEmpty || args[0] is! Map) {
@@ -48,40 +63,112 @@ class DsHandlers {
   Future<dynamic> _dispatch(String method, dynamic args) async {
     final a = (args is List) ? args : <dynamic>[];
     switch (method) {
-      case 'req':         return _req(a);
-      case 'toast':       return _toast(a);
-      case 'openVod':     return _openVod(a);
-      case 'openLive':    return _openLive();
-      case 'openKeep':    return _openKeep();
-      case 'openSetting': return _openSetting();
-      case 'search':      return _search(a);
-      case 'vod':         return _vod(a);
-      case 'play':        return _play(a);
-      case 'fullscreen':  return _fullscreen(a);
-      case 'tab':         return _tab(a);
-      case 'back':        return _back();
-      case 'reload':      return _reload();
-      case 'replay':      return _reload();
-      case 'store.get':   return _storeGet(a);
-      case 'store.set':   return _storeSet(a);
-      case 'store.del':   return _storeDel(a);
-      case 'device':      return _device();
-      case 'site':        return _site();
-      case 'config':      return _config();
-      case 'history':     return _history();
-      case 'viewport':    return _viewport();
-      case 'extInfo':     return _extInfo();
+      case 'req':                return _req(a);
+      case 'toast':              return _toast(a);
+      case 'openVod':            return _openVod(a);
+      case 'openLive':           return _openLive();
+      case 'openKeep':           return _openKeep();
+      case 'openSetting':        return _openSetting();
+      case 'search':             return _search(a);
+      case 'vod':                return _vod(a);
+      case 'play':               return _play(a);
+      case 'fullscreen':         return _fullscreen(a);
+      case 'tab':                return _tab(a);
+      case 'back':               return _back();
+      case 'reload':             return _reload();
+      case 'replay':             return _reload();
+      case 'store.get':          return _storeGet(a);
+      case 'store.set':          return _storeSet(a);
+      case 'store.del':          return _storeDel(a);
+      case 'device':             return _device();
+      case 'site':               return _site();
+      case 'config':             return _config();
+      case 'history':            return _history();
+      case 'viewport':           return _viewport();
+      case 'extInfo':            return _extInfo();
+
+      // ★ 嗅探 / 网盘推送
+      case 'sniffedVideo':       return _onSniffedVideo(a);
+      case 'showSniffedVideo':   return _onSniffedVideo(a);
+      case 'reportCloudLinks':   return _onReportCloudLinks(a);
+      case 'showCloudPush':      return _onShowCloudPush(a);
+      case 'pan.play':           return _onPanPlay(a);
+
       case '__resolveDone':
-        final token = a.isNotEmpty ? a[0]?.toString() ?? '' : '';
-        final url = a.length > 1 ? a[1]?.toString() : null;
-        _resolveCompleters.remove(token)?.complete(url);
         return true;
       default:
         throw Exception('unsupported method: $method');
     }
   }
 
-  // ===== 网络 =====
+  // ============================================================
+  // 嗅探 / 网盘
+  // ============================================================
+  Future<bool> _onSniffedVideo(List a) async {
+    if (a.isEmpty || a[0] is! Map) return false;
+    final data = Map<String, dynamic>.from(a[0] as Map);
+    final url = data['url']?.toString() ?? '';
+    final title = data['title']?.toString() ?? '';
+    if (url.isEmpty) return false;
+    _onSniffedVideoCb?.call(url, title);
+    return true;
+  }
+
+  Future<bool> _onReportCloudLinks(List a) async {
+    if (a.isEmpty || a[0] is! List) return false;
+    final links = (a[0] as List)
+        .whereType<Map>()
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
+    if (links.isEmpty) return false;
+    _onCloudLinksCb?.call(links);
+    return true;
+  }
+
+  Future<bool> _onShowCloudPush(List a) async {
+    if (a.isEmpty || a[0] is! Map) return false;
+    _onCloudLinksCb?.call([Map<String, dynamic>.from(a[0] as Map)]);
+    return true;
+  }
+
+  /// 网盘点击推送播放：构造详情页走原生播放路径
+  Future<bool> _onPanPlay(List a) async {
+    if (a.isEmpty || a[0] is! Map) return false;
+    final data = Map<String, dynamic>.from(a[0] as Map);
+    final url = data['url']?.toString() ?? '';
+    final title = data['title']?.toString() ?? '网盘播放';
+    if (url.isEmpty) return false;
+
+    final detail = VideoDetail(
+      vodId: 'pan_${DateTime.now().millisecondsSinceEpoch}',
+      vodName: title,
+      vodPic: '',
+      typeName: '网盘',
+      playSources: [
+        PlaySource(
+          name: '网盘',
+          episodes: [Episode(name: title, url: url)],
+        ),
+      ],
+    );
+
+    Get.toNamed(
+      AppPages.detail,
+      arguments: {
+        'isPush': true,
+        'directUrl': url,
+        'directTitle': title,
+        'videoDetail': detail,
+        'sourceName': '网盘',
+        'isDirectPushMode': true,
+      },
+    );
+    return true;
+  }
+
+  // ============================================================
+  // 网络 / UI / 存储 / 播放（原逻辑）
+  // ============================================================
   Future<Map<String, dynamic>> _req(List a) async {
     final url = a.isNotEmpty ? a[0]?.toString() ?? '' : '';
     if (url.isEmpty) throw Exception('url 不能为空');
@@ -140,7 +227,6 @@ class DsHandlers {
     };
   }
 
-  // ===== UI =====
   Future<bool> _toast(List a) async {
     final msg = a.isNotEmpty ? a[0]?.toString() ?? '' : '';
     if (msg.isNotEmpty) SmartDialog.showToast(msg);
@@ -177,7 +263,6 @@ class DsHandlers {
     return true;
   }
 
-  /// 切到指定名字的 Tab
   bool _switchTabByName(String name) {
     if (!Get.isRegistered<MainController>()) return false;
     final mc = Get.find<MainController>();
@@ -187,14 +272,11 @@ class DsHandlers {
     return true;
   }
 
-  /// 打开首页
   Future<bool> _openHome() async => _switchTabByName('home');
 
-  // ===== 打开页面 =====
   Future<bool> _openLive() async => _switchTabByName('live');
 
   Future<bool> _openKeep() async {
-    // 打开历史记录
     Get.toNamed(AppPages.history);
     return true;
   }
@@ -213,13 +295,11 @@ class DsHandlers {
         : <String, dynamic>{};
     final direct = opts['direct'] == true;
 
-    // 非 direct → 跳搜索页
     if (!direct) {
       Get.toNamed(AppPages.search, arguments: {'keyword': kw});
       return true;
     }
 
-    // direct → 直接跳搜索结果
     List<String> sources = [];
     bool onlyDefault = false;
     if (Get.isRegistered<SearchFilterService>()) {
@@ -229,7 +309,6 @@ class DsHandlers {
     }
 
     if (sources.isEmpty) {
-      // 无启用源 → 退化为搜索页
       Get.toNamed(AppPages.search, arguments: {'keyword': kw});
       return true;
     }
@@ -245,7 +324,6 @@ class DsHandlers {
     return true;
   }
 
-  /// fm.vod(siteKey, vodId, name, pic) —— 按 siteKey 打开对应详情
   Future<bool> _vod(List a) async {
     final siteKey = a.isNotEmpty ? a[0]?.toString() ?? '' : '';
     final vodId = a.length > 1 ? a[1]?.toString() ?? '' : '';
@@ -281,7 +359,6 @@ class DsHandlers {
     return null;
   }
 
-  // ===== 存储 =====
   Future<Box> _boxOf(String ns) {
     final name = 'web_ds_${ns.isEmpty ? 'default' : ns}';
     return _boxCache.putIfAbsent(name, () => Hive.openBox(name));
@@ -314,9 +391,7 @@ class DsHandlers {
     return true;
   }
 
-  // ===== 播放 =====
   Future<bool> _openVod(List a) async {
-    // 无参数 / 参数非 Map → 打开首页
     if (a.isEmpty || a[0] == null || a[0] is! Map) {
       return _openHome();
     }
@@ -324,7 +399,6 @@ class DsHandlers {
 
     final playSources = <PlaySource>[];
 
-    // 1) 顶层 episodes 数组（fm-selftest 的 vodInline 用的格式）
     final topEpisodes = raw['episodes'];
     if (topEpisodes is List && topEpisodes.isNotEmpty) {
       final eps = <Episode>[];
@@ -340,7 +414,6 @@ class DsHandlers {
       }
     }
 
-    // 2) lines 数组（wbbb1.js 用的格式）
     final lines = raw['lines'];
     if (lines is List && lines.isNotEmpty) {
       for (final line in lines) {
@@ -363,7 +436,6 @@ class DsHandlers {
       }
     }
 
-    // 3) vod_play_from$$$vod_play_url（DSPlayer 原生格式）
     if (playSources.isEmpty) {
       final fromList = (raw['vod_play_from']?.toString() ?? '').split(r'$$$');
       final urlList = (raw['vod_play_url']?.toString() ?? '').split(r'$$$');
@@ -424,14 +496,6 @@ class DsHandlers {
         'videoDetail': detail,
         'sourceName': detail.typeName,
         'isDirectPushMode': true,
-        'vodPic': detail.vodPic,
-        'vodContent': detail.vodContent,
-        'vodYear': detail.vodYear,
-        'vodActor': detail.vodActor,
-        'vodDirector': detail.vodDirector,
-        'vodRemarks': detail.vodRemarks,
-        'typeName': detail.typeName,
-        'webResolver': _resolveWebUrl,
       },
     );
     return true;
@@ -462,45 +526,9 @@ class DsHandlers {
         'videoDetail': detail,
         'sourceName': 'Web 源',
         'isDirectPushMode': true,
-        'webResolver': _resolveWebUrl,
       },
     );
     return true;
-  }
-
-  Future<String?> _resolveWebUrl(String url) async {
-    if (url.isEmpty) return null;
-    final token = 'r_${DateTime.now().microsecondsSinceEpoch}';
-    final completer = Completer<String?>();
-    _resolveCompleters[token] = completer;
-
-    try {
-      await controller.evaluateJavascript(source: '''
-        (async function(){
-          try {
-            var r = null;
-            if (typeof window.__dsResolver === 'function') {
-              r = await window.__dsResolver({url: ${jsonEncode(url)}});
-            }
-            window.ds.__resolveDone(${jsonEncode(token)}, r && r.url ? r.url : null);
-          } catch (e) {
-            try { window.ds.__resolveDone(${jsonEncode(token)}, null); } catch (e2) {}
-          }
-        })();
-      ''');
-    } catch (e) {
-      debugPrint('[DsHandlers] _resolveWebUrl eval failed: $e');
-      _resolveCompleters.remove(token)?.complete(null);
-      return null;
-    }
-
-    return completer.future.timeout(
-      const Duration(seconds: 30),
-      onTimeout: () {
-        _resolveCompleters.remove(token);
-        return null;
-      },
-    );
   }
 
   // ===== 信息 =====

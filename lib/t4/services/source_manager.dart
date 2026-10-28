@@ -1391,8 +1391,15 @@ class SourceManager extends GetxController {
   void _updatePushAgentCache() {
     for (final site in this.sites) {
       final key = site['key']?.toString() ?? '';
+      final name = site['name']?.toString() ?? '';
       final type = site['type'] as int? ?? -1;
-      if (key == 'push_agent' && type == 4) {
+
+      // type=4 且（key 精确匹配 OR 名称包含 push_agent）
+      // - 远端配置：key='push_agent', type=4
+      // - 手动 T4：key='manual_t4_push_agent', name='push_agent(T4)', type=4
+      if (type == 4 &&
+          (key == 'push_agent' ||
+              name.toLowerCase().contains('push_agent'))) {
         _pushAgentSite.value = site;
         return;
       }

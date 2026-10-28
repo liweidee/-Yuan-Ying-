@@ -256,7 +256,6 @@ class _ManualSourcePageState extends State<ManualSourcePage> {
         );
       }
 
-      // 多选或筛选视图：普通 ListView（不支持拖拽）
       if (!_ctrl.canReorder) {
         return ListView.separated(
           padding: const EdgeInsets.all(Style.safeSpace),
@@ -266,7 +265,6 @@ class _ManualSourcePageState extends State<ManualSourcePage> {
         );
       }
 
-      // 全部视图：ReorderableListView
       return ReorderableListView.builder(
         padding: const EdgeInsets.all(Style.safeSpace),
         buildDefaultDragHandles: false,
@@ -394,7 +392,9 @@ class _ManualSourcePageState extends State<ManualSourcePage> {
                       if (v == 'delete') _confirmDelete(item);
                     },
                     itemBuilder: (ctx) => [
-                      const PopupMenuItem(value: 'edit', child: Text('编辑')),
+                      if (item.type != ManualSourceType.html)
+                        const PopupMenuItem(
+                            value: 'edit', child: Text('编辑')),
                       PopupMenuItem(
                         value: 'toggle',
                         child: Text(item.disabled ? '启用' : '禁用'),
@@ -420,11 +420,9 @@ class _ManualSourcePageState extends State<ManualSourcePage> {
       case ManualSourceType.dr2:
       case ManualSourceType.dr3: return Icons.javascript;
       case ManualSourceType.js: return Icons.extension;
-      case ManualSourceType.html: return Icons.web;
-      case ManualSourceType.xbpq:
-        return Icons.code;
-      case ManualSourceType.xyq:
-        return Icons.code;
+      case ManualSourceType.html: return Icons.language;
+      case ManualSourceType.xbpq: return Icons.code;
+      case ManualSourceType.xyq: return Icons.code;
       case ManualSourceType.t4: return Icons.cloud;
     }
   }
@@ -472,11 +470,12 @@ class _ManualSourcePageState extends State<ManualSourcePage> {
     );
   }
 
-  // ===== 业务 =====
+  // ===== 添加（统一走 edit dialog）=====
   Future<void> _onAdd() async {
     final r = await showManualSourceEditDialog(context);
     if (r == null) return;
 
+    // T4
     if (r.type == ManualSourceType.t4) {
       await _ctrl.addT4Source(
         name: r.name,
@@ -489,25 +488,55 @@ class _ManualSourcePageState extends State<ManualSourcePage> {
       return;
     }
 
-    // 文件类型：先上传文件，再写 meta
-    final localPath = r.localFilePath;
-    if (localPath == null || localPath.isEmpty) {
+    // 文件类型
+    final paths = r.localFilePaths;
+    if (paths == null || paths.isEmpty) {
       SmartDialog.showToast('未选择文件');
       return;
     }
 
     try {
-      // 1. 上传文件到对应目录
-      final savedPath = await ManualSourceScanner.saveBytes(
-        r.type,
-        File(localPath).uri.pathSegments.last,
-        await File(localPath).readAsBytes(),
-      );
+      // 1. 保存所有文件
+      final savedFiles = <String>[];
+      for (final path in paths) {
+        final saved = await ManualSourceScanner.saveBytes(
+          r.type,
+          File(path).uri.pathSegments.last,
+          await File(path).readAsBytes(),
+        );
+        savedFiles.add(saved);
+      }
 
-      // 2. 写 meta
-      final fileName = File(savedPath).uri.pathSegments.last;
-      final nameWithoutExt = fileName.replaceAll('.${r.type.ext}', '');
-      final newId = 'manual_${r.type.name}_$nameWithoutExt';
+      // 2. 确定主文件名（用于 id）
+      String? mainPath;
+      if (r.type == ManualSourceType.html) {
+        // 优先 .web.json，其次 .html
+        for (final f in savedFiles) {
+          if (f.toLowerCase().endsWith('.web.json')) {
+            mainPath = f;
+            break;
+          }
+        }
+        mainPath ??= savedFiles.firstWhere(
+          (f) => f.toLowerCase().endsWith('.html'),
+          orElse: () => savedFiles.first,
+        );
+      } else {
+        mainPath = savedFiles.first;
+      }
+
+      // 3. 计算 id
+      final mainName = File(mainPath).uri.pathSegments.last;
+      String baseName;
+      if (mainName.toLowerCase().endsWith('.web.json')) {
+        baseName =
+            mainName.substring(0, mainName.length - '.web.json'.length);
+      } else {
+        final dot = mainName.lastIndexOf('.');
+        baseName = dot > 0 ? mainName.substring(0, dot) : mainName;
+      }
+
+      final newId = 'manual_${r.type.name}_$baseName';
       await _ctrl.updateSourceById(
         newId,
         ManualSourceMeta(
@@ -550,9 +579,11 @@ class _ManualSourcePageState extends State<ManualSourcePage> {
         shape: RoundedRectangleBorder(borderRadius: Style.mdRadius),
         backgroundColor: colorScheme.surface,
         title: const Text('删除源'),
-        content: Text(item.type.isFileBased
-            ? '确定删除 ${item.name}.${item.type.ext} 吗？'
-            : '确定删除 ${item.name} 吗？'),
+        content: Text(item.type == ManualSourceType.html
+            ? '确定删除 ${item.name}（含 .web.json / .html 与配套 .js）吗？'
+            : item.type.isFileBased
+                ? '确定删除 ${item.name}.${item.type.ext} 吗？'
+                : '确定删除 ${item.name} 吗？'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),

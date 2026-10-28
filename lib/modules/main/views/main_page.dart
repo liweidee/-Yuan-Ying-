@@ -50,6 +50,9 @@ class _MainPageState extends State<MainPage> {
       case NavigationBarStyle.floating:
         baseHeight = 56.0;
         break;
+      case NavigationBarStyle.minimal:
+        baseHeight = 48.0;
+        break;
     }
     final bottomPadding = MediaQuery.viewPaddingOf(context).bottom;
     return baseHeight + bottomPadding;
@@ -278,6 +281,44 @@ class _MainPageState extends State<MainPage> {
     );
 
     // ============================================================
+    // 2.5 极简 NavigationBar（仅图标，隐藏文字）
+    // ============================================================
+    final minimalNavigationBar = NavigationBar(
+      // 与 _getBottomBarHeight 中 minimal 分支保持一致
+      height: 48,
+      elevation: 0,
+      selectedIndex: selectedIndex,
+      onDestinationSelected: _controller.switchPage,
+      // 选中态用轻底色；想更"裸"可改为 Colors.transparent
+      indicatorColor: colorScheme.primaryContainer.withValues(alpha: 0.5),
+      // 核心：始终隐藏文字标签
+      labelBehavior: NavigationDestinationLabelBehavior.alwaysHide,
+      overlayColor: WidgetStateProperty.resolveWith((states) {
+        if (states.any((state) =>
+            state == WidgetState.pressed ||
+            state == WidgetState.hovered ||
+            state == WidgetState.focused)) {
+          return Colors.transparent;
+        }
+        return null;
+      }),
+      destinations: navigationBars.map((item) {
+        return NavigationDestination(
+          // 极简模式下文字不可见，tooltip 是唯一的"文字出口"
+          tooltip: item.label,
+          icon: Icon(item.icon.icon, size: 24, color: colorScheme.outline),
+          selectedIcon: Icon(
+            item.selectIcon.icon,
+            size: 24,
+            color: colorScheme.primary,
+          ),
+          // label 仍然要传：Semantics 用它读屏，只是不渲染
+          label: item.label,
+        );
+      }).toList(),
+    );
+
+    // ============================================================
     // 3. 根据样式选择
     // ============================================================
     Widget bottomBar;
@@ -308,6 +349,10 @@ class _MainPageState extends State<MainPage> {
 
       case NavigationBarStyle.capsule:
         bottomBar = capsuleNavigationBar;
+        break;
+
+      case NavigationBarStyle.minimal:
+        bottomBar = minimalNavigationBar;
         break;
     }
 

@@ -5,6 +5,7 @@ import 'package:yuanying/models/common/enum_with_label.dart';
 import 'package:yuanying/modules/main/controllers/main_controller.dart';
 import 'package:yuanying/modules/setting/models/setting_pref.dart';
 import 'package:yuanying/utils/storage_manager.dart';
+import 'package:yuanying/core/constants/storage_keys.dart';
 
 class BarSetPage extends StatefulWidget {
   const BarSetPage({super.key});
@@ -17,6 +18,7 @@ class _BarSetPageState extends State<BarSetPage> {
   late final String key;
   late final String title;
   late final List<({EnumWithLabel item, bool enabled})> list;
+  late final List defaultBars; // 编辑页打开时的全部枚举快照
 
   @override
   void initState() {
@@ -25,7 +27,7 @@ class _BarSetPageState extends State<BarSetPage> {
     key = args['key'];
     title = args['title'];
     final List? cache = StorageManager.getSetting<List>(key);
-    final defaultBars = args['defaultBars'] as List;
+    defaultBars = args['defaultBars'] as List;
     list = defaultBars
         .map((e) => (
               item: e as EnumWithLabel,
@@ -48,9 +50,18 @@ class _BarSetPageState extends State<BarSetPage> {
         .map((e) => (e.item as Enum).index)
         .toList();
     StorageManager.setSetting(key, sorted);
-    // ===== 通知 MainController 刷新导航栏 =====
+
+    // 编辑导航栏时，记录"本次保存时全部可见枚举值"快照
+    if (key == SettingBoxKey.navBarSort) {
+      final List<int> seen = defaultBars.map((e) => (e as Enum).index).toList();
+      StorageManager.setSetting(SettingBoxKey.navBarSeenValues, seen);
+    }
+
+    // 通知 MainController 刷新导航栏
     if (Get.isRegistered<MainController>()) {
-      Get.find<MainController>().setNavBarConfig();
+      final c = Get.find<MainController>();
+      c.setNavBarConfig();
+      c.navStyleVersion.value++;   // 强制 UI 重绘
     }
     SmartDialog.showToast('保存成功');
   }
@@ -58,9 +69,15 @@ class _BarSetPageState extends State<BarSetPage> {
   void onReset() {
     Get.back();
     StorageManager.deleteSetting(key);
-    // ===== 通知 MainController 刷新导航栏 =====
+    // 重置导航栏时同步清空快照
+    if (key == SettingBoxKey.navBarSort) {
+      StorageManager.deleteSetting(SettingBoxKey.navBarSeenValues);
+    }
+    // 通知 MainController 刷新导航栏
     if (Get.isRegistered<MainController>()) {
-      Get.find<MainController>().setNavBarConfig();
+      final c = Get.find<MainController>();
+      c.setNavBarConfig();
+      c.navStyleVersion.value++;   // 强制 UI 重绘
     }
     SmartDialog.showToast('重置成功');
   }

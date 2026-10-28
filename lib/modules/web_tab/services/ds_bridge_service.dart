@@ -9,7 +9,9 @@ class DsBridgeService {
   static const String handlerName = 'ds';
 
   static String buildSkeleton(DsEnv env) {
-    return _template.replaceFirst('__ENV_PLACEHOLDER__', env.toJsonString());
+    final bridge =
+        _template.replaceFirst('__ENV_PLACEHOLDER__', env.toJsonString());
+    return '$bridge\n$_sniffHook';
   }
 
   static Future<void> emit(
@@ -25,6 +27,9 @@ class DsBridgeService {
     } catch (_) {}
   }
 
+  // ============================================================
+  // 桥接骨架（保持不变）
+  // ============================================================
   static const String _template = r'''
 (function() {
   if (window.__dsBridgeReady) return;
@@ -41,7 +46,6 @@ class DsBridgeService {
       });
   }
 
-  // ===== 事件系统 =====
   var listeners = {};
   function dispatch(name, data) {
     var arr = listeners[name] || [];
@@ -50,7 +54,6 @@ class DsBridgeService {
     }
   }
 
-  // ===== CSS 变量 =====
   function applyCssVars(vars) {
     try {
       var s = document.documentElement.style;
@@ -102,12 +105,10 @@ class DsBridgeService {
     dispatch(name, data);
   };
 
-  // ===== ds 本体（全部顶层方法都内联在这） =====
   window.ds = {
     ready: false,
     env: ENV,
 
-    // —— 网络 ——
     req: function(url, opts) { return call('req', [url, opts]); },
     res: function(url, opts) {
       if (!url) return '';
@@ -120,7 +121,6 @@ class DsBridgeService {
       return s;
     },
 
-    // —— UI ——
     toast: function(msg) { return call('toast', [msg]); },
     fullscreen: function(b) { return call('fullscreen', [b]); },
     tab: function(name) { return call('tab', [name]); },
@@ -128,7 +128,6 @@ class DsBridgeService {
     reload: function() { return call('reload', []); },
     replay: function() { return call('replay', []); },
 
-    // —— 打开页面 ——
     openVod: function(vod) { return call('openVod', [vod]); },
     openLive: function() { return call('openLive', []); },
     openKeep: function() { return call('openKeep', []); },
@@ -138,11 +137,9 @@ class DsBridgeService {
       return call('vod', [siteKey, id, name, pic]);
     },
 
-    // —— 播放 ——
     play: function(url, t) { return call('play', [url, t]); },
     vodInline: function(vod) { return call('openVod', [vod]); },
 
-    // —— 事件 ——
     on: function(name, cb) {
       (listeners[name] = listeners[name] || []).push(cb);
       return function() {
@@ -152,21 +149,18 @@ class DsBridgeService {
       };
     },
 
-    // —— 存储 ——
     store: {
       get: function(k, ns) { return call('store.get', [k, ns]); },
       set: function(k, v, ns) { return call('store.set', [k, v, ns]); },
       del: function(k, ns) { return call('store.del', [k, ns]); }
     },
 
-    // —— 信息 ——
     device: function() { return call('device', []); },
     site: function() { return call('site', []); },
     config: function() { return call('config', []); },
     history: function() { return call('history', []); },
     viewport: function() { return call('viewport', []); },
 
-    // —— 播放器状态（stub） ——
     stat: function() {
       return Promise.resolve({
         state: 'idle', speed: 0, duration: 0, position: 0,
@@ -180,21 +174,17 @@ class DsBridgeService {
       return Promise.resolve(true);
     },
 
-    // —— 内部回调 ——
     __resolveDone: function(token, url) {
       return call('__resolveDone', [token, url]);
     }
   };
 
-  // cache 与 store 相同
   window.ds.cache = window.ds.store;
 
-  // ===== fm 别名 =====
   window.fm = window.ds;
   window.fongmiBridge = window.ds;
   window.fongmiClient = { mode: 'mobile', isLeanback: false };
 
-  // ===== pan 网盘降级 =====
   window.ds.pan = {
     check: function(items) {
       return Promise.resolve((items || []).map(function(it) {
@@ -206,20 +196,18 @@ class DsBridgeService {
       }));
     },
     play: function(o) {
-      if (o && o.type === 'http') return call('play', [o.url, o.title || '']);
-      return Promise.resolve({ ok: false, error: 'unsupported' });
+      if (!o || !o.url) return Promise.resolve({ ok: false, error: 'invalid' });
+      return call('pan.play', [o]);
     }
   };
   window.ds.check = window.ds.pan.play;
 
-  // ===== ui 分组 =====
   window.ds.ui = {
     getViewport: function() { return call('viewport', []); },
     restoreChrome: function() { return Promise.resolve(true); },
     setToolbar: function(b) { return Promise.resolve(true); }
   };
 
-  // ===== ext 分组 =====
   window.ds.ext = {
     info: function() { return call('extInfo', []); },
     log: function(msg, data) {
@@ -229,7 +217,6 @@ class DsBridgeService {
     toast: function(msg) { return call('toast', [msg]); }
   };
 
-  // ===== history 事件 =====
   try {
     var _ps = history.pushState;
     history.pushState = function() {
@@ -238,7 +225,6 @@ class DsBridgeService {
     };
   } catch (e) {}
 
-  // ===== CSS 变量初始化 + ready =====
   function markReady() {
     if (!document.documentElement) {
       setTimeout(markReady, 10);
@@ -271,6 +257,259 @@ class DsBridgeService {
     }, 0);
   }
   markReady();
+})();
+''';
+
+  // ============================================================
+  // 嗅探 Hook：5 路并行 + PerformanceObserver
+  // ============================================================
+  static const String _sniffHook = r'''
+(function() {
+  if (window.__dsSniffHookInstalled) return;
+  window.__dsSniffHookInstalled = true;
+
+  var reported = {};
+
+  function isMedia(u) {
+    if (!u || typeof u !== 'string') return false;
+    if (u.indexOf('blob:') === 0 || u.indexOf('data:') === 0) return false;
+    if (/\.(js|css|png|jpg|jpeg|gif|webp|svg|woff|ttf)(\?|#|$)/i.test(u)) return false;
+    return /\.(m3u8|mp4|flv|mpd|mkv|mov|m4v|ts|webm)(\?|#|$)/i.test(u)
+      || /videoplayback|\/video\/|\/stream\//i.test(u);
+  }
+
+  function reportMedia(url, title) {
+    if (!isMedia(url)) return;
+    if (reported[url]) return;
+    reported[url] = true;
+    try {
+      window.flutter_inappwebview.callHandler('ds', {
+        method: 'sniffedVideo',
+        args: [{ url: url, title: title || document.title || '' }]
+      });
+      try { console.log('[sniff] report:', url); } catch (e) {}
+    } catch (e) {}
+  }
+
+  // ============ 路径 1：PerformanceObserver（buffered:true 捕获历史资源） ============
+  try {
+    var po = new PerformanceObserver(function(list) {
+      var entries = list.getEntries();
+      for (var i = 0; i < entries.length; i++) {
+        var entry = entries[i];
+        var name = entry.name;
+        if (!name) continue;
+        var type = entry.initiatorType || '';
+        // 不过滤类型，全都试一遍（避免漏掉）
+        reportMedia(name, '');
+      }
+    });
+    po.observe({ entryTypes: ['resource'] });
+  } catch (e) { try { console.log('[sniff] PerformanceObserver failed:', e); } catch (_) {} }
+
+  // ============ 路径 2：定时扫 Performance API（兜底，防止 buffered 丢历史） ============
+  function scanPerformance() {
+    try {
+      var entries = performance.getEntriesByType('resource');
+      for (var i = 0; i < entries.length; i++) {
+        if (entries[i].name) reportMedia(entries[i].name, '');
+      }
+    } catch (e) {}
+  }
+
+  // ============ 路径 3：扫 video/source/link ============
+  function scanDOM() {
+    try {
+      document.querySelectorAll('video, source').forEach(function(el) {
+        if (el.src) reportMedia(el.src, el.title || '');
+        if (el.currentSrc) reportMedia(el.currentSrc, el.title || '');
+      });
+    } catch (e) {}
+    try {
+      document.querySelectorAll('link[rel="preload"], link[rel="prefetch"]').forEach(function(l) {
+        if (l.href) reportMedia(l.href, '');
+      });
+    } catch (e) {}
+  }
+
+  // ============ 路径 4：Hook play/load/src setter ============
+  try {
+    var origPlay = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = function() {
+      try {
+        if (this.src) reportMedia(this.src, this.title || '');
+        if (this.currentSrc) reportMedia(this.currentSrc, this.title || '');
+      } catch (e) {}
+      return origPlay.apply(this, arguments);
+    };
+  } catch (e) {}
+
+  try {
+    var origLoad = HTMLMediaElement.prototype.load;
+    HTMLMediaElement.prototype.load = function() {
+      try {
+        if (this.src) reportMedia(this.src, this.title || '');
+      } catch (e) {}
+      return origLoad.apply(this, arguments);
+    };
+  } catch (e) {}
+
+  try {
+    var desc = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'src');
+    if (desc && desc.set) {
+      var origSet = desc.set;
+      Object.defineProperty(HTMLMediaElement.prototype, 'src', {
+        configurable: true,
+        enumerable: desc.enumerable,
+        get: desc.get,
+        set: function(v) {
+          try { reportMedia(v, this.title || ''); } catch (e) {}
+          return origSet.call(this, v);
+        }
+      });
+    }
+  } catch (e) {}
+
+  // ============ 路径 5：Hook fetch / XHR ============
+  try {
+    var origFetch = window.fetch;
+    if (origFetch) {
+      window.fetch = function(input) {
+        try {
+          var url = typeof input === 'string' ? input : (input && input.url);
+          if (url) reportMedia(url);
+        } catch (e) {}
+        return origFetch.apply(this, arguments);
+      };
+    }
+  } catch (e) {}
+
+  try {
+    var origOpen = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function(method, url) {
+      try {
+        if (url) {
+          var absUrl = url;
+          if (url.indexOf('http') !== 0 && url.indexOf('blob:') !== 0) {
+            try { absUrl = new URL(url, location.href).href; } catch (e) {}
+          }
+          reportMedia(absUrl);
+        }
+      } catch (e) {}
+      return origOpen.apply(this, arguments);
+    };
+  } catch (e) {}
+
+  // ============ 路径 6：MutationObserver 实时监听 DOM ============
+  try {
+    var mo = new MutationObserver(function(mutations) {
+      for (var i = 0; i < mutations.length; i++) {
+        var m = mutations[i];
+        if (m.type === 'childList') {
+          for (var j = 0; j < m.addedNodes.length; j++) {
+            var node = m.addedNodes[j];
+            if (!node || node.nodeType !== 1) continue;
+            if (node.tagName === 'VIDEO' || node.tagName === 'SOURCE') {
+              if (node.src) reportMedia(node.src, node.title || '');
+              if (node.currentSrc) reportMedia(node.currentSrc, node.title || '');
+            }
+            if (node.querySelectorAll) {
+              node.querySelectorAll('video, source').forEach(function(el) {
+                if (el.src) reportMedia(el.src, el.title || '');
+              });
+            }
+          }
+        } else if (m.type === 'attributes' && m.target) {
+          var t = m.target;
+          if (t.tagName === 'VIDEO' || t.tagName === 'SOURCE') {
+            if (t.src) reportMedia(t.src, t.title || '');
+          }
+        }
+      }
+    });
+    var root = document.documentElement || document.body;
+    if (root) {
+      mo.observe(root, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['src']
+      });
+    }
+  } catch (e) {}
+
+  // ============ 定时兜底 ============
+  setInterval(function() {
+    scanPerformance();
+    scanDOM();
+  }, 2000);
+
+  setTimeout(function() {
+    scanPerformance();
+    scanDOM();
+  }, 500);
+
+  setTimeout(scanPerformance, 3000);
+
+  // ============ 网盘链接检测（保持不变） ============
+  var CLOUD_REGEX = /(pan\.quark\.cn|pan\.baidu\.com|pan\.xunlei\.com|aliyundrive\.com|alipan\.com|115\.com|123pan\.com|cloud\.189\.cn|drive\.uc\.cn)/i;
+  var CODE_REGEX = /(?:提取码|密码|pwd)[\s:：=]*([a-zA-Z0-9]{4})/i;
+
+  function extractCloudLinks() {
+    var links = [];
+    var seen = {};
+    function add(url, label) {
+      if (!url || seen[url]) return;
+      if (!CLOUD_REGEX.test(url)) return;
+      seen[url] = true;
+      var code = '';
+      try {
+        var m = (label || '').match(CODE_REGEX);
+        if (m) code = m[1];
+      } catch (e) {}
+      links.push({ url: url, label: label || '', extractCode: code });
+    }
+    try {
+      document.querySelectorAll('a[href]').forEach(function(a) {
+        add(a.href || '', (a.textContent || '').trim().slice(0, 100));
+      });
+    } catch (e) {}
+    try {
+      var body = document.body ? (document.body.innerText || '') : '';
+      var urlRegex = /(https?:\/\/(?:pan\.quark\.cn|pan\.baidu\.com|pan\.xunlei\.com|aliyundrive\.com|alipan\.com|115\.com|123pan\.com|cloud\.189\.cn|drive\.uc\.cn)[^\s"'<>]+)/gi;
+      var matches = body.match(urlRegex) || [];
+      matches.forEach(function(u) { add(u, ''); });
+    } catch (e) {}
+    try {
+      var walker = document.createTreeWalker(
+        document.body || document.documentElement,
+        NodeFilter.SHOW_TEXT, null, false
+      );
+      var node;
+      while ((node = walker.nextNode())) {
+        var t = (node.nodeValue || '').trim();
+        if (t && CLOUD_REGEX.test(t)) {
+          var m2 = t.match(/(https?:\/\/[^\s"'<>]+)/i);
+          if (m2) add(m2[1], t.slice(0, 100));
+        }
+      }
+    } catch (e) {}
+    return links;
+  }
+
+  function reportCloudLinks() {
+    var links = extractCloudLinks();
+    if (!links.length) return;
+    try {
+      window.flutter_inappwebview.callHandler('ds', {
+        method: 'reportCloudLinks',
+        args: [links]
+      });
+    } catch (e) {}
+  }
+
+  setInterval(reportCloudLinks, 3000);
+  setTimeout(reportCloudLinks, 1500);
 })();
 ''';
 }

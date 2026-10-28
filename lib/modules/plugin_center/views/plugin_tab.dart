@@ -787,7 +787,6 @@ class _InstalledPluginCard extends StatelessWidget {
           label: 'py 源管理',
           onTap: () => Get.toNamed(AppPages.pySource),
         ));
-        break;
         // 保活开关：从 extras['pyKeepAlive'] 读状态，label 上带状态标识
         actions.add(_ActionBtn(
           icon: plugin.extras['pyKeepAlive'] == true

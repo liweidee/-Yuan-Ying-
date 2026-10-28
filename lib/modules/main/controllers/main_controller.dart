@@ -5,6 +5,8 @@ import 'package:yuanying/models/common/bar_hide_type.dart';
 import 'package:yuanying/models/common/nav_bar_config.dart';
 import 'package:yuanying/modules/setting/models/setting_pref.dart';
 import 'package:yuanying/modules/live/controllers/live_controller.dart';
+import 'package:yuanying/core/constants/storage_keys.dart';
+import 'package:yuanying/utils/storage_manager.dart';
 
 class MainController extends GetxController {
   // ===== 导航配置 =====
@@ -80,17 +82,28 @@ class MainController extends GetxController {
     if (savedSort == null || savedSort.isEmpty) {
       navigationBars = allValues;
     } else {
+      // 1) 按保存顺序重建，过滤越界索引（兜底脏数据）
       navigationBars = savedSort
-          .map((i) => NavigationBarType.values[i])
-          .whereType<NavigationBarType>()
+          .where((i) => i >= 0 && i < allValues.length)
+          .map((i) => allValues[i])
           .toList();
 
+      // 2) 读取"上次保存时已存在的全部枚举值"快照
+      //    老用户没有此快照 → fallback 为当前全部枚举（视为全部已存在）
+      final List? rawSeen =
+          StorageManager.getSetting<List>(SettingBoxKey.navBarSeenValues);
+      final Set<int> seenSet = rawSeen != null
+          ? rawSeen.map((e) => e as int).toSet()
+          : allValues.map((e) => e.index).toSet();
+
+      // 3) 仅补全"不在快照中"的索引（= 新版本新增枚举）
       final Set<int> savedIndices = savedSort.toSet();
       bool hasMissing = false;
-      for (int i = 0; i < allValues.length; i++) {
-        if (!savedIndices.contains(i)) {
-          navigationBars.add(allValues[i]);
-          savedSort.add(i);
+      for (final NavigationBarType value in allValues) {
+        final int idx = value.index;
+        if (!savedIndices.contains(idx) && !seenSet.contains(idx)) {
+          navigationBars.add(value);
+          savedSort.add(idx);
           hasMissing = true;
         }
       }
@@ -101,6 +114,11 @@ class MainController extends GetxController {
 
       if (hasMissing) {
         SettingPref.navBarSort = savedSort;
+        // 同步快照为"当前全部枚举"，避免下次重复判定
+        StorageManager.setSetting(
+          SettingBoxKey.navBarSeenValues,
+          allValues.map((e) => e.index).toList(),
+        );
       }
     }
 
