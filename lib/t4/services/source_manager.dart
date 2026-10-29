@@ -460,7 +460,24 @@ class SourceManager extends GetxController {
     if (savedKey != null && savedKey.toString().isNotEmpty) {
       selectedConfig = customConfigs.firstWhereOrNull((c) => c['key'] == savedKey);
     }
-    selectedConfig ??= customConfigs.isNotEmpty ? customConfigs.first : null;
+
+    // 兜底：仅当 savedKey 不存在时，才从 customConfigs 里挑第一条。
+    // 但如果第一条是 manual_source（_source == 'manual'），不能拿它当
+    // "远端配置"去 fetch，需要把 configSource 同步切到 'manual'，
+    // 否则会走 _loadRemoteConfig → fetchConfig(api='manual') 必失败，
+    // 用户看到误导性的"请检查网络连接"。
+    if (selectedConfig == null && customConfigs.isNotEmpty) {
+      selectedConfig = customConfigs.first;
+      final selSource = selectedConfig['_source']?.toString() ?? '';
+      if (selSource == 'manual') {
+        // 唯一（或首条）配置是手动源 → configSource 切到 manual
+        if (configSource.value != 'manual') {
+          configSource.value = 'manual';
+          GStorage.setSetting('config_source', 'manual');
+        }
+      }
+    }
+
     currentConfigType.value = selectedConfig?['configType']?.toString() ?? 'tvbox';
     currentConfigKey.value = selectedConfig?['key']?.toString() ?? '';
     NodeJSService.instance.updateConfigType(currentConfigType.value);
@@ -562,7 +579,14 @@ class SourceManager extends GetxController {
   }
 
   Future<void> _loadRemoteConfig({int? loadId}) async {
-    final customConfigs = GStorage.getCustomSites();
+    // 过滤掉手动源配置：manual_source 的 api 是 'manual'（不是 URL），
+    // 不能当远端配置去 fetchConfig。手动源由 configSource == 'manual'
+    // 分支处理（走 _refreshManualSites）。
+    final allConfigs = GStorage.getCustomSites();
+    final customConfigs = allConfigs
+        .where((c) => c['_source']?.toString() != 'manual')
+        .toList();
+
     if (customConfigs.isEmpty) {
       remoteSites.clear();
       remoteParses.clear();

@@ -24,6 +24,11 @@
         <package android:name="com.dsplayer.plugin.python" />
         <package android:name="com.dsplayer.plugin.qjs" />
         <package android:name="com.dsplayer.plugin.agent" />
+        <package android:name="idm.internet.download.manager.plus" />
+        <package android:name="bin.mt.plus.canary" />
+        <package android:name="dev.aigw.app" />
+        <package android:name="dev.raccoon2api" />
+        <package android:name="dev.agentmore2api" />
     </queries>
 
     <queries>
