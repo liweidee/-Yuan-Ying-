@@ -345,6 +345,20 @@ class SourceManager extends GetxController {
   void onInit() {
     super.onInit();
     _logService = Get.find<CatVodLogService>();
+
+    // ===== 预创建手动源配置记录 =====
+    //
+    // 背景：`manual_source` 原本只在 SiteConfigPage 打开时由
+    // SiteConfigController 懒创建，导致首次启动时：
+    //   - 首页左上角"切换接口"弹窗读 getCustomSites() 为空 → 弹窗空白
+    //   - 用户必须先进一次设置页，记录才会出现
+    //
+    // 在 SourceManager 初始化时预创建，保证所有下游读取点（首页弹窗、
+    // SiteConfigPage 列表、弹窗里的手动源跳转）第一次访问就能看到记录。
+    // SiteConfigController._ensureManualConfigExists 保留幂等兜底，
+    // 处理极端场景（如用户手动清空了 Hive）。
+    _ensureManualConfigExists();
+
     configSource.value = GStorage.getSetting<String>('config_source') ?? 'remote';
     WidgetsBinding.instance.addPostFrameCallback((_) {
       loadConfig();
@@ -354,6 +368,44 @@ class SourceManager extends GetxController {
         _saveCurrentSiteKey();
       }
     });
+  }
+
+  /// 确保手动源配置记录存在（幂等）
+  ///
+  /// 与 SiteConfigController._ensureManualConfigExists 逻辑一致，
+  /// 但调用时机更早（App 启动时），覆盖首页弹窗等早期入口。
+  ///
+  /// 记录结构（与 SiteConfigController 里创建的一致）：
+  ///   key        = SettingBoxKey.manualConfigKey ('manual_source')
+  ///   name       = '手动源'
+  ///   api        = 'manual'
+  ///   _source    = 'manual'
+  ///   configType = 'tvbox'
+  void _ensureManualConfigExists() {
+    try {
+      final list = GStorage.getCustomSites();
+      final has = list.any(
+        (s) => s['key']?.toString() == SettingBoxKey.manualConfigKey,
+      );
+      if (has) return;
+
+      GStorage.addCustomSite({
+        'key': SettingBoxKey.manualConfigKey,
+        'name': '手动源',
+        'api': 'manual',
+        'searchable': 0,
+        'filterable': 0,
+        'quickSearch': 0,
+        'lang': 'manual',
+        'type': '3',
+        '_source': 'manual',
+        'configType': 'tvbox',
+      });
+      _log('[SourceManager] 已预创建手动源配置记录');
+    } catch (e) {
+      // 失败不阻断启动（极端情况下 GStorage 未就绪）
+      debugPrint('[SourceManager] _ensureManualConfigExists failed: $e');
+    }
   }
 
   Future<void> _selectDefaultSite() async {
