@@ -35,15 +35,13 @@ class _AgentUiPageState extends State<AgentUiPage> {
   }
 
   Future<void> _init() async {
-    // 0. 确保 AiConfigController 已注册。
-    // 原实现依赖用户先访问设置页（AiConfigPage.initState 里 Get.put），
-    // 冷启动直接进 AI 页时 Controller 未注册，_readConfig 返回空 AiConfig，
-    // 导致 isConfigured=false → 跳过注入 → NextChat 显示未配置界面。
+    // AiConfigController.onInit 是同步 _load()，
+    // Get.put 返回后 config.value 已是最新值。
     if (!Get.isRegistered<AiConfigController>()) {
       Get.put(AiConfigController());
     }
 
-    // 1. 先起本地 LLM 网关（和 DsPlayer 一致：先起网关再开页面）
+    // 1. 先起本地 LLM 网关
     await AgentLlmServer.instance.ensureStarted();
 
     // 2. 再起静态资源服务
@@ -58,7 +56,6 @@ class _AgentUiPageState extends State<AgentUiPage> {
     setState(() => _url = url);
   }
 
-  /// 从 Hive 读取配置
   AiConfig _readConfig() {
     if (Get.isRegistered<AiConfigController>()) {
       return Get.find<AiConfigController>().config.value;
@@ -66,46 +63,172 @@ class _AgentUiPageState extends State<AgentUiPage> {
     return const AiConfig();
   }
 
-  /// 生成注入脚本：把配置写进 NextChat 的 localStorage('app-config')
+  /// 生成注入脚本：把配置写进 NextChat 的正确存储位置。
+  ///
+  /// 【NextChat 存储结构（从 page-8904b7358f096194.js 反推）】
+  ///
+  ///   access-control       ← o._X，存 openaiUrl / openaiApiKey / useCustomConfig
+  ///                          ★ 接口配置在这里！不在 app-config 里
+  ///   app-config           ← o.MG，存 modelConfig（model / temperature / ...）
+  ///   chat-next-web-store  ← o.aK，存 sessions[]（含 sessions[].mask.modelConfig）
+  ///   mask-store           ← o.Zy，存自定义 mask
+  ///
+  /// 【请求实际的 model 来源（优先级从高到低）】
+  ///   sessions[current].mask.modelConfig.model    （会话 mask，会话创建时固化）
+  /// > app-config.modelConfig.model                 （全局默认，新会话复制源）
+  ///
+  /// 【IndexedDB 优先级高于 localStorage】
+  ///   NextChat 的 storage.getItem 是「先 IndexedDB 再 localStorage」，
+  ///   所以必须同时清掉 IndexedDB 里的 access-control / app-config，
+  ///   否则 localStorage 里的新值会被 IndexedDB 里的旧值覆盖。
   String _buildInjectScript(AiConfig cfg) {
-    // NextChat 的 Zustand persist key 是 'app-config'
-    // 结构：{ state: {...}, version: 4 }
-    // 关键字段：openaiUrl / openaiApiKey / useCustomConfig / modelConfig.model
     final llmBase = AgentLlmServer.instance.baseUrl;
     final llmToken = AgentLlmServer.instance.token;
     final useLocalGateway = llmBase != null && llmToken.isNotEmpty;
 
-    final statePatch = <String, dynamic>{
-      'openaiUrl': useLocalGateway ? llmBase : cfg.apiBaseUrl,
-      'openaiApiKey': useLocalGateway ? llmToken : cfg.apiKey,
-      'useCustomConfig': true,
-      'modelConfig': <String, dynamic>{
-        'model': cfg.model,
-        'providerName': 'OpenAI',
-      },
-    };
+    // AiConfig.isConfigured 没 trim，这里都 trim 一遍防止空白字符
+    final url = useLocalGateway ? llmBase : cfg.apiBaseUrl.trim();
+    final key = useLocalGateway ? llmToken : cfg.apiKey.trim();
+    final model = cfg.model.trim().isEmpty ? 'gpt-4o-mini' : cfg.model.trim();
 
-    final patchJson = jsonEncode(statePatch);
+    final urlJson = jsonEncode(url);
+    final keyJson = jsonEncode(key);
+    final modelJson = jsonEncode(model);
 
     return '''
 (function(){
   try {
-    var KEY = 'app-config';
-    var raw = localStorage.getItem(KEY);
-    var store = raw ? JSON.parse(raw) : { state: {}, version: 4 };
-    store.state = store.state || {};
-    var patch = $patchJson;
-    for (var k in patch) {
-      if (k === 'modelConfig') {
-        store.state.modelConfig = store.state.modelConfig || {};
-        for (var mk in patch.modelConfig) {
-          store.state.modelConfig[mk] = patch.modelConfig[mk];
-        }
-      } else {
-        store.state[k] = patch[k];
-      }
+    var URL = $urlJson;
+    var KEY = $keyJson;
+    var MODEL = $modelJson;
+
+    // ============================================================
+    // patch 1: access-control（接口配置，核心！）
+    //
+    // 这是 o._X store，class p.path() 读 t.openaiUrl、
+    // class R() 读 t.openaiApiKey，都是从这里读。
+    // 之前 patch app-config 无效就是这个原因。
+    // ============================================================
+    var AKEY = 'access-control';
+    var araw = localStorage.getItem(AKEY);
+    var astore = araw ? JSON.parse(araw) : { state: {}, version: 2 };
+    astore.state = astore.state || {};
+    astore.state.useCustomConfig = true;
+    astore.state.provider = 'OpenAI';
+    astore.state.openaiUrl = URL;
+    astore.state.openaiApiKey = KEY;
+    astore.state.needCode = false;   // 避免被 auth 页拦截
+    localStorage.setItem(AKEY, JSON.stringify(astore));
+
+    // ============================================================
+    // patch 2: app-config（全局 modelConfig）
+    // ============================================================
+    var CKEY = 'app-config';
+    var craw = localStorage.getItem(CKEY);
+    var cstore = craw ? JSON.parse(craw) : { state: {}, version: 4 };
+    cstore.state = cstore.state || {};
+    cstore.state.modelConfig = cstore.state.modelConfig || {};
+    cstore.state.modelConfig.model = MODEL;
+    cstore.state.modelConfig.providerName = 'OpenAI';
+    cstore.state.modelConfig.stream = false;
+    if (Array.isArray(cstore.state.masks)) {
+      cstore.state.masks.forEach(function(m){
+        if (!m) return;
+        if (!m.modelConfig) m.modelConfig = {};
+        m.modelConfig.model = MODEL;
+        m.modelConfig.providerName = 'OpenAI';
+        m.modelConfig.stream = false;
+      });
     }
-    localStorage.setItem(KEY, JSON.stringify(store));
+    localStorage.setItem(CKEY, JSON.stringify(cstore));
+
+    // ============================================================
+    // patch 3: chat-next-web-store（所有已有会话的 mask）
+    //
+    // 会话的 mask.modelConfig 在会话创建时固化，
+    // 后续改全局 modelConfig 不会影响已有会话，
+    // 必须逐条改 sessions[].mask.modelConfig。
+    // ============================================================
+    var SKEY = 'chat-next-web-store';
+    var sraw = localStorage.getItem(SKEY);
+    if (sraw) {
+      try {
+        var ss = JSON.parse(sraw);
+        ss.state = ss.state || {};
+        if (Array.isArray(ss.state.sessions)) {
+          ss.state.sessions.forEach(function(sess){
+            if (!sess) return;
+            if (!sess.mask) sess.mask = {};
+            if (!sess.mask.modelConfig) sess.mask.modelConfig = {};
+            sess.mask.modelConfig.model = MODEL;
+            sess.mask.modelConfig.providerName = 'OpenAI';
+            sess.mask.modelConfig.stream = false;
+          });
+        }
+        localStorage.setItem(SKEY, JSON.stringify(ss));
+      } catch (e) {}
+    }
+
+    // ============================================================
+    // patch 4: mask-store（用户自定义 mask 模板）
+    // ============================================================
+    var MKEY = 'mask-store';
+    var mraw = localStorage.getItem(MKEY);
+    if (mraw) {
+      try {
+        var ms = JSON.parse(mraw);
+        ms.state = ms.state || {};
+        if (ms.state.masks && typeof ms.state.masks === 'object') {
+          Object.keys(ms.state.masks).forEach(function(k){
+            var m = ms.state.masks[k];
+            if (!m) return;
+            if (!m.modelConfig) m.modelConfig = {};
+            m.modelConfig.model = MODEL;
+            m.modelConfig.providerName = 'OpenAI';
+            m.modelConfig.stream = false;
+          });
+        }
+        localStorage.setItem(MKEY, JSON.stringify(ms));
+      } catch (e) {}
+    }
+
+    // ============================================================
+    // patch 5: 清掉 IndexedDB 里的 access-control / app-config 条目
+    //
+    // NextChat 的 storage.getItem 是「先 IndexedDB 再 localStorage」，
+    // IndexedDB 里的旧值会覆盖我们刚写的 localStorage。
+    // 只删 access-control / app-config（配置类），不动
+    // chat-next-web-store / mask-store（保留对话和自定义 mask）。
+    // ============================================================
+    try {
+      if (window.indexedDB && indexedDB.databases) {
+        indexedDB.databases().then(function(dbs){
+          (dbs || []).forEach(function(info){
+            var name = info && info.name;
+            if (!name) return;
+            try {
+              var req = indexedDB.open(name);
+              req.onsuccess = function(ev){
+                var db = ev.target.result;
+                try {
+                  if (db.objectStoreNames.contains('keyval')) {
+                    var tx = db.transaction('keyval', 'readwrite');
+                    var store = tx.objectStore('keyval');
+                    try { store.delete('access-control'); } catch(e) {}
+                    try { store.delete('app-config'); } catch(e) {}
+                    tx.oncomplete = function(){ try { db.close(); } catch(e) {} };
+                    tx.onerror = function(){ try { db.close(); } catch(e) {} };
+                  } else {
+                    db.close();
+                  }
+                } catch(e) { try { db.close(); } catch(e2) {} }
+              };
+            } catch(e) {}
+          });
+        });
+      }
+    } catch (e) {}
+
     sessionStorage.setItem('__ds_ai_injected', '1');
     return 'ok';
   } catch (e) {
@@ -120,8 +243,8 @@ class _AgentUiPageState extends State<AgentUiPage> {
     if (c == null || _configInjected) return;
 
     final cfg = _readConfig();
-    if (!cfg.isConfigured) {
-      // 配置不完整就不注入，让用户在页面里自己填
+    // 必须同时有 base、key、model 才注入，避免注入空 model
+    if (!cfg.isConfigured || cfg.model.trim().isEmpty) {
       return;
     }
 
@@ -141,6 +264,8 @@ class _AgentUiPageState extends State<AgentUiPage> {
 
     if (result is String && result.startsWith('ok')) {
       _configInjected = true;
+      // 给 IndexedDB 异步删除留一点时间（IDB 操作几毫秒完成，300ms 足够）
+      await Future.delayed(const Duration(milliseconds: 300));
       await c.reload();
     }
   }
@@ -191,7 +316,6 @@ class _AgentUiPageState extends State<AgentUiPage> {
             tooltip: '刷新',
             icon: const Icon(Icons.refresh),
             onPressed: () async {
-              // 手动刷新时清掉注入标记，允许重新注入（用户在设置页改了配置）
               await _web?.evaluateJavascript(
                 source: "sessionStorage.removeItem('__ds_ai_injected')",
               );
