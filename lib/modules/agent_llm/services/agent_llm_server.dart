@@ -190,9 +190,22 @@ class AgentLlmServer {
       }
 
       if (round == maxToolRounds) {
-        // 达到上限仍要调用工具，放弃执行，原样返回
+        // 达到上限仍要调用工具，放弃执行。
+        //
+        // 不能原样返回带 tool_calls 的 assistant 消息——OpenAI 规范要求
+        // assistant.tool_calls 后必须紧跟配对的 role=tool 消息，NextChat
+        // 解析这种「悬空 tool_calls」时会静默失败或渲染异常。
+        // 这里剥掉 tool_calls，只保留 content（通常模型会在 content 里
+        // 给出对工具调用达上限的自然语言说明）。
         debugPrint('[AgentLlmServer] tool_calls 超过上限，停止执行');
-        return _jsonResponse(resp);
+        final cleanedMsg = msg is Map
+            ? (Map<String, dynamic>.from(msg)..remove('tool_calls'))
+            : msg;
+        final newChoice = Map<String, dynamic>.from(choices[0] as Map)
+          ..['message'] = cleanedMsg;
+        final patched = Map<String, dynamic>.from(resp)
+          ..['choices'] = [newChoice];
+        return _jsonResponse(patched);
       }
 
       // 执行 tool_calls

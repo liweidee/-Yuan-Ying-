@@ -20,6 +20,7 @@ import 'package:yuanying/modules/sandbox/widgets/sandbox_service_form_dialog.dar
 import 'package:yuanying/modules/sandbox/widgets/sandbox_service_log_sheet.dart';
 import 'package:yuanying/modules/webview/views/webview_page.dart';
 import 'package:yuanying/modules/sandbox/widgets/sandbox_import_dialog.dart';
+import 'package:yuanying/modules/sandbox/widgets/rootfs_install_dialog.dart';
 
 class SandboxPage extends StatefulWidget {
   const SandboxPage({super.key});
@@ -115,8 +116,7 @@ class _SandboxPageState extends State<SandboxPage> {
     if (_installingRootfs) return;
     setState(() => _installingRootfs = true);
 
-    // 重装当前激活的 distro 时，先停掉所有正在运行的服务，
-    // 避免删 rootfs 目录时 fd 未关。
+    // 重装当前激活的 distro 时，先停掉所有正在运行的服务
     if (_installedDistro == distro.id) {
       for (final svc in _services) {
         if (SandboxServiceManager.instance.isRunning(svc.id)) {
@@ -125,24 +125,14 @@ class _SandboxPageState extends State<SandboxPage> {
       }
     }
 
-    SmartDialog.showLoading(msg: '正在下载 ${distro.name}…');
     try {
-      await RootfsManager.instance.install(
-        distro,
-        onProgress: (r, t) {
-          if (t > 0) {
-            SmartDialog.showLoading(
-              msg: '${distro.name} ${(r / t * 100).toStringAsFixed(0)}%',
-            );
-          }
-        },
+      final ok = await showRootfsInstallDialog(
+        context: context,
+        distro: distro,
       );
-      SmartDialog.dismiss();
-      SmartDialog.showToast('${distro.name} 安装完成');
-      await _refreshState();
-    } catch (e) {
-      SmartDialog.dismiss();
-      SmartDialog.showToast('安装失败：$e');
+      if (ok) {
+        await _refreshState();
+      }
     } finally {
       if (mounted) setState(() => _installingRootfs = false);
     }

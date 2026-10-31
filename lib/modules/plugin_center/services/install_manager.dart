@@ -510,6 +510,9 @@ class InstallManager {
     }
 
     // ===== type=apk 分支（仅 Android） =====
+    // 系统直装型 APK：跳系统安装器。_installApkPackage 内部还会按 APK 内
+    // assets/plugin.json 的 installMode 再分流（import → 提取到私有目录，
+    // apk → 系统安装）。
     if (entry.type == 'apk') {
       if (!Platform.isAndroid) {
         throw Exception('APK 仅支持 Android 平台');
@@ -612,13 +615,24 @@ class InstallManager {
       return;
     }
 
-    // ===== type=import 默认分支 =====
+    // ===== type=import 分支 =====
     //
-    // C2 修复：先解压到同卷临时目录，成功后再清理旧目录并原子 rename。
-    // 原流程是「先删旧目录 → 解压到最终路径」，解压失败会留下
-    // 「注册表还指向旧路径，但旧目录已被删」的脏状态，用户必须手动
+    // 按「下载 URL 后缀是否为 .apk」再分两路：
+    //
+    // 1. .apk 后缀 → 「解压型 APK」：包内是 APK 目录结构
+    //    （assets/plugin.json + assets/www/ 或 lib/{abi}/），
+    //    需按 plugin.json 的 kind 提取有效资源到 plugins/{id}/，
+    //    APK 自身元数据（META-INF/classes.dex/等）丢弃。
+    //    agent / qjs / mpv 均属此类型。
+    //
+    // 2. 非 .apk 后缀 → 「普通 zip」：包内根目录就是 plugin.json / bin/ 等
+    //    应用数据，原样解压到 plugins/{id}/。nodejs / mediaProxy 属此类型。
+    //
+    // C2 修复（普通 zip 路径）：先解压到同卷临时目录，成功后再清理旧目录
+    // 并原子 rename。原流程是「先删旧目录 → 解压到最终路径」，解压失败会
+    // 留下「注册表还指向旧路径，但旧目录已被删」的脏状态，用户必须手动
     // 卸载重装才能恢复。新流程下解压失败时旧目录与注册表均保持原样。
-    emit(InstallStage.extracting);
+    final isApkContainer = _isApkUrl(downloadUrl);
 
     final root = await PluginPaths.root();
     final finalDir = p.join(root.path, entry.id);
@@ -627,6 +641,7 @@ class InstallManager {
           '${DateTime.now().millisecondsSinceEpoch}'),
     );
 
+    emit(InstallStage.extracting);
     try {
       if (!tmpDir.existsSync()) {
         await tmpDir.create(recursive: true);
@@ -640,7 +655,81 @@ class InstallManager {
     }
     await _safeDeleteFile(tempPath);
 
-    // 解压成功，开始替换旧目录
+    // ===== 解压型 APK：按 kind 提取 =====
+    if (isApkContainer) {
+      final apkPluginJson =
+          File(p.join(tmpDir.path, 'assets', 'plugin.json'));
+      if (!apkPluginJson.existsSync()) {
+        // .apk 后缀但内容不是 APK 结构 → 明确的打包错误，暴露而不是掩盖
+        await _safeDeleteDir(tmpDir.path);
+        emit(InstallStage.failed);
+        throw Exception(
+          'APK 容器缺少 assets/plugin.json（包结构不符合解压型 APK 约定）',
+        );
+      }
+
+      Map<String, dynamic> pluginJson;
+      try {
+        pluginJson = jsonDecode(await apkPluginJson.readAsString())
+            as Map<String, dynamic>;
+      } catch (e) {
+        await _safeDeleteDir(tmpDir.path);
+        emit(InstallStage.failed);
+        throw Exception('plugin.json 解析失败：$e');
+      }
+
+      // 防御：installMode=apk 说明市场把系统直装包错标成 type=import
+      final installMode = pluginJson['installMode']?.toString() ?? '';
+      if (installMode == 'apk') {
+        await _safeDeleteDir(tmpDir.path);
+        emit(InstallStage.failed);
+        throw Exception(
+          '该插件为系统直装型（installMode=apk），'
+          '市场条目 type 应为 apk，当前为 import',
+        );
+      }
+
+      final kind = pluginJson['kind']?.toString() ?? '';
+
+      try {
+        await _cleanupOldVersions(entry.id, entry.version);
+        final finalDirObj = Directory(finalDir);
+        if (finalDirObj.existsSync()) {
+          await finalDirObj.delete(recursive: true);
+        }
+        await finalDirObj.create(recursive: true);
+        await _extractApkContainer(tmpDir.path, finalDirObj.path, kind);
+      } catch (e) {
+        await _safeDeleteDir(tmpDir.path);
+        emit(InstallStage.failed);
+        throw Exception('APK 容器提取失败：$e');
+      }
+      await _safeDeleteDir(tmpDir.path);
+
+      emit(InstallStage.registering);
+      await register(InstalledPlugin(
+        id: entry.id,
+        version: entry.version,
+        source: marketName,
+        installPath: finalDir,
+        enabled: true,
+        pinned: false,
+        installedAtMs: DateTime.now().millisecondsSinceEpoch,
+        type: entry.type,
+        desc: entry.desc,
+        changelog: entry.changelog,
+        icon: entry.icon,
+        extras: {
+          'platform': Platform.isWindows ? 'win32' : 'android',
+          'installMode': 'import',
+          if (kind.isNotEmpty) 'kind': kind,
+        },
+      ));
+      emit(InstallStage.done);
+      return;
+    }
+
+    // ===== 普通 zip：原样替换 =====
     try {
       await _cleanupOldVersions(entry.id, entry.version);
       final finalDirObj = Directory(finalDir);
@@ -684,7 +773,7 @@ class InstallManager {
     emit(InstallStage.done);
   }
 
-  /// C7：按入口文件推断运行时（Windows / Android 分别映射到带/不带 `-win` 后缀的 id）。
+  /// 按入口文件推断运行时（Windows / Android 分别映射到带/不带 `-win` 后缀的 id）。
   /// 供 `_createServiceFromManifest` 与 `ImportPackageDialog` 共用，
   /// 消除两处硬编码不一致（原来 Android 上手动导入 server 包会错误指向 `*-win`）。
   static String resolveRuntimeForEntryFile(
@@ -911,6 +1000,102 @@ class InstallManager {
         if (kind.isNotEmpty) 'kind': kind,
       },
     ));
+  }
+
+  /// 判断下载 URL 是否为 .apk 后缀（忽略 query/fragment/代理前缀）。
+  /// 用于 type=import 分支区分「解压型 APK」与「普通 zip」。
+  bool _isApkUrl(String url) {
+    try {
+      final uri = Uri.parse(url);
+      return uri.path.toLowerCase().endsWith('.apk');
+    } catch (_) {
+      return url.toLowerCase().endsWith('.apk');
+    }
+  }
+
+  /// 从已解压的临时目录按 kind 提取 APK 容器内容到 targetDir。
+  ///
+  /// 仅处理 assets/ 与 lib/{abi}/ 下的内容；APK 自身元数据
+  /// （META-INF / classes.dex / kotlin / resources.arsc /
+  /// AndroidManifest.xml）一律丢弃。
+  ///
+  /// 与 [_installApkAsImport] 的差别：
+  /// - 本方法输入是「已解压目录」，供 type=import + .apk 后缀的条目
+  ///   （agent / qjs / mpv 等）使用；
+  /// - [_installApkAsImport] 输入是 Archive，供 type=apk 分支中
+  ///   installMode=import 的系统安装型 APK 使用。
+  /// 两者对 kind → 落盘结构的映射保持一致，避免同一插件两种安装
+  /// 路径产出不同目录布局。
+  Future<void> _extractApkContainer(
+    String srcDir,
+    String targetDir,
+    String kind,
+  ) async {
+    String? abiDir;
+    if (Platform.isAndroid) {
+      final abi = Abi.current();
+      if (abi == Abi.androidArm64) {
+        abiDir = 'arm64-v8a';
+      } else if (abi == Abi.androidArm) {
+        abiDir = 'armeabi-v7a';
+      } else if (abi == Abi.androidX64) {
+        abiDir = 'x86_64';
+      } else if (abi == Abi.androidIA32) {
+        abiDir = 'x86';
+      }
+    }
+
+    final srcRoot = Directory(srcDir);
+    await for (final entity in srcRoot.list(recursive: true)) {
+      if (entity is! File) continue;
+      final rel =
+          p.relative(entity.path, from: srcDir).replaceAll('\\', '/');
+
+      // 统一过滤：APK 自身元数据一律丢弃
+      if (rel.startsWith('META-INF/')) continue;
+      if (rel == 'AndroidManifest.xml') continue;
+      if (rel == 'resources.arsc') continue;
+      if (rel.startsWith('kotlin/')) continue;
+      if (rel == 'classes.dex') continue;
+      if (rel.startsWith('classes') && rel.endsWith('.dex')) continue;
+
+      String? outRel;
+      if (kind == 'qjs-engine') {
+        if (rel == 'assets/plugin.json') {
+          outRel = 'plugin.json';
+        } else if (abiDir != null && rel.startsWith('lib/$abiDir/')) {
+          outRel = p.basename(rel);
+        }
+      } else if (kind == 'agent-ui') {
+        if (rel == 'assets/plugin.json') {
+          outRel = 'plugin.json';
+        } else if (rel.startsWith('assets/www/')) {
+          final sub = rel.substring('assets/www/'.length);
+          if (sub.isNotEmpty) outRel = sub;
+        }
+      } else {
+        // 通用：assets/ 全部内嵌；lib/{abi}/ 平铺到根
+        if (rel == 'assets/plugin.json') {
+          outRel = 'plugin.json';
+        } else if (rel.startsWith('assets/')) {
+          final sub = rel.substring('assets/'.length);
+          if (sub.isNotEmpty) outRel = sub;
+        } else if (abiDir != null && rel.startsWith('lib/$abiDir/')) {
+          outRel = p.basename(rel);
+        }
+      }
+
+      if (outRel == null) continue;
+      // H1：Zip Slip 防护（与 _installApkAsImport 同语义）
+      if (!_isSafeArchivePath(targetDir, outRel)) {
+        debugPrint('[InstallManager] 跳过非法 entry: $rel');
+        continue;
+      }
+
+      final outFile = File(p.join(targetDir, outRel));
+      await outFile.parent.create(recursive: true);
+      await entity.copy(outFile.path);
+    }
   }
 
   Future<void> _writeArchiveFile(

@@ -20,6 +20,11 @@ import 'package:yuanying/modules/plugin_center/services/install_manager.dart';
 /// - `/agent-ui/index.html`                → `plugins/agent/index.html`
 /// - `/agent-ui/_next/static/chunks/x.js`  → `plugins/agent/_next/static/chunks/x.js`
 /// - `/agent-ui/`                          → `plugins/agent/index.html`（defaultDocument）
+///
+/// 说明：agent 插件包为「解压型 APK」（type=import + .apk 后缀），
+/// InstallManager 会按 plugin.json 的 kind=agent-ui 把 assets/www/
+/// 下的静态资源提取到 plugins/agent/ 根目录。因此这里只按根目录查找
+/// index.html，不做旧结构兼容。
 class AgentUiGateway {
   AgentUiGateway._();
   static final AgentUiGateway instance = AgentUiGateway._();

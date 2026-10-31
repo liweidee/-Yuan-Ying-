@@ -18,7 +18,8 @@ class StoragePermissionButton extends StatefulWidget {
       _StoragePermissionButtonState();
 }
 
-class _StoragePermissionButtonState extends State<StoragePermissionButton> {
+class _StoragePermissionButtonState extends State<StoragePermissionButton>
+    with WidgetsBindingObserver {
   static const _channel = MethodChannel('com.example.yuanying/storage');
 
   final RxBool _granted = false.obs;
@@ -27,7 +28,24 @@ class _StoragePermissionButtonState extends State<StoragePermissionButton> {
   @override
   void initState() {
     super.initState();
+    // 监听 App 生命周期：从系统设置页返回（resumed）时刷新授权态。
+    // 原实现只在点击后 500ms 刷一次，用户在设置页里授权耗时超过 500ms
+    // 就刷不到新状态，需重新进入插件中心才会更新——本 Observer 修复此问题。
+    WidgetsBinding.instance.addObserver(this);
     _refreshStatus();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _refreshStatus();
+    }
   }
 
   Future<void> _refreshStatus() async {
@@ -35,8 +53,10 @@ class _StoragePermissionButtonState extends State<StoragePermissionButton> {
       final ok =
           await _channel.invokeMethod<bool>('isExternalStorageManager') ??
               false;
+      if (!mounted) return;
       _granted.value = ok;
     } catch (_) {
+      if (!mounted) return;
       _granted.value = false;
     }
   }
@@ -54,6 +74,8 @@ class _StoragePermissionButtonState extends State<StoragePermissionButton> {
         return;
       }
       await _channel.invokeMethod('requestAllFilesAccess');
+      // 500ms 刷新覆盖「用户快速返回」的极小概率路径；
+      // 主路径靠 didChangeAppLifecycleState(resumed) 兜底
       Future.delayed(const Duration(milliseconds: 500), _refreshStatus);
     } catch (e) {
       SmartDialog.showToast('授权检查失败：$e');

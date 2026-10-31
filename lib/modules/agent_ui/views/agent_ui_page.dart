@@ -35,6 +35,14 @@ class _AgentUiPageState extends State<AgentUiPage> {
   }
 
   Future<void> _init() async {
+    // 0. 确保 AiConfigController 已注册。
+    // 原实现依赖用户先访问设置页（AiConfigPage.initState 里 Get.put），
+    // 冷启动直接进 AI 页时 Controller 未注册，_readConfig 返回空 AiConfig，
+    // 导致 isConfigured=false → 跳过注入 → NextChat 显示未配置界面。
+    if (!Get.isRegistered<AiConfigController>()) {
+      Get.put(AiConfigController());
+    }
+
     // 1. 先起本地 LLM 网关（和 DsPlayer 一致：先起网关再开页面）
     await AgentLlmServer.instance.ensureStarted();
 
