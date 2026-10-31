@@ -9,9 +9,9 @@ import 'package:get/get.dart';
 
 import 'package:yuanying/main.dart' show webViewEnvironment;
 import 'package:yuanying/modules/agent_ui/services/agent_ui_gateway.dart';
+import 'package:yuanying/modules/agent_llm/services/agent_llm_server.dart';
 import 'package:yuanying/modules/setting/controllers/ai_config_controller.dart';
 import 'package:yuanying/modules/setting/models/ai_config.dart';
-import 'package:yuanying/modules/agent_llm/services/agent_llm_server.dart';
 
 class AgentUiPage extends StatefulWidget {
   const AgentUiPage({super.key});
@@ -25,7 +25,7 @@ class _AgentUiPageState extends State<AgentUiPage> {
   String? _url;
   String? _error;
 
-  /// 防止 onLoadStop 里 reload 导致的死循环
+  /// 防止 reload 死循环（仅作为辅助，主判断靠 openaiUrl 匹配）
   bool _configInjected = false;
 
   @override
@@ -35,16 +35,14 @@ class _AgentUiPageState extends State<AgentUiPage> {
   }
 
   Future<void> _init() async {
-    // AiConfigController.onInit 是同步 _load()，
-    // Get.put 返回后 config.value 已是最新值。
     if (!Get.isRegistered<AiConfigController>()) {
       Get.put(AiConfigController());
     }
 
-    // 1. 先起本地 LLM 网关
+    // 先起网关（生成 token + 端口）
     await AgentLlmServer.instance.ensureStarted();
 
-    // 2. 再起静态资源服务
+    // 再起静态资源服务
     final url = await AgentUiGateway.instance.ensureStarted();
     if (!mounted) return;
     if (url == null) {
@@ -63,30 +61,16 @@ class _AgentUiPageState extends State<AgentUiPage> {
     return const AiConfig();
   }
 
-  /// 生成注入脚本：把配置写进 NextChat 的正确存储位置。
+  /// 生成注入脚本。
   ///
-  /// 【NextChat 存储结构（从 page-8904b7358f096194.js 反推）】
-  ///
-  ///   access-control       ← o._X，存 openaiUrl / openaiApiKey / useCustomConfig
-  ///                          ★ 接口配置在这里！不在 app-config 里
-  ///   app-config           ← o.MG，存 modelConfig（model / temperature / ...）
-  ///   chat-next-web-store  ← o.aK，存 sessions[]（含 sessions[].mask.modelConfig）
-  ///   mask-store           ← o.Zy，存自定义 mask
-  ///
-  /// 【请求实际的 model 来源（优先级从高到低）】
-  ///   sessions[current].mask.modelConfig.model    （会话 mask，会话创建时固化）
-  /// > app-config.modelConfig.model                 （全局默认，新会话复制源）
-  ///
-  /// 【IndexedDB 优先级高于 localStorage】
-  ///   NextChat 的 storage.getItem 是「先 IndexedDB 再 localStorage」，
-  ///   所以必须同时清掉 IndexedDB 里的 access-control / app-config，
-  ///   否则 localStorage 里的新值会被 IndexedDB 里的旧值覆盖。
+  /// 核心：openaiUrl 用 rootUrl（不带 /v1）。
+  /// NextChat 会自己拼 openaiUrl + '/v1/chat/completions'。
   String _buildInjectScript(AiConfig cfg) {
-    final llmBase = AgentLlmServer.instance.baseUrl;
+    // 关键：rootUrl 不带 /v1
+    final llmBase = AgentLlmServer.instance.rootUrl;
     final llmToken = AgentLlmServer.instance.token;
     final useLocalGateway = llmBase != null && llmToken.isNotEmpty;
 
-    // AiConfig.isConfigured 没 trim，这里都 trim 一遍防止空白字符
     final url = useLocalGateway ? llmBase : cfg.apiBaseUrl.trim();
     final key = useLocalGateway ? llmToken : cfg.apiKey.trim();
     final model = cfg.model.trim().isEmpty ? 'gpt-4o-mini' : cfg.model.trim();
@@ -103,11 +87,7 @@ class _AgentUiPageState extends State<AgentUiPage> {
     var MODEL = $modelJson;
 
     // ============================================================
-    // patch 1: access-control（接口配置，核心！）
-    //
-    // 这是 o._X store，class p.path() 读 t.openaiUrl、
-    // class R() 读 t.openaiApiKey，都是从这里读。
-    // 之前 patch app-config 无效就是这个原因。
+    // patch 1: access-control（接口配置，核心）
     // ============================================================
     var AKEY = 'access-control';
     var araw = localStorage.getItem(AKEY);
@@ -115,9 +95,9 @@ class _AgentUiPageState extends State<AgentUiPage> {
     astore.state = astore.state || {};
     astore.state.useCustomConfig = true;
     astore.state.provider = 'OpenAI';
-    astore.state.openaiUrl = URL;
+    astore.state.openaiUrl = URL;      // 不带 /v1！
     astore.state.openaiApiKey = KEY;
-    astore.state.needCode = false;   // 避免被 auth 页拦截
+    astore.state.needCode = false;
     localStorage.setItem(AKEY, JSON.stringify(astore));
 
     // ============================================================
@@ -144,10 +124,6 @@ class _AgentUiPageState extends State<AgentUiPage> {
 
     // ============================================================
     // patch 3: chat-next-web-store（所有已有会话的 mask）
-    //
-    // 会话的 mask.modelConfig 在会话创建时固化，
-    // 后续改全局 modelConfig 不会影响已有会话，
-    // 必须逐条改 sessions[].mask.modelConfig。
     // ============================================================
     var SKEY = 'chat-next-web-store';
     var sraw = localStorage.getItem(SKEY);
@@ -193,69 +169,107 @@ class _AgentUiPageState extends State<AgentUiPage> {
     }
 
     // ============================================================
-    // patch 5: 清掉 IndexedDB 里的 access-control / app-config 条目
+    // patch 5: 清 IndexedDB 里的 access-control / app-config
     //
-    // NextChat 的 storage.getItem 是「先 IndexedDB 再 localStorage」，
-    // IndexedDB 里的旧值会覆盖我们刚写的 localStorage。
-    // 只删 access-control / app-config（配置类），不动
-    // chat-next-web-store / mask-store（保留对话和自定义 mask）。
+    // NextChat storage.getItem 是「先 IndexedDB 再 localStorage」，
+    // 不清 IDB 的话，reload 后 hydration 会读到旧值覆盖 localStorage。
+    // 用异步 Promise + window.__ds_inject_done 标志等待完成。
     // ============================================================
-    try {
-      if (window.indexedDB && indexedDB.databases) {
-        indexedDB.databases().then(function(dbs){
-          (dbs || []).forEach(function(info){
-            var name = info && info.name;
-            if (!name) return;
-            try {
-              var req = indexedDB.open(name);
-              req.onsuccess = function(ev){
-                var db = ev.target.result;
-                try {
-                  if (db.objectStoreNames.contains('keyval')) {
-                    var tx = db.transaction('keyval', 'readwrite');
-                    var store = tx.objectStore('keyval');
-                    try { store.delete('access-control'); } catch(e) {}
-                    try { store.delete('app-config'); } catch(e) {}
-                    tx.oncomplete = function(){ try { db.close(); } catch(e) {} };
-                    tx.onerror = function(){ try { db.close(); } catch(e) {} };
-                  } else {
-                    db.close();
-                  }
-                } catch(e) { try { db.close(); } catch(e2) {} }
-              };
-            } catch(e) {}
-          });
-        });
+    var cleanIDB = function(){
+      var promises = [];
+      var tryDelete = function(dbName){
+        promises.push(new Promise(function(resolve){
+          try {
+            var req = indexedDB.deleteDatabase(dbName);
+            req.onsuccess = function(){ resolve(); };
+            req.onerror = function(){ resolve(); };
+            req.onblocked = function(){ resolve(); };
+          } catch(e){ resolve(); }
+        }));
+      };
+      if (indexedDB.databases) {
+        promises.push(
+          indexedDB.databases().then(function(dbs){
+            (dbs || []).forEach(function(d){
+              if (d && d.name) tryDelete(d.name);
+            });
+          }).catch(function(){})
+        );
       }
-    } catch (e) {}
+      ['keyval-store', 'nextchat', 'chat-next-web-store', 'keyval'].forEach(tryDelete);
+      return Promise.all(promises);
+    };
 
-    sessionStorage.setItem('__ds_ai_injected', '1');
+    window.__ds_inject_done = false;
+    cleanIDB().then(function(){
+      sessionStorage.setItem('__ds_ai_injected', '1');
+      window.__ds_inject_done = true;
+    }).catch(function(){
+      sessionStorage.setItem('__ds_ai_injected', '1');
+      window.__ds_inject_done = true;
+    });
+
     return 'ok';
   } catch (e) {
+    window.__ds_inject_done = true;
     return 'err:' + e;
   }
 })();
 ''';
   }
 
+  /// 注入 + 必要时 reload。
+  ///
+  /// 每次 onLoadStop 都会调用。判断逻辑：
+  ///   1. 读当前 access-control.openaiUrl
+  ///   2. 如果等于网关 rootUrl → 已注入，跳过
+  ///   3. 否则（null / 被用户改过 / 被重置）→ 强制注入 + reload
+  ///
+  /// 这样即使用户在 AI 助手内手动改配置，下次 onLoadStop 会强制覆盖回来。
   Future<void> _injectConfigAndReload() async {
     final c = _web;
-    if (c == null || _configInjected) return;
+    if (c == null) return;
 
     final cfg = _readConfig();
-    // 必须同时有 base、key、model 才注入，避免注入空 model
     if (!cfg.isConfigured || cfg.model.trim().isEmpty) {
+      debugPrint(
+        '[AgentUiPage] 配置不完整，跳过注入: '
+        'base=${cfg.apiBaseUrl.isEmpty ? "空" : "已填"} '
+        'key=${cfg.apiKey.isEmpty ? "空" : "已填"} '
+        'model=${cfg.model.isEmpty ? "空" : cfg.model}',
+      );
       return;
     }
 
-    // 先检查 sessionStorage，避免每次 reload 都重复注入
-    final already = await c.evaluateJavascript(
-      source: "sessionStorage.getItem('__ds_ai_injected')",
-    );
-    if (already == '1' || already == '"1"') {
-      _configInjected = true;
+    final expectedUrl = AgentLlmServer.instance.rootUrl;
+    if (expectedUrl == null) {
+      debugPrint('[AgentUiPage] 网关未启动');
       return;
     }
+
+    // 检查当前 openaiUrl
+    final currentUrl = await c.evaluateJavascript(
+      source: "(function(){"
+          "try{"
+          "var s=localStorage.getItem('access-control');"
+          "if(!s)return null;"
+          "var j=JSON.parse(s);"
+          "return j.state && j.state.openaiUrl ? j.state.openaiUrl : null;"
+          "}catch(e){return null;}"
+          "})()",
+    );
+    final currentUrlStr = currentUrl?.toString();
+    // evaluateJavascript 返回可能是带引号的字符串，去掉引号
+    final cleanUrl = currentUrlStr?.replaceAll('"', '') ?? '';
+
+    if (cleanUrl == expectedUrl && _configInjected) {
+      // 已是最新，跳过
+      return;
+    }
+
+    debugPrint(
+      '[AgentUiPage] 注入 (currentUrl=$cleanUrl, expected=$expectedUrl)',
+    );
 
     final result = await c.evaluateJavascript(
       source: _buildInjectScript(cfg),
@@ -264,8 +278,15 @@ class _AgentUiPageState extends State<AgentUiPage> {
 
     if (result is String && result.startsWith('ok')) {
       _configInjected = true;
-      // 给 IndexedDB 异步删除留一点时间（IDB 操作几毫秒完成，300ms 足够）
-      await Future.delayed(const Duration(milliseconds: 300));
+      // 等 IndexedDB 清理完成（最多 2 秒）
+      for (var i = 0; i < 20; i++) {
+        final done = await c.evaluateJavascript(
+          source: "window.__ds_inject_done === true",
+        );
+        if (done == true || done == 'true') break;
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
+      debugPrint('[AgentUiPage] reload 应用注入');
       await c.reload();
     }
   }

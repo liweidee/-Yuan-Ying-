@@ -17,16 +17,27 @@ import 'package:yuanying/modules/agent_llm/services/capability_bootstrap.dart';
 import 'package:yuanying/modules/agent_llm/services/tool_dispatcher.dart';
 import 'package:yuanying/modules/setting/controllers/ai_config_controller.dart';
 
-/// OpenAI 兼容网关。只做协议层职责：
-///   1. 路由 / 鉴权
-///   2. 组装 system prompt（引导词 + 状态块）
-///   3. tool_calls 循环
-///   4. 模型未返回 tool_calls 时调 registry.matchFallback（保险）
+/// OpenAI 兼容网关。
 ///
-/// 不关心具体有哪些工具、也不关心工具怎么实现。工具的注册、
-/// 描述、能力分类、兜底匹配都在 registry + capability 层。
+/// 【关键设计】
 ///
-/// 未来接 MCP：MCP loader 把工具注册进 registry 即可，本文件不改。
+/// 1. 双 URL：
+///    - rootUrl = http://127.0.0.1:9978（注入给 NextChat 用）
+///      NextChat 自己拼 rootUrl + '/v1/chat/completions' → 正确
+///    - baseUrl = http://127.0.0.1:9978/v1（内部/文档用）
+///
+/// 2. CORS：
+///    NextChat 页面在 gateway 随机端口，请求网关 9978 跨域。
+///    必须处理 OPTIONS 预检 + 带 CORS 头，否则浏览器直接拒绝 POST。
+///
+/// 3. SSE：
+///    NextChat onUserInput 硬编码 config.stream = true，用 SSE 解析器
+///    解析响应。网关内部对上游永远发 stream=false（tool_calls 拦截需要
+///    完整响应），处理完包装成 SSE 返回给 NextChat。
+///
+/// 4. tool loop + 兜底：
+///    模型返回 tool_calls → 执行 → 再请求上游 → 直到纯文本。
+///    模型不返回 tool_calls → registry.matchFallback（保险）。
 class AgentLlmServer {
   AgentLlmServer._();
   static final AgentLlmServer instance = AgentLlmServer._();
@@ -34,18 +45,47 @@ class AgentLlmServer {
   static const int _preferredPort = 9978;
   static const int _maxToolRounds = 3;
 
+  // CORS 头：所有响应都要带
+  static const Map<String, String> _corsHeaders = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+    'Access-Control-Max-Age': '86400',
+  };
+
+  // SSE 头：包含 CORS
+  static final Map<String, String> _sseHeaders = {
+    ..._corsHeaders,
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+  };
+
+  // JSON 头：包含 CORS
+  static final Map<String, String> _jsonHeaders = {
+    ..._corsHeaders,
+    'Content-Type': 'application/json',
+  };
+
   HttpServer? _server;
   int? _port;
   String? _token;
 
   int? get port => _port;
+
+  /// 给 NextChat 注入用的根 URL（不带 /v1）。
+  /// NextChat 会自己拼 rootUrl + '/v1/chat/completions'。
+  String? get rootUrl => _port == null ? null : 'http://127.0.0.1:$_port';
+
+  /// 内部/文档使用的 base URL（带 /v1）。
   String? get baseUrl => _port == null ? null : 'http://127.0.0.1:$_port/v1';
+
   String get token => _token ?? '';
 
   bool get isRunning => _server != null && _port != null;
 
   Future<String?> ensureStarted() async {
-    if (isRunning) return baseUrl;
+    if (isRunning) return rootUrl;
 
     _token = _generateToken();
     CapabilityBootstrap.initAll();
@@ -73,8 +113,8 @@ class AgentLlmServer {
 
     _server = server;
     _port = server.port;
-    debugPrint('[AgentLlmServer] 已启动: $baseUrl (token=$_token)');
-    return baseUrl;
+    debugPrint('[AgentLlmServer] 已启动: $rootUrl (token=$_token)');
+    return rootUrl;
   }
 
   Future<void> stop() async {
@@ -94,19 +134,39 @@ class AgentLlmServer {
   // ============================================================
 
   Future<shelf.Response> _route(shelf.Request req) async {
+    // 1. CORS 预检（必须在鉴权之前，OPTIONS 不带 Authorization）
+    if (req.method == 'OPTIONS') {
+      return shelf.Response.ok('', headers: _corsHeaders);
+    }
+
+    // 2. 鉴权
     if (!_isAuthorized(req)) {
       return shelf.Response.unauthorized(
         jsonEncode({'error': 'unauthorized'}),
-        headers: {'Content-Type': 'application/json'},
+        headers: _jsonHeaders,
       );
     }
+
+    // 3. 路由（兼容单/双 v1）
     final path = req.url.path;
-    if (path == 'v1/models') return _handleModels(req);
-    if (path == 'v1/chat/completions') return _handleChat(req);
-    return shelf.Response.notFound(
-      jsonEncode({'error': 'not found'}),
-      headers: {'Content-Type': 'application/json'},
-    );
+    try {
+      if (path == 'v1/models' || path == 'v1/v1/models') {
+        return await _handleModels(req);
+      }
+      if (path == 'v1/chat/completions' || path == 'v1/v1/chat/completions') {
+        return await _handleChat(req);
+      }
+      return shelf.Response.notFound(
+        jsonEncode({'error': 'not found', 'path': path}),
+        headers: _jsonHeaders,
+      );
+    } catch (e, st) {
+      debugPrint('[AgentLlmServer] handler 异常: $e\n$st');
+      return shelf.Response.internalServerError(
+        body: jsonEncode({'error': 'internal: $e'}),
+        headers: _jsonHeaders,
+      );
+    }
   }
 
   bool _isAuthorized(shelf.Request req) {
@@ -122,6 +182,12 @@ class AgentLlmServer {
 
   Future<shelf.Response> _handleModels(shelf.Request req) async {
     final cfg = _readConfig();
+    if (cfg.apiBaseUrl.isEmpty) {
+      return shelf.Response.internalServerError(
+        body: jsonEncode({'error': 'AI 配置未填写'}),
+        headers: _jsonHeaders,
+      );
+    }
     final upstream = _buildUpstreamUrl(cfg.apiBaseUrl, 'models');
     try {
       final resp = await http.get(
@@ -135,6 +201,7 @@ class AgentLlmServer {
         resp.statusCode,
         body: resp.bodyBytes,
         headers: {
+          ..._corsHeaders,
           'Content-Type':
               resp.headers['content-type'] ?? 'application/json',
         },
@@ -142,7 +209,7 @@ class AgentLlmServer {
     } catch (e) {
       return shelf.Response.internalServerError(
         body: jsonEncode({'error': e.toString()}),
-        headers: {'Content-Type': 'application/json'},
+        headers: _jsonHeaders,
       );
     }
   }
@@ -157,25 +224,33 @@ class AgentLlmServer {
       body = jsonDecode(await req.readAsString()) as Map<String, dynamic>;
     } catch (e) {
       return shelf.Response.badRequest(
-        body: jsonEncode({'error': 'invalid json'}),
-        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'error': 'invalid json: $e'}),
+        headers: _jsonHeaders,
       );
     }
+
+    // 记录客户端要流式还是非流式（NextChat 硬编码 stream=true）
+    final clientWantsStream = body['stream'] == true;
 
     final cfg = _readConfig();
     if (cfg.apiBaseUrl.isEmpty || cfg.apiKey.isEmpty) {
+      final err = {
+        'error': 'AI 配置未填写（请在设置 → AI 助手中配置）'
+      };
+      if (clientWantsStream) {
+        return _wrapAsSse(_buildErrorResponse(err['error']!), cfg.model);
+      }
       return shelf.Response.internalServerError(
-        body: jsonEncode({'error': 'AI 配置未填写（请在设置 → AI 助手中配置）'}),
-        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(err),
+        headers: _jsonHeaders,
       );
     }
 
-    // 强制非流式（NextChat 非流式分支不发 tools，且只读 message.content）
+    // 对上游：强制非流式
     body['stream'] = false;
-    // 强制用设置页的模型（NextChat 会话 mask 会残留旧值）
     if (cfg.model.isNotEmpty) body['model'] = cfg.model;
 
-    // 注入 tools + system prompt（含状态块）
+    // 注入 tools + system prompt
     final toolDefs = AgentToolRegistry.instance.toolDefinitions;
     if (toolDefs.isNotEmpty) {
       body['tools'] = toolDefs;
@@ -183,32 +258,52 @@ class AgentLlmServer {
       _ensureSystemPrompt(body);
     }
 
-    // 主循环
+    // 主循环（内部对上游都是非流式）
+    final finalResponse = await _runToolLoop(cfg, body);
+    if (finalResponse == null) {
+      const errMsg = '上游请求失败，请检查 AI 配置';
+      if (clientWantsStream) {
+        return _wrapAsSse(_buildErrorResponse(errMsg), cfg.model);
+      }
+      return shelf.Response.internalServerError(
+        body: jsonEncode({'error': errMsg}),
+        headers: _jsonHeaders,
+      );
+    }
+
+    // 按客户端期望返回
+    if (clientWantsStream) {
+      return _wrapAsSse(finalResponse, cfg.model);
+    }
+    return shelf.Response.ok(
+      jsonEncode(finalResponse),
+      headers: _jsonHeaders,
+    );
+  }
+
+  /// 工具调用主循环
+  Future<Map<String, dynamic>?> _runToolLoop(
+    _AiCfg cfg,
+    Map<String, dynamic> body,
+  ) async {
     var round = 0;
     while (round <= _maxToolRounds) {
       var resp = await _forwardOnce(cfg, body);
       if (resp == null && body['tool_choice'] is Map) {
-        // 降级重试
         debugPrint('[AgentLlmServer] 具体 tool_choice 被拒，降级为 auto');
         body['tool_choice'] = 'auto';
         resp = await _forwardOnce(cfg, body);
       }
-      if (resp == null) {
-        return shelf.Response.internalServerError(
-          body: jsonEncode({'error': '上游请求失败'}),
-          headers: {'Content-Type': 'application/json'},
-        );
-      }
+      if (resp == null) return null;
 
       final choices = resp['choices'];
-      if (choices is! List || choices.isEmpty) return _jsonResponse(resp);
+      if (choices is! List || choices.isEmpty) return resp;
       final msg = (choices[0] as Map)['message'];
       final toolCalls = msg is Map ? msg['tool_calls'] : null;
 
-      // ===== 模型没返回 tool_calls =====
+      // 无 tool_calls
       if (toolCalls is! List || toolCalls.isEmpty) {
         if (round == 0) {
-          // 唯一兜底入口：registry.matchFallback
           final messages = _messagesOf(body);
           final matched = AgentToolRegistry.instance.matchFallback(messages);
           if (matched != null) {
@@ -222,10 +317,10 @@ class AgentLlmServer {
             );
           }
         }
-        return _jsonResponse(resp);
+        return resp;
       }
 
-      // ===== 达上限 =====
+      // 达上限
       if (round == _maxToolRounds) {
         debugPrint('[AgentLlmServer] tool_calls 达上限，剥掉返回');
         final cleanedMsg = msg is Map
@@ -233,12 +328,11 @@ class AgentLlmServer {
             : msg;
         final newChoice = Map<String, dynamic>.from(choices[0] as Map)
           ..['message'] = cleanedMsg;
-        final patched = Map<String, dynamic>.from(resp)
+        return Map<String, dynamic>.from(resp)
           ..['choices'] = [newChoice];
-        return _jsonResponse(patched);
       }
 
-      // ===== 执行 tool_calls =====
+      // 执行 tool_calls
       final messages = _messagesOf(body);
       messages.add(Map<String, dynamic>.from(msg as Map));
       for (final tc in toolCalls) {
@@ -254,23 +348,89 @@ class AgentLlmServer {
       body['messages'] = messages;
       round++;
     }
-
-    return shelf.Response.internalServerError(
-      body: jsonEncode({'error': 'tool loop overflow'}),
-      headers: {'Content-Type': 'application/json'},
-    );
+    return null;
   }
 
   // ============================================================
-  // 内部：system prompt
+  // SSE 包装
   // ============================================================
 
-  /// 组装 system prompt：
-  ///   - 角色定位
-  ///   - 当前状态块（AppContextProvider 提供）
-  ///   - 工具选择规则
+  /// 把完整 JSON 响应包装成 SSE 流。
   ///
-  /// 如果已有 system message，追加；否则插入到最前。
+  /// 策略：一次性把完整 content 放进一个 delta 事件，NextChat 内部
+  /// 有 requestAnimationFrame 打字机，会自己逐帧显示。这样比拆分成
+  /// 多个事件更稳定（避免切坏 UTF-8 字符）。
+  shelf.Response _wrapAsSse(Map<String, dynamic> data, String model) {
+    final choices = data['choices'];
+    if (choices is! List || choices.isEmpty) {
+      return shelf.Response.ok('data: [DONE]\n\n', headers: _sseHeaders);
+    }
+
+    final msg = (choices[0] as Map)['message'];
+    final content = msg is Map ? (msg['content']?.toString() ?? '') : '';
+
+    final id = data['id']?.toString() ??
+        'chatcmpl-sse-${DateTime.now().millisecondsSinceEpoch}';
+    final created = data['created'] ??
+        (DateTime.now().millisecondsSinceEpoch ~/ 1000);
+    final actualModel = data['model']?.toString() ?? model;
+
+    final sb = StringBuffer();
+
+    // 内容 chunk（一次性发送完整文本）
+    if (content.isNotEmpty) {
+      final chunk = {
+        'id': id,
+        'object': 'chat.completion.chunk',
+        'created': created,
+        'model': actualModel,
+        'choices': [
+          {
+            'index': 0,
+            'delta': {'role': 'assistant', 'content': content},
+            'finish_reason': null,
+          }
+        ],
+      };
+      sb.write('data: ${jsonEncode(chunk)}\n\n');
+    }
+
+    // 结束 chunk
+    final finalChunk = {
+      'id': id,
+      'object': 'chat.completion.chunk',
+      'created': created,
+      'model': actualModel,
+      'choices': [
+        {
+          'index': 0,
+          'delta': {},
+          'finish_reason': 'stop',
+        }
+      ],
+    };
+    sb.write('data: ${jsonEncode(finalChunk)}\n\n');
+    sb.write('data: [DONE]\n\n');
+
+    return shelf.Response.ok(sb.toString(), headers: _sseHeaders);
+  }
+
+  Map<String, dynamic> _buildErrorResponse(String message) {
+    return {
+      'choices': [
+        {
+          'index': 0,
+          'message': {'role': 'assistant', 'content': message},
+          'finish_reason': 'stop',
+        }
+      ],
+    };
+  }
+
+  // ============================================================
+  // system prompt
+  // ============================================================
+
   void _ensureSystemPrompt(Map<String, dynamic> body) {
     final block = _buildSystemPrompt();
     final rawMessages = body['messages'];
@@ -313,10 +473,10 @@ $state
   }
 
   // ============================================================
-  // 内部：兜底执行
+  // 兜底执行
   // ============================================================
 
-  Future<shelf.Response> _executeForcedTool(
+  Future<Map<String, dynamic>?> _executeForcedTool(
     _AiCfg cfg,
     List<Map<String, dynamic>> messages,
     String toolName,
@@ -351,7 +511,6 @@ $state
       },
     ];
 
-    // 二次请求上游拿最终文本（不传 tools，避免模型又调一次）
     final resp = await _forwardOnce(cfg, {
       'model': cfg.model,
       'messages': newMessages,
@@ -366,14 +525,12 @@ $state
           final cleaned = Map<String, dynamic>.from(m)..remove('tool_calls');
           final fixed = Map<String, dynamic>.from(choices[0] as Map)
             ..['message'] = cleaned;
-          final patched = Map<String, dynamic>.from(resp)
-            ..['choices'] = [fixed];
-          return _jsonResponse(patched);
+          return Map<String, dynamic>.from(resp)..['choices'] = [fixed];
         }
       }
-      return _jsonResponse(resp);
+      return resp;
     }
-    return _jsonResponse(_buildFallbackResponse(cfg.model, toolName, args));
+    return _buildFallbackResponse(cfg.model, toolName, args);
   }
 
   Map<String, dynamic> _buildFallbackResponse(
@@ -399,13 +556,13 @@ $state
           'index': 0,
           'message': {'role': 'assistant', 'content': content},
           'finish_reason': 'stop',
-        },
+        }
       ],
     };
   }
 
   // ============================================================
-  // 内部：上游
+  // 上游转发
   // ============================================================
 
   Future<Map<String, dynamic>?> _forwardOnce(
@@ -414,6 +571,7 @@ $state
   ) async {
     final upstream = _buildUpstreamUrl(cfg.apiBaseUrl, 'chat/completions');
     try {
+      debugPrint('[AgentLlmServer] → POST $upstream');
       final resp = await http.post(
         Uri.parse(upstream),
         headers: {
@@ -423,28 +581,19 @@ $state
         body: jsonEncode(body),
       ).timeout(const Duration(seconds: 60));
       if (resp.statusCode < 200 || resp.statusCode >= 300) {
-        debugPrint('[AgentLlmServer] 上游 HTTP ${resp.statusCode}: ${resp.body}');
+        debugPrint(
+          '[AgentLlmServer] ← HTTP ${resp.statusCode}: ${resp.body}',
+        );
         return null;
       }
       final decoded = jsonDecode(resp.body);
       if (decoded is Map<String, dynamic>) return decoded;
       return null;
     } catch (e) {
-      debugPrint('[AgentLlmServer] 上游请求异常: $e');
+      debugPrint('[AgentLlmServer] ← 上游请求异常: $e');
       return null;
     }
   }
-
-  shelf.Response _jsonResponse(Map<String, dynamic> data) {
-    return shelf.Response.ok(
-      jsonEncode(data),
-      headers: {'Content-Type': 'application/json'},
-    );
-  }
-
-  // ============================================================
-  // 内部：工具
-  // ============================================================
 
   List<Map<String, dynamic>> _messagesOf(Map<String, dynamic> body) {
     final raw = body['messages'];
