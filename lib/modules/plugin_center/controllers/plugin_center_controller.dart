@@ -12,6 +12,7 @@ import 'package:yuanying/modules/plugin_center/services/market_manager.dart';
 import 'package:yuanying/modules/plugin_center/models/service_config.dart';
 import 'package:yuanying/modules/plugin_center/services/service_manager.dart';
 import 'package:yuanying/nodejs/nodejs_service.dart';
+import 'package:yuanying/modules/sandbox/services/sandbox_service_manager.dart';
 
 enum MarketFilter { all, updatable, installed, notInstalled }
 
@@ -212,6 +213,16 @@ class PluginCenterController extends GetxController {
           await NodeJSService.instance.stopForPluginDisabled();
         } catch (e) {
           debugPrint('[PluginCenterController] stop nodejs failed: $e');
+        }
+      }
+
+      // ===== 禁用 proot：停掉所有沙盒服务 =====
+      if (id == 'proot') {
+        try {
+          await SandboxServiceManager.instance.stopAll();
+        } catch (e) {
+          debugPrint(
+              '[PluginCenterController] stop sandbox services failed: $e');
         }
       }
 

@@ -20,6 +20,7 @@ import 'package:yuanying/modules/plugin_center/widgets/plugin_icon.dart';
 import 'package:yuanying/modules/plugin_center/widgets/python_deps_sheet.dart';
 import 'package:yuanying/modules/plugin_center/widgets/qjs_concurrency_dialog.dart';
 import 'package:yuanying/modules/plugin_center/widgets/py_keep_alive_dialog.dart';
+import 'package:yuanying/modules/setting/controllers/ai_config_controller.dart';
 
 class PluginTab extends StatefulWidget {
   const PluginTab({super.key});
@@ -799,6 +800,35 @@ class _InstalledPluginCard extends StatelessWidget {
         ));
         break;
 
+      case 'agent':
+        actions.add(_ActionBtn(
+          icon: Icons.smart_toy_outlined,
+          label: '打开 AI 助手',
+          onTap: () async {
+            // 先检查 AI 配置是否就绪
+            if (!Get.isRegistered<AiConfigController>()) {
+              Get.put(AiConfigController());
+            }
+            final ctrl = Get.find<AiConfigController>();
+            if (!ctrl.isReady) {
+              // 未配置 → 引导去设置页
+              Get.toNamed(AppPages.aiConfig);
+              SmartDialog.showToast('请先填写 API 基址和 Key');
+              return;
+            }
+            Get.toNamed(AppPages.agentUi);
+          },
+        ));
+        break;
+
+      case 'proot':
+        actions.add(_ActionBtn(
+          icon: Icons.terminal,
+          label: '打开沙盒',
+          onTap: () => Get.toNamed(AppPages.sandbox),
+        ));
+        break;
+
       case 'mediaProxy':
       case 'mediaProxy-win':
         actions.add(_ActionBtn(
@@ -1098,6 +1128,8 @@ class _InstalledPluginCard extends StatelessWidget {
         return '媒体代理服务';
       case 'mediaProxy-win':
         return '媒体代理服务（Windows）';
+      case 'proot':
+        return 'Linux 沙盒运行时（PRoot）';
       default:
         return id;
     }

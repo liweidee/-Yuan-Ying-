@@ -55,6 +55,7 @@ import 'package:yuanying/modules/subtitle_translation/models/subtitle_entry.dart
 import 'package:yuanying/modules/subtitle_translation/services/subtitle_srt_parser.dart';
 import 'package:yuanying/modules/subtitle_translation/services/subtitle_translation_service.dart';
 import 'package:yuanying/modules/subtitle_translation/services/translation_engine.dart';
+import 'package:yuanying/modules/agent_llm/models/playback_context.dart';
 
 class DetailController extends GetxController with GetTickerProviderStateMixin {
   // ===== tag 用于隔离控制器 =====
@@ -1770,6 +1771,28 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
       }
     };
     playerController.addStatusLister(_playCompletedListener!);
+
+    // ===== AI 助手：记录当前播放上下文（不影响任何现有逻辑，异常静默） =====
+    _recordPlaybackContext();
+  }
+
+  /// 记录当前播放上下文供 AI 工具读取（异常静默，不影响播放）
+  void _recordPlaybackContext() {
+    try {
+      final detail = introController.videoDetail.value;
+      final site = _currentSiteConfig ?? _sourceManager.currentSite.value;
+      PlaybackContextRegistry.instance.set(PlaybackContext(
+        vodId: vodId,
+        vodName: detail?.vodName ?? '',
+        episodeName: _currentEpisode?.name ?? '',
+        siteKey: site?['key']?.toString() ?? '',
+        siteName: site?['name']?.toString() ??
+            introController.sourceName.value,
+        controllerTag: _tag ?? '',
+      ));
+    } catch (e) {
+      debugPrint('[DetailController] _recordPlaybackContext 失败: $e');
+    }
   }
 
   /// 播放完成处理（根据播放顺序自动切换）
@@ -2748,6 +2771,11 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
 
     // 清理字幕翻译进度
     translationProgress.value = null;
+
+    // ===== AI 助手：清理播放上下文（仅当前 tag 匹配时清理，不影响多标签） =====
+    try {
+      PlaybackContextRegistry.instance.clearByTag(_tag);
+    } catch (_) {}
 
     super.onClose();
   }

@@ -5,6 +5,7 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <!-- 所有文件访问（Android 11+，用于 /storage/emulated/0/yuanying/） -->
     <uses-permission
@@ -231,6 +232,17 @@
             <intent-filter>
                 <action android:name="android.media.browse.MediaBrowserService" />
             </intent-filter>
+        </service>
+
+        <!-- 服务托管前台服务（沙盒/插件服务保活） -->
+        <service
+            android:name=".ServiceHostService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse"
+            tools:ignore="Instantiatable">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="sandbox_service_host" />
         </service>
 
         <activity

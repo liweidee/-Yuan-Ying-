@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'dart:io' show Platform;
 import 'package:yuanying/core/routes/app_pages.dart';
 import 'package:yuanying/core/theme/style.dart';
 
@@ -63,6 +64,39 @@ class LabPage extends StatelessWidget {
             title: '网页嗅探器',
             subtitle: '访问网页并嗅探视频资源，一键播放',
             route: AppPages.webSniffer,
+          ),
+          // ===== AI 助手 =====
+          const SizedBox(height: 12),
+          _buildEntry(
+            context,
+            theme,
+            icon: Icons.smart_toy_outlined,
+            title: 'AI 助手',
+            subtitle: '对话式遥控（NextChat 界面，需先安装 agent-ui 插件）',
+            route: AppPages.agentUi,
+          ),
+          const SizedBox(height: 12),
+          // ===== Linux 沙盒（仅 Android） =====
+          // if (Platform.isAndroid) ...[
+          //   _buildEntry(
+          //     context,
+          //     theme,
+          //     icon: Icons.terminal,
+          //     title: 'Linux 沙盒',
+          //     subtitle: '免 root 在手机上装一套完整 Linux（PRoot），'
+          //         '自由安装 node/python/ffmpeg 等并注册为常驻服务',
+          //     route: AppPages.sandbox,
+          //   ),
+          //   const SizedBox(height: 12),
+          // ],
+          _buildEntry(
+            context,
+            theme,
+            icon: Icons.terminal,
+            title: 'Linux 沙盒',
+            subtitle: '免 root 在手机上装一套完整 Linux（PRoot），'
+                '自由安装 node/python/ffmpeg 等并注册为常驻服务',
+            route: AppPages.sandbox,
           ),
           const SizedBox(height: 12),
           _buildEntry(

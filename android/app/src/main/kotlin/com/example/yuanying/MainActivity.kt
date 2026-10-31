@@ -261,6 +261,62 @@ class MainActivity : AudioServiceActivity(), MethodCallHandler {
                 eventSink = null
             }
         })
+        
+        // ===== 5) 服务托管前台服务（沙盒/插件服务保活） =====
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "com.example.yuanying/service_host"
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "start" -> {
+                    try {
+                        val intent = Intent(this, ServiceHostService::class.java).apply {
+                            @Suppress("UNCHECKED_CAST")
+                            val pidsArg = call.argument<List<Int>>("pids")
+                            putIntegerArrayListExtra(
+                                ServiceHostService.EXTRA_PIDS,
+                                if (pidsArg != null) ArrayList(pidsArg) else arrayListOf()
+                            )
+                            putExtra(
+                                ServiceHostService.EXTRA_COUNT,
+                                call.argument<Int>("count") ?: 0
+                            )
+                            call.argument<Int>("services")?.let {
+                                putExtra(ServiceHostService.EXTRA_SERVICES, it)
+                            }
+                            call.argument<Int>("plugins")?.let {
+                                putExtra(ServiceHostService.EXTRA_PLUGINS, it)
+                            }
+                            call.argument<String>("gw")?.let {
+                                putExtra(ServiceHostService.EXTRA_GW, it)
+                            }
+                        }
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            startForegroundService(intent)
+                        } else {
+                            startService(intent)
+                        }
+                        result.success(true)
+                    } catch (e: Exception) {
+                        android.util.Log.w("MainActivity", "service_host start failed: $e")
+                        result.success(false)
+                    }
+                }
+                "stopAll" -> {
+                    try {
+                        startService(
+                            Intent(this, ServiceHostService::class.java)
+                                .setAction(ServiceHostService.ACTION_STOP_ALL)
+                        )
+                        result.success(true)
+                    } catch (e: Exception) {
+                        android.util.Log.w("MainActivity", "service_host stopAll failed: $e")
+                        result.success(false)
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
     }
 
     override fun onDestroy() {

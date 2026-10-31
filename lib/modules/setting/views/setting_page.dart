@@ -130,6 +130,14 @@ class SettingPage extends StatelessWidget {
           const SizedBox(height: 8),
           _buildSettingItem(
             context: context,
+            icon: Icons.smart_toy_outlined,
+            title: 'AI 助手',
+            subtitle: '配置模型接口，打开 AI 对话界面',
+            onTap: () => Get.toNamed(AppPages.aiConfig),
+          ),
+          const SizedBox(height: 8),
+          _buildSettingItem(
+            context: context,
             icon: Icons.more_horiz,
             title: '其它设置',
             subtitle: '高级功能与调试选项',

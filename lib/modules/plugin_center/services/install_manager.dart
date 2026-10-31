@@ -28,6 +28,7 @@ import 'package:yuanying/modules/plugin_center/services/service_manager.dart';
 import 'package:yuanying/utils/storage_manager.dart';
 import 'package:yuanying/t4/services/python_runtime.dart';
 import 'package:yuanying/nodejs/nodejs_service.dart';
+import 'package:yuanying/modules/sandbox/services/sandbox_service_manager.dart';
 
 /// 安装阶段枚举
 enum InstallStage {
@@ -1136,6 +1137,16 @@ class InstallManager {
         await Future.delayed(const Duration(milliseconds: 500));
       } catch (e) {
         debugPrint('[InstallManager] stop nodejs service failed: $e');
+      }
+    }
+
+    // proot 卸载：先停所有沙盒服务
+    if (plugin.id == 'proot') {
+      try {
+        await SandboxServiceManager.instance.stopAll();
+        await Future.delayed(const Duration(milliseconds: 500));
+      } catch (e) {
+        debugPrint('[InstallManager] stop sandbox services failed: $e');
       }
     }
 
