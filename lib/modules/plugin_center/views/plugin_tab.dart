@@ -247,6 +247,32 @@ class _SystemInstalledPluginCard extends StatelessWidget {
   final VoidCallback onSolidified;
   final VoidCallback onUninstalled;
 
+  /// 只有 installMode=apk 的插件（py + 5 个第三方）走"登记"流程
+  /// installMode=import 的（qjs / agent）需要固化资源
+  bool _isApkOnlyPlugin(String pluginId) {
+    const apkOnly = {
+      'py',
+      'idmplus',
+      'mtmanager',
+      'aigw',
+      'raccoon',
+      'zhipu-gw',
+    };
+    return apkOnly.contains(pluginId);
+  }
+
+  /// 是否是第三方独立应用（登记后卸载走系统卸载，不删文件）
+  bool _isThirdPartyPlugin(String pluginId) {
+    const thirdParty = {
+      'idmplus',
+      'mtmanager',
+      'aigw',
+      'raccoon',
+      'zhipu-gw',
+    };
+    return thirdParty.contains(pluginId);
+  }
+
   const _SystemInstalledPluginCard({
     required this.info,
     required this.controller,
@@ -343,7 +369,7 @@ class _SystemInstalledPluginCard extends StatelessWidget {
                 onPressed: () => _onSolidify(context),
                 icon: const Icon(Icons.save_alt, size: 18),
                 label: Text(
-                  info.pluginId == 'py'
+                  _isApkOnlyPlugin(info.pluginId)
                       ? '登记为已安装（系统安装型）'
                       : '固化 APK 资源到应用内并卸载 APK',
                 ),
@@ -405,16 +431,52 @@ class _SystemInstalledPluginCard extends StatelessWidget {
         return '本地 JS 爬虫源执行引擎（QuickJS）：drpy2 与 drpy3 源统一由本插件执行。'
             '当前已通过系统安装器安装；固化后资源将提取到应用内，不再依赖系统应用。';
       case 'agent':
-        return '提供 AI 助手对话界面（NextChat 静态包）：经本地网关（动态端口 / agent-ui）托管，'
-            '由应用内置 Agent 运行时驱动，支持「写脚本 → 本地执行 → 自检修正」任务闭环。'
-            '需在设置「AI」页配置模型接口。';
+        return '提供 AI 助手对话界面（NextChat 静态包）：经本地网关托管，'
+            '由应用内置 Agent 运行时驱动。需在设置「AI」页配置模型接口。';
+      case 'py':
+        return '本地 Python 爬虫源执行引擎（Chaquopy）：type=3 的 .py 源自动进入点播源列表。'
+            '系统安装型插件必须保持 APK 形态（需要 AIDL/Service 桥接），仅做登记，卸载需走系统卸载。';
+      case 'idmplus':
+        return 'IDM+ 下载器（第三方独立应用）：多线程下载、断点续传。'
+            '本插件中心仅做"识别"，不影响该应用的正常使用。';
+      case 'mtmanager':
+        return 'MT管理器（第三方独立应用）：文件管理 + APK 反编译编辑。'
+            '本插件中心仅做"识别"。';
+      case 'aigw':
+        return 'AI 聚合网关（第三方独立应用）：本地 OpenAI 兼容 API 网关。'
+            '本插件中心仅做"识别"。';
+      case 'raccoon':
+        return '小浣熊（第三方独立应用）：本地 OpenAI 兼容 API 网关。'
+            '本插件中心仅做"识别"。';
+      case 'zhipu-gw':
+        return '智谱清言网关（第三方独立应用）：本机监听端口并转发到智谱清言。'
+            '本插件中心仅做"识别"。';
       default:
         return '系统安装的直装型插件，固化后资源将提取到应用内。';
     }
   }
 
   Future<void> _onSolidify(BuildContext context) async {
-    // 系统安装型插件（py）只能"登记"，不能"固化"（需保持 APK 形态以维持 AIDL/Service 桥接）
+    // 第三方应用：直接登记，不弹系统卸载
+    if (_isThirdPartyPlugin(info.pluginId)) {
+      SmartDialog.showLoading(msg: '正在登记…');
+      try {
+        final ok = await InstallManager.instance.solidifySystemPlugin(info);
+        SmartDialog.dismiss();
+        if (!ok) {
+          SmartDialog.showToast('操作失败，请重试');
+          return;
+        }
+        onSolidified();
+        SmartDialog.showToast('已登记为已安装（可在已装插件卡片卸载）');
+      } catch (e) {
+        SmartDialog.dismiss();
+        SmartDialog.showToast('操作失败：$e');
+      }
+      return;
+    }
+
+    // 系统安装型插件（py）只能"登记"，不能"固化"
     final isSystemApk = info.pluginId == 'py';
     SmartDialog.showLoading(
       msg: isSystemApk ? '正在登记…' : '正在固化资源…',
@@ -427,7 +489,6 @@ class _SystemInstalledPluginCard extends StatelessWidget {
         return;
       }
       if (isSystemApk) {
-        // 系统安装型：只登记，不卸载 APK
         onSolidified();
         SmartDialog.showToast('已登记为已安装（卸载请走插件卡卸载按钮）');
         return;
@@ -451,8 +512,13 @@ class _SystemInstalledPluginCard extends StatelessWidget {
         backgroundColor: colorScheme.surface,
         title: const Text('卸载系统应用',
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
-        content: Text('确定要卸载系统安装的「${info.title}」吗？\n'
-            '卸载后该卡片将不再显示，资源不会提取到应用内。'),
+        content: Text(
+            _isThirdPartyPlugin(info.pluginId)
+                ? '确定要卸载「${info.title}」吗？\n'
+                    '本操作会拉起系统卸载界面；取消不影响当前状态。'
+                : '确定要卸载系统安装的「${info.title}」吗？\n'
+                    '卸载后该卡片将不再显示，资源不会提取到应用内。',
+          ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -791,8 +857,8 @@ class _InstalledPluginCard extends StatelessWidget {
         // 保活开关：从 extras['pyKeepAlive'] 读状态，label 上带状态标识
         actions.add(_ActionBtn(
           icon: plugin.extras['pyKeepAlive'] == true
-              ? Icons.favorite
-              : Icons.favorite_border,
+              ? Icons.gpp_good
+              : Icons.gpp_bad,
           label: plugin.extras['pyKeepAlive'] == true
               ? '保活(已开)'
               : '保活设置',
@@ -826,6 +892,32 @@ class _InstalledPluginCard extends StatelessWidget {
           icon: Icons.terminal,
           label: '打开沙盒',
           onTap: () => Get.toNamed(AppPages.sandbox),
+        ));
+        break;
+
+      case 'idmplus':
+      case 'mtmanager':
+      case 'aigw':
+      case 'raccoon':
+      case 'zhipu-gw':
+        actions.add(_ActionBtn(
+          icon: Icons.open_in_new_outlined,
+          label: '打开应用',
+          onTap: () async {
+            final pkg = plugin.extras['apkPackage']?.toString();
+            if (pkg == null || pkg.isEmpty) {
+              SmartDialog.showToast('找不到包名');
+              return;
+            }
+            try {
+              const channel = MethodChannel('com.example.yuanying/storage');
+              await channel.invokeMethod<bool>('openAppDetails', {
+                'packageName': pkg,
+              });
+            } catch (e) {
+              SmartDialog.showToast('打开失败：$e');
+            }
+          },
         ));
         break;
 

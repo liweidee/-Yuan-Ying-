@@ -21,6 +21,9 @@ import 'package:yuanying/modules/sandbox/widgets/sandbox_service_log_sheet.dart'
 import 'package:yuanying/modules/webview/views/webview_page.dart';
 import 'package:yuanying/modules/sandbox/widgets/sandbox_import_dialog.dart';
 import 'package:yuanying/modules/sandbox/widgets/rootfs_install_dialog.dart';
+import 'package:yuanying/modules/sandbox/models/sandbox_pref.dart';
+import 'package:yuanying/modules/sandbox/widgets/rootfs_mirror_picker_dialog.dart';
+import 'package:yuanying/modules/sandbox/widgets/software_source_dialog.dart';
 
 class SandboxPage extends StatefulWidget {
   const SandboxPage({super.key});
@@ -109,14 +112,32 @@ class _SandboxPageState extends State<SandboxPage> {
     SmartDialog.showToast('项目已导入，可在下方列表中启动');
   }
 
+  Future<void> _changeSoftwareSource() async {
+    final distroId = _installedDistro;
+    if (distroId == null) return;
+    final changed = await showSoftwareSourceDialog(
+      context,
+      distroId: distroId,
+    );
+    if (changed && mounted) {
+      setState(() {});
+    }
+  }
+
   // ============================================================
   // rootfs
   // ============================================================
   Future<void> _installRootfs(DistroInfo distro) async {
     if (_installingRootfs) return;
+
+    final mirror = await showRootfsMirrorPickerDialog(
+      context,
+      distro: distro,
+    );
+    if (mirror == null) return; // 用户取消
+
     setState(() => _installingRootfs = true);
 
-    // 重装当前激活的 distro 时，先停掉所有正在运行的服务
     if (_installedDistro == distro.id) {
       for (final svc in _services) {
         if (SandboxServiceManager.instance.isRunning(svc.id)) {
@@ -129,6 +150,7 @@ class _SandboxPageState extends State<SandboxPage> {
       final ok = await showRootfsInstallDialog(
         context: context,
         distro: distro,
+        mirrorLabel: mirror == 'auto' ? null : mirror,
       );
       if (ok) {
         await _refreshState();
@@ -561,6 +583,17 @@ class _SandboxPageState extends State<SandboxPage> {
                   label: const Text('卸载'),
                 ),
               ],
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _changeSoftwareSource,
+                icon: const Icon(Icons.dns_outlined, size: 16),
+                label: Text(
+                  '沙盒软件源：${softwareSourceLabel(_installedDistro!, SandboxPref.softwareMirror)}（点击切换）',
+                ),
+              ),
             ),
           ],
         ],

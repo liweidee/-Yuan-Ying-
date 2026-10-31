@@ -618,7 +618,7 @@ class _HomePageState extends CommonPageState<HomePage>
               splashRadius: 22,
             ),
             IconButton(
-              icon: const Icon(Icons.star_border, size: 22),
+              icon: const Icon(Icons.favorite_border, size: 22),
               onPressed: () => Get.toNamed(AppPages.favorite),
               splashRadius: 22,
             ),

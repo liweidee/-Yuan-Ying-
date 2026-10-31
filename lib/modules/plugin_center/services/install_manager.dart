@@ -132,7 +132,21 @@ class InstallManager {
   /// 已知的系统安装型包名清单（installMode=apk，market.json 可能未声明 pkg）
   static const knownApkPackages = <String>[
     'com.dsplayer.plugin.python',
+    'idm.internet.download.manager.plus',
+    'bin.mt.plus.canary',
+    'dev.aigw.app',
+    'dev.raccoon2api',
+    'dev.agentmore2api',
   ];
+
+  /// 第三方应用包名（登记后仍可通过系统卸载）
+  static const _thirdPartyPackages = <String>{
+    'idm.internet.download.manager.plus',
+    'bin.mt.plus.canary',
+    'dev.aigw.app',
+    'dev.raccoon2api',
+    'dev.agentmore2api',
+  };
 
   /// id → 系统安装型包名映射（market.json 无 pkg 时兜底）
   static const _idToApkPackage = <String, String>{
@@ -145,12 +159,22 @@ class InstallManager {
     'com.dsplayer.plugin.qjs': 'qjs',
     'com.dsplayer.plugin.agent': 'agent',
     'com.dsplayer.plugin.python': 'py',
+    'idm.internet.download.manager.plus': 'idmplus',
+    'bin.mt.plus.canary': 'mtmanager',
+    'dev.aigw.app': 'aigw',
+    'dev.raccoon2api': 'raccoon',
+    'dev.agentmore2api': 'zhipu-gw',
   };
 
   static const _pkgToTitle = <String, String>{
     'com.dsplayer.plugin.qjs': 'QJS 爬虫引擎插件',
     'com.dsplayer.plugin.agent': 'AI 助手界面插件',
     'com.dsplayer.plugin.python': 'Python 爬虫引擎插件',
+    'idm.internet.download.manager.plus': 'IDM+ 下载器',
+    'bin.mt.plus.canary': 'MT管理器',
+    'dev.aigw.app': 'AI 聚合网关',
+    'dev.raccoon2api': '小浣熊',
+    'dev.agentmore2api': '智谱清言网关',
   };
 
   Box get _box => Hive.box(PluginStorageKeys.installedBox);
@@ -417,6 +441,32 @@ class InstallManager {
 
   Future<bool> solidifySystemPlugin(SystemInstalledPlugin info) async {
     if (!Platform.isAndroid) return false;
+
+    // 第三方应用直接登记，不需要读 APK 内容
+    if (_thirdPartyPackages.contains(info.packageName)) {
+      final apkPath = await _getApkPath(info.packageName);
+      await register(InstalledPlugin(
+        id: info.pluginId,
+        version: info.version.isEmpty ? '0.0.0' : info.version,
+        source: '系统应用',
+        installPath: apkPath ?? '',
+        enabled: true,
+        pinned: false,
+        installedAtMs: DateTime.now().millisecondsSinceEpoch,
+        type: 'apk',
+        desc: '第三方应用（通过 APK 安装，卸载需走系统卸载）',
+        extras: {
+          'platform': 'android',
+          'installMode': 'apk',
+          'apkPackage': info.packageName,
+          'thirdParty': true,
+        },
+      ));
+      debugPrint('[InstallManager] 已登记第三方应用：${info.pluginId} '
+          '(pkg=${info.packageName}, v=${info.version})');
+      return true;
+    }
+
     try {
       final apkPath = await _getApkPath(info.packageName);
       if (apkPath == null || apkPath.isEmpty) return false;

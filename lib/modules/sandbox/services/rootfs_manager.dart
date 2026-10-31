@@ -9,9 +9,9 @@ import 'package:path/path.dart' as p;
 
 import 'package:yuanying/http/init.dart';
 import 'package:yuanying/modules/sandbox/models/rootfs_progress.dart';
+import 'package:yuanying/modules/sandbox/models/sandbox_pref.dart';
 import 'package:yuanying/modules/sandbox/services/sandbox_paths.dart';
 
-/// 发行版元信息
 class DistroInfo {
   final String id;
   final String name;
@@ -28,7 +28,6 @@ class DistroInfo {
   });
 }
 
-/// 内置发行版（arm64 专用）
 const kDistros = <DistroInfo>[
   DistroInfo(
     id: 'alpine',
@@ -67,39 +66,65 @@ const kDistros = <DistroInfo>[
       (
         label: '官方',
         url:
-            'https://cdimage.ubuntu.com/ubuntu-base/releases/24.04.3/release/ubuntu-base-24.04.3-arm64.tar.gz',
+            'https://cdimage.ubuntu.com/ubuntu-base/releases/24.04.3/release/ubuntu-base-24.04.3-base-arm64.tar.gz',
       ),
     ],
   ),
 ];
 
-/// 用户取消异常
 class RootfsCancelledException implements Exception {
   @override
   String toString() => '已取消';
 }
 
-/// Rootfs 管理器
+/// 软件源元信息
+class SoftwareSource {
+  final String id;
+  final String label;
+  final String icon; // emoji 或短标识（UI 层转 IconData）
+  const SoftwareSource(this.id, this.label, this.icon);
+}
+
+/// 各发行版支持的软件源列表
+List<SoftwareSource> softwareSourcesFor(String distroId) {
+  if (distroId == 'alpine') {
+    return const [
+      SoftwareSource('aliyun', '阿里云', 'aliyun'),
+      SoftwareSource('tuna', '清华 TUNA', 'tuna'),
+      SoftwareSource('huawei', '华为云', 'huawei'),
+      SoftwareSource('official', '官方 CDN', 'official'),
+    ];
+  } else if (distroId == 'ubuntu') {
+    return const [
+      SoftwareSource('tuna', '清华 TUNA', 'tuna'),
+      SoftwareSource('aliyun', '阿里云', 'aliyun'),
+      SoftwareSource('huawei', '华为云', 'huawei'),
+      SoftwareSource('official', '官方', 'official'),
+    ];
+  }
+  return const [];
+}
+
+String softwareSourceLabel(String distroId, String id) {
+  for (final s in softwareSourcesFor(distroId)) {
+    if (s.id == id) return s.label;
+  }
+  return id;
+}
+
 class RootfsManager {
   RootfsManager._();
   static final RootfsManager instance = RootfsManager._();
 
   /// 安装 rootfs
   ///
-  /// [onProgress] 阶段与进度回调（必传，供 UI 渲染进度对话框）
-  /// [cancelToken] 用于取消下载
-  ///
-  /// 流程：
-  ///  1. 检查缓存（若已下完整包则跳过下载）
-  ///  2. 多镜像顺序尝试下载（失败自动切下一个）
-  ///  3. 清空旧 rootfs + 解压
-  ///  4. 修复权限
-  ///  5. 配置 DNS 与软件源
-  ///  6. 写 marker（含 installedAt 供多 distro 场景排序）
+  /// [mirrorLabel] null 表示 auto（全部镜像依序 fallback），
+  ///               非 null 表示只用指定镜像 label（如 '华为云'）
   Future<void> install(
     DistroInfo distro, {
     required void Function(RootfsProgress) onProgress,
     CancelToken? cancelToken,
+    String? mirrorLabel,
   }) async {
     final token = cancelToken ?? CancelToken();
 
@@ -123,7 +148,7 @@ class RootfsManager {
         await tgz.length() >= (distro.sizeBytes * 0.8).round();
 
     // ============================================================
-    // 2. 下载（多镜像 fallback）
+    // 2. 下载（按用户选择的镜像）
     // ============================================================
     if (!cachedOk) {
       if (tgz.existsSync()) {
@@ -132,13 +157,30 @@ class RootfsManager {
         } catch (_) {}
       }
 
+      // ★ 根据 mirrorLabel 决定候选镜像
+      List<({String label, String url})> targets;
+      if (mirrorLabel == null || mirrorLabel.isEmpty) {
+        targets = distro.mirrors; // auto：全部尝试
+      } else {
+        final matched = distro.mirrors
+            .where((m) => m.label == mirrorLabel)
+            .toList();
+        if (matched.isEmpty) {
+          throw Exception('镜像「$mirrorLabel」不存在');
+        }
+        targets = matched;
+      }
+
       DioException? lastDioError;
       Exception? lastError;
       bool downloaded = false;
 
-      for (int i = 0; i < distro.mirrors.length; i++) {
-        final mirror = distro.mirrors[i];
-        final tag = i == 0 ? '' : '（切换镜像 ${mirror.label}）';
+      for (int i = 0; i < targets.length; i++) {
+        final mirror = targets[i];
+        // 只在 auto 模式下、且不是第一个时才提示"切换镜像"
+        final tag = (mirrorLabel == null && i > 0)
+            ? '（切换镜像 ${mirror.label}）'
+            : '';
         emit(RootfsStage.downloading, detail: '从 ${mirror.label} 下载$tag');
 
         try {
@@ -147,8 +189,6 @@ class RootfsManager {
             tgz,
             token,
             (received, total) {
-              // 若服务器未给 Content-Length，用 distro.sizeBytes 作为估算，
-              // 这样进度条也能动起来
               final effectiveTotal = total > 0 ? total : distro.sizeBytes;
               emit(
                 RootfsStage.downloading,
@@ -181,7 +221,11 @@ class RootfsManager {
       }
 
       if (!downloaded) {
-        throw lastDioError ?? lastError ?? Exception('所有镜像均下载失败');
+        // 手动指定镜像失败 → 直接报错；auto 模式 → 全部失败
+        final msg = mirrorLabel != null
+            ? '镜像「$mirrorLabel」下载失败，请尝试其它源'
+            : '所有镜像均下载失败，请检查网络';
+        throw lastDioError ?? lastError ?? Exception(msg);
       }
     }
 
@@ -189,7 +233,6 @@ class RootfsManager {
     // 3. 清空旧 rootfs + 解压
     // ============================================================
     emit(RootfsStage.extracting);
-    // 让 UI 有机会渲染"正在解压"再开始（避免同步阻塞感知）
     await Future.delayed(const Duration(milliseconds: 80));
 
     final rootfsDir = await SandboxPaths.rootfs(distro.id);
@@ -200,7 +243,6 @@ class RootfsManager {
       } catch (_) {}
     }
 
-    // 清空旧内容
     final entries = await rootfsDir.list().toList();
     for (final e in entries) {
       try {
@@ -224,7 +266,7 @@ class RootfsManager {
     await _fixPermissions(rootfsDir);
 
     // ============================================================
-    // 5. 配置网络
+    // 5. 配置网络（DNS + 软件源，软件源用用户偏好）
     // ============================================================
     emit(RootfsStage.configuring);
     await _setupNetwork(distro, rootfsDir);
@@ -248,7 +290,34 @@ class RootfsManager {
     emit(RootfsStage.done);
   }
 
-  /// 卸载 rootfs
+  /// 应用软件源（用户运行中切换）
+  ///
+  /// 写配置文件；不刷新索引（让调用方决定是否跑 apk/apt update）
+  Future<void> applySoftwareSource(String distroId, String sourceId) async {
+    final distro = kDistros.firstWhere(
+      (d) => d.id == distroId,
+      orElse: () => throw Exception('未知发行版：$distroId'),
+    );
+    final rootfs = await SandboxPaths.rootfs(distroId);
+    final marker = await SandboxPaths.installedMarker(distroId);
+    if (!marker.existsSync()) {
+      throw Exception('rootfs 未安装');
+    }
+
+    switch (distroId) {
+      case 'alpine':
+        await _applyAlpineSoftwareSource(distro, rootfs, sourceId);
+        break;
+      case 'ubuntu':
+        await _applyUbuntuSoftwareSource(rootfs, sourceId);
+        break;
+      default:
+        throw Exception('$distroId 不支持切换软件源');
+    }
+
+    await SandboxPref.setSoftwareMirror(sourceId);
+  }
+
   Future<void> uninstall(String distroId) async {
     final rootfs = await SandboxPaths.rootfs(distroId);
     if (rootfs.existsSync()) {
@@ -275,7 +344,6 @@ class RootfsManager {
     }
   }
 
-  /// 返回当前激活的 distro（按 installedAt 最新）
   Future<String?> currentInstalledDistro() async {
     String? latestId;
     DateTime? latestTime;
@@ -299,7 +367,7 @@ class RootfsManager {
   }
 
   // ============================================================
-  // 下载（手动 stream，保证即使无 Content-Length 也有进度）
+  // 下载
   // ============================================================
   Future<void> _download(
     String url,
@@ -348,13 +416,12 @@ class RootfsManager {
     }
 
     if (received < 1024) {
-      // 极端情况：拿到空包
       throw Exception('下载内容为空');
     }
   }
 
   // ============================================================
-  // 网络配置（DNS + 软件源）
+  // 网络配置
   // ============================================================
   Future<void> _setupNetwork(DistroInfo distro, Directory rootfs) async {
     final resolv = File(p.join(rootfs.path, 'etc/resolv.conf'));
@@ -369,12 +436,18 @@ class RootfsManager {
       'nameserver 119.29.29.29\n',
     );
 
+    // ★ 用偏好里保存的软件源；若没装过，按默认
+    String sourceId = SandboxPref.softwareMirror;
+    if (sourceId.isEmpty) {
+      sourceId = SandboxPref.defaultSoftwareMirrorFor(distro.id);
+    }
+
     switch (distro.id) {
       case 'alpine':
-        await _setupAlpineRepos(distro, rootfs);
+        await _applyAlpineSoftwareSource(distro, rootfs, sourceId);
         break;
       case 'ubuntu':
-        await _setupUbuntuRepos(rootfs);
+        await _applyUbuntuSoftwareSource(rootfs, sourceId);
         break;
       default:
         break;
@@ -390,22 +463,71 @@ class RootfsManager {
     }
   }
 
-  Future<void> _setupAlpineRepos(
+  // ============================================================
+  // 软件源映射表
+  // ============================================================
+
+  /// Alpine 镜像基础 URL（不含 /main /community）
+  String? _alpineMirrorBase(String sourceId, String minor) {
+    switch (sourceId) {
+      case 'aliyun':
+        return 'https://mirrors.aliyun.com/alpine/v$minor';
+      case 'tuna':
+        return 'https://mirrors.tuna.tsinghua.edu.cn/alpine/v$minor';
+      case 'huawei':
+        return 'https://mirrors.huaweicloud.com/alpine/v$minor';
+      case 'official':
+        return 'https://dl-cdn.alpinelinux.org/alpine/v$minor';
+      default:
+        return null;
+    }
+  }
+
+  /// Ubuntu 镜像基础 URL（不含 codename 部分）
+  String? _ubuntuMirrorBase(String sourceId) {
+    switch (sourceId) {
+      case 'tuna':
+        return 'https://mirrors.tuna.tsinghua.edu.cn/ubuntu-ports/';
+      case 'aliyun':
+        return 'https://mirrors.aliyun.com/ubuntu-ports/';
+      case 'huawei':
+        return 'https://mirrors.huaweicloud.com/ubuntu-ports/';
+      case 'official':
+        return 'http://ports.ubuntu.com/ubuntu-ports/';
+      default:
+        return null;
+    }
+  }
+
+  Future<void> _applyAlpineSoftwareSource(
     DistroInfo distro,
     Directory rootfs,
+    String sourceId,
   ) async {
     final minor = _majorMinorVersion(distro.version);
+    final baseUrl = _alpineMirrorBase(sourceId, minor);
+    if (baseUrl == null) {
+      throw Exception('不支持的 Alpine 软件源：$sourceId');
+    }
     final apkRepos = File(p.join(rootfs.path, 'etc/apk/repositories'));
-    if (!apkRepos.parent.existsSync()) return;
+    if (!apkRepos.parent.existsSync()) {
+      throw Exception('rootfs 目录结构异常（etc/apk 不存在）');
+    }
     await apkRepos.writeAsString(
-      'https://mirrors.aliyun.com/alpine/v$minor/main\n'
-      'https://mirrors.aliyun.com/alpine/v$minor/community\n',
+      '$baseUrl/main\n'
+      '$baseUrl/community\n',
     );
   }
 
-  Future<void> _setupUbuntuRepos(Directory rootfs) async {
+  Future<void> _applyUbuntuSoftwareSource(
+    Directory rootfs,
+    String sourceId,
+  ) async {
+    final baseUrl = _ubuntuMirrorBase(sourceId);
+    if (baseUrl == null) {
+      throw Exception('不支持的 Ubuntu 软件源：$sourceId');
+    }
     const codename = 'noble';
-    const mirror = 'https://mirrors.tuna.tsinghua.edu.cn/ubuntu-ports/';
 
     final keyring = File(p.join(
       rootfs.path,
@@ -421,7 +543,7 @@ class RootfsManager {
     if (hasKeyring) {
       await sourcesDeb822.writeAsString('''
 Types: deb
-URIs: $mirror
+URIs: $baseUrl
 Suites: $codename $codename-updates $codename-backports $codename-security
 Components: main restricted universe multiverse
 Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
@@ -429,7 +551,7 @@ Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
     } else {
       await sourcesDeb822.writeAsString('''
 Types: deb
-URIs: $mirror
+URIs: $baseUrl
 Suites: $codename $codename-updates $codename-backports $codename-security
 Components: main restricted universe multiverse
 Trusted: yes
@@ -451,7 +573,7 @@ Trusted: yes
   }
 
   // ============================================================
-  // 解压
+  // 解压 & 权限（与原实现相同）
   // ============================================================
   Future<void> _extractTarGz(File tgz, Directory target) async {
     final bytes = await tgz.readAsBytes();

@@ -9,10 +9,14 @@ import 'package:yuanying/modules/sandbox/services/rootfs_manager.dart';
 
 /// 显示 rootfs 安装进度对话框。
 ///
+/// [mirrorLabel] 为 null 表示 auto（全部镜像顺序 fallback）；
+///               非 null 表示只用指定镜像（如 '清华'），失败不 fallback。
+///
 /// 返回 true 表示安装成功；false 表示失败或被取消。
 Future<bool> showRootfsInstallDialog({
   required BuildContext context,
   required DistroInfo distro,
+  String? mirrorLabel,
 }) async {
   final progressNotifier = ValueNotifier<RootfsProgress>(
     const RootfsProgress(stage: RootfsStage.checking),
@@ -63,7 +67,6 @@ Future<bool> showRootfsInstallDialog({
     },
   );
 
-  // 让 dialog 有时间渲染
   await Future.delayed(const Duration(milliseconds: 50));
 
   try {
@@ -73,6 +76,7 @@ Future<bool> showRootfsInstallDialog({
         progressNotifier.value = p;
       },
       cancelToken: cancelToken,
+      mirrorLabel: mirrorLabel,
     );
     finished = true;
     progressNotifier.value = const RootfsProgress(stage: RootfsStage.done);
@@ -135,7 +139,6 @@ class _RootfsProgressDialog extends StatefulWidget {
 }
 
 class _RootfsProgressDialogState extends State<_RootfsProgressDialog> {
-  // 速度计算
   int _lastReceived = 0;
   DateTime _lastTime = DateTime.now();
   double _speedBytesPerSec = 0;
@@ -168,7 +171,6 @@ class _RootfsProgressDialogState extends State<_RootfsProgressDialog> {
         child: ValueListenableBuilder<RootfsProgress>(
           valueListenable: widget.progressNotifier,
           builder: (context, p, _) {
-            // 速度采样（只在下载阶段）
             if (p.stage == RootfsStage.downloading) {
               final now = DateTime.now();
               final dt = now.difference(_lastTime).inMilliseconds;
@@ -189,16 +191,13 @@ class _RootfsProgressDialogState extends State<_RootfsProgressDialog> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // 阶段
                 Row(
                   children: [
                     Container(
                       width: 8,
                       height: 8,
                       decoration: BoxDecoration(
-                        color: isDone
-                            ? Colors.green
-                            : colorScheme.primary,
+                        color: isDone ? Colors.green : colorScheme.primary,
                         shape: BoxShape.circle,
                       ),
                     ),
@@ -208,9 +207,7 @@ class _RootfsProgressDialogState extends State<_RootfsProgressDialog> {
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
-                        color: isDone
-                            ? Colors.green
-                            : colorScheme.primary,
+                        color: isDone ? Colors.green : colorScheme.primary,
                       ),
                     ),
                     const Spacer(),
@@ -227,8 +224,6 @@ class _RootfsProgressDialogState extends State<_RootfsProgressDialog> {
                   ],
                 ),
                 const SizedBox(height: 10),
-
-                // 进度条
                 if (p.stage == RootfsStage.downloading)
                   LinearProgressIndicator(
                     value: showPercent ? p.percent : null,
@@ -247,10 +242,7 @@ class _RootfsProgressDialogState extends State<_RootfsProgressDialog> {
                     minHeight: 6,
                     borderRadius: BorderRadius.circular(3),
                   ),
-
                 const SizedBox(height: 12),
-
-                // 大小与速度
                 if (showPercent)
                   Row(
                     children: [
@@ -282,8 +274,6 @@ class _RootfsProgressDialogState extends State<_RootfsProgressDialog> {
                       color: colorScheme.outline,
                     ),
                   ),
-
-                // 阶段说明
                 const SizedBox(height: 10),
                 Text(
                   p.detail ?? p.stageDesc,
@@ -293,8 +283,6 @@ class _RootfsProgressDialogState extends State<_RootfsProgressDialog> {
                     height: 1.5,
                   ),
                 ),
-
-                // 解压阶段的温馨提示
                 if (p.stage == RootfsStage.extracting) ...[
                   const SizedBox(height: 6),
                   Text(
