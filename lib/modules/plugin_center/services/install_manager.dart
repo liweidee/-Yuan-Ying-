@@ -106,11 +106,20 @@ class SystemInstalledPlugin {
   final String title;
   final String version;
 
+  /// 'import' 或 'apk'：决定 UI 显示"固化"还是"登记"
+  ///
+  /// - `import`：解压型 APK 容器（qjs / agent / mpv），点按钮提取资源到应用内
+  /// - `apk`：系统安装型（py / ijk / bundle / ffmpeg / 第三方应用），点按钮只登记
+  ///
+  /// 默认 `import`，保证未传此字段的旧调用行为不变。
+  final String installMode;
+
   const SystemInstalledPlugin({
     required this.packageName,
     required this.pluginId,
     required this.title,
     required this.version,
+    this.installMode = 'import',
   });
 }
 
@@ -449,12 +458,22 @@ class InstallManager {
     // 合并 import 型（qjs/agent/mpv）和 apk 型（python/ijk/bundle/ffmpeg 等）所有已知包
     final pkgToId = <String, String>{..._pkgToId};
     final pkgToTitle = <String, String>{..._pkgToTitle};
-    final allPackages = <String>{
-      ...knownImportPackages,
-      ...knownApkPackages,
-    };
+    // 包名 → installMode。来源优先级：硬编码清单 > market.json。
+    // 两者冲突时硬编码优先（人工核对过的映射不被市场数据覆盖）。
+    final pkgToMode = <String, String>{};
+    final allPackages = <String>{};
 
-    // 市场数据兜底：market.json 里带 pkg 的条目会动态纳入扫描范围
+    // 1. 硬编码兜底：import 型
+    for (final pkg in knownImportPackages) {
+      allPackages.add(pkg);
+      pkgToMode[pkg] = 'import';
+    }
+    // 2. 硬编码兜底：apk 型
+    for (final pkg in knownApkPackages) {
+      allPackages.add(pkg);
+      pkgToMode[pkg] = 'apk';
+    }
+    // 3. 市场数据：动态补充 pkg / id / title / mode（硬编码优先，不覆盖）
     if (marketEntries != null) {
       for (final entry in marketEntries) {
         final pkg = entry.pkg;
@@ -463,9 +482,13 @@ class InstallManager {
         // type=apk，或 type=import 但下载物是 .apk（解压型 APK 容器）
         if (entry.type != 'apk' && !_isApkUrl(entry.url)) continue;
         allPackages.add(pkg);
-        // 硬编码优先：人工核对过的映射不被市场数据覆盖
         pkgToId.putIfAbsent(pkg, () => entry.id);
         pkgToTitle.putIfAbsent(pkg, () => entry.name);
+        // installMode 从 market.json 的 type 推断；硬编码已存在的不覆盖
+        pkgToMode.putIfAbsent(
+          pkg,
+          () => entry.type == 'apk' ? 'apk' : 'import',
+        );
       }
     }
 
@@ -480,6 +503,7 @@ class InstallManager {
         pluginId: id,
         title: pkgToTitle[pkg] ?? id,
         version: version,
+        installMode: pkgToMode[pkg] ?? 'import',
       ));
     }
     return result;

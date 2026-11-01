@@ -29,7 +29,7 @@ class PluginTab extends StatefulWidget {
   State<PluginTab> createState() => _PluginTabState();
 }
 
-class _PluginTabState extends State<PluginTab> {
+class _PluginTabState extends State<PluginTab> with WidgetsBindingObserver {
   final TextEditingController _searchCtrl = TextEditingController();
   bool _showSearch = false;
 
@@ -37,26 +37,80 @@ class _PluginTabState extends State<PluginTab> {
   final RxList<SystemInstalledPlugin> _systemPlugins =
       <SystemInstalledPlugin>[].obs;
 
-  /// 是否正在扫描
+  /// 是否正在用户主动扫描（用于顶部 loading 圈显隐）
   final RxBool _scanning = false.obs;
+
+  /// 静默扫描标志：resumed 触发时使用，不显示 loading 圈。
+  /// 与 _scanning 互斥：任一为 true 时另一个不再启动，防止并发 MethodChannel 调用。
+  bool _backgroundScanning = false;
+
+  /// 上次扫描成功的时间戳，用于 resumed 重扫节流
+  DateTime? _lastScanAt;
+
+  /// resumed 重扫的最小间隔，避免每次切回 App 都重扫
+  static const Duration _rescanThrottle = Duration(seconds: 2);
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     // 首次进入自动扫描一次
     WidgetsBinding.instance.addPostFrameCallback((_) => _scanSystemPlugins());
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _searchCtrl.dispose();
     super.dispose();
   }
 
-  Future<void> _scanSystemPlugins() async {
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // 只在 Android 上做系统包状态刷新（其他平台无系统直装型插件）
     if (!Platform.isAndroid) return;
+    if (state != AppLifecycleState.resumed) return;
+
+    // 节流：距上次扫描不足 2 秒则跳过。
+    // 覆盖「切到系统设置卸载 → 切回 App」和「系统卸载框操作后返回」两个主场景，
+    // 同时避免频繁切前台时反复走 MethodChannel。
+    final now = DateTime.now();
+    final last = _lastScanAt;
+    if (last != null && now.difference(last) < _rescanThrottle) return;
+
+    _scanSystemPlugins(silent: true);
+  }
+
+  /// 扫描系统安装的直装型插件。
+  ///
+  /// [silent]：true 表示由生命周期（resumed）触发的后台静默扫描，
+  ///           不显示顶部 loading 圈；false 表示用户主动点扫描按钮。
+  Future<void> _scanSystemPlugins({bool silent = false}) async {
+    if (!Platform.isAndroid) return;
+
+    if (silent) {
+      // 静默扫描：与 _scanning 互斥，任一方在跑则跳过本次
+      if (_backgroundScanning || _scanning.value) return;
+      _backgroundScanning = true;
+      try {
+        await _doScan();
+      } finally {
+        _backgroundScanning = false;
+      }
+      return;
+    }
+
+    // 用户主动扫描：显示 loading 圈
     if (_scanning.value) return;
     _scanning.value = true;
+    try {
+      await _doScan();
+    } finally {
+      _scanning.value = false;
+    }
+  }
+
+  Future<void> _doScan() async {
     try {
       // 传入市场条目：market.json 里有 pkg 字段的条目会被动态纳入扫描。
       // marketEntries 为空时退化为硬编码兜底，覆盖所有已知包名。
@@ -66,10 +120,9 @@ class _PluginTabState extends State<PluginTab> {
       );
       if (!mounted) return;
       _systemPlugins.assignAll(list);
+      _lastScanAt = DateTime.now();
     } catch (e) {
       debugPrint('[PluginTab] scan failed: $e');
-    } finally {
-      _scanning.value = false;
     }
   }
 
@@ -360,7 +413,7 @@ class _SystemInstalledPluginCard extends StatelessWidget {
                 onPressed: () => _onSolidify(context),
                 icon: const Icon(Icons.save_alt, size: 18),
                 label: Text(
-                  info.pluginId == 'py'
+                  info.installMode == 'apk'
                       ? '登记为已安装（系统安装型）'
                       : '固化 APK 资源到应用内并卸载 APK',
                 ),
@@ -426,13 +479,18 @@ class _SystemInstalledPluginCard extends StatelessWidget {
             '由应用内置 Agent 运行时驱动，支持「写脚本 → 本地执行 → 自检修正」任务闭环。'
             '需在设置「AI」页配置模型接口。';
       default:
-        return '系统安装的直装型插件，固化后资源将提取到应用内。';
+        return info.installMode == 'apk'
+            ? '系统安装的第三方应用，登记后可被市场识别为已安装；'
+                  '如需移除请走「卸载」按钮拉起系统卸载。'
+            : '系统安装的直装型插件，固化后资源将提取到应用内。';
     }
   }
 
   Future<void> _onSolidify(BuildContext context) async {
-    // 系统安装型插件（py）只能"登记"，不能"固化"（需保持 APK 形态以维持 AIDL/Service 桥接）
-    final isSystemApk = info.pluginId == 'py';
+    // 按 installMode 判定，不再硬编码 pluginId == 'py'。
+    // installMode=apk（py/ijk/bundle/ffmpeg/第三方应用）：只登记，不提取资源；
+    // installMode=import（qjs/agent/mpv）：提取资源到应用内，再拉起系统卸载。
+    final isSystemApk = info.installMode == 'apk';
     SmartDialog.showLoading(
       msg: isSystemApk ? '正在登记…' : '正在固化资源…',
     );
@@ -449,7 +507,7 @@ class _SystemInstalledPluginCard extends StatelessWidget {
         SmartDialog.showToast('已登记为已安装（卸载请走插件卡卸载按钮）');
         return;
       }
-      // import 型（qjs/agent）：固化后拉起系统卸载
+      // import 型（qjs/agent/mpv）：固化后拉起系统卸载
       await InstallManager.instance.uninstallSystemPackage(info.packageName);
       onSolidified();
       SmartDialog.showToast('资源已固化；若未卸载系统应用，可稍后在插件卡卸载');
