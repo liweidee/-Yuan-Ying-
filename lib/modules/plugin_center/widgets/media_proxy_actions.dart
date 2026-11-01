@@ -17,10 +17,28 @@ import 'package:yuanying/modules/plugin_center/services/plugin_paths.dart';
 import 'package:yuanying/modules/plugin_center/services/service_manager.dart';
 import 'package:yuanying/modules/webview/views/webview_page.dart';
 
+/// mediaProxy 服务固定 id（插件卡启动服务时由本文件创建）
+const String _serviceId = 'svc-mkt-mediaProxy-win';
+
+/// 读取媒体代理端口。
+///
+/// 从 Hive 注册表读最新 extras，而不是从传入的 plugin 快照读。
+/// 原因：用户可能刚在配置对话框里改了端口保存，但插件卡片的
+/// plugin 对象尚未刷新（updateExtras 不回传新对象），
+/// 直接用 plugin.extras 会拿到过期端口。
 int _getProxyPort(InstalledPlugin plugin) {
-  final v = plugin.extras['mediaProxyPort'];
+  final latest = InstallManager.instance.findInstalled(plugin.id);
+  final extras = latest?.extras ?? plugin.extras;
+  final v = extras['mediaProxyPort'];
   if (v is int) return v;
   return 5575;
+}
+
+/// 读取额外启动参数（同样从 Hive 读最新值）
+String _getExtraArgs(InstalledPlugin plugin) {
+  final latest = InstallManager.instance.findInstalled(plugin.id);
+  final extras = latest?.extras ?? plugin.extras;
+  return extras['mediaProxyExtraArgs']?.toString() ?? '';
 }
 
 /// 打开 Web：先探一次端口再打开
@@ -81,10 +99,11 @@ class _MediaProxyConfigDialogState extends State<_MediaProxyConfigDialog> {
   @override
   void initState() {
     super.initState();
+    // 从 Hive 读最新值，保证打开对话框时展示的是最新保存的端口
     final port = _getProxyPort(widget.plugin);
     _portCtrl = TextEditingController(text: '$port');
     _extraArgsCtrl = TextEditingController(
-      text: widget.plugin.extras['mediaProxyExtraArgs']?.toString() ?? '',
+      text: _getExtraArgs(widget.plugin),
     );
   }
 
@@ -164,12 +183,34 @@ class _MediaProxyConfigDialogState extends State<_MediaProxyConfigDialog> {
       SmartDialog.showToast('端口无效（1-65535）');
       return;
     }
-    final extras = Map<String, dynamic>.from(widget.plugin.extras);
+
+    // 从 Hive 读最新 extras，避免基于旧 plugin 快照覆盖其他字段
+    final latest = InstallManager.instance.findInstalled(widget.plugin.id);
+    final extras = Map<String, dynamic>.from(
+      latest?.extras ?? widget.plugin.extras,
+    );
     extras['mediaProxyPort'] = port;
     extras['mediaProxyExtraArgs'] = _extraArgsCtrl.text.trim();
     await InstallManager.instance.updateExtras(widget.plugin.id, extras);
+
+    // 关键修复：通知插件中心刷新 installedList。
+    // 否则本页内的后续操作（点启动服务 / 再次编辑）仍读到旧 extras。
+    if (Get.isRegistered<PluginCenterController>()) {
+      Get.find<PluginCenterController>().reloadInstalled();
+    }
+
+    // 检查服务是否正在运行：端口变更必须重启服务才能生效
+    final currentStatus = ServiceManager.instance.getStatus(_serviceId);
+    final wasRunning = currentStatus == ServiceStatus.running ||
+        currentStatus == ServiceStatus.starting;
+
     if (mounted) Navigator.pop(context);
-    SmartDialog.showToast('已保存');
+
+    if (wasRunning) {
+      SmartDialog.showToast('已保存，需停止并重新启动服务才能生效');
+    } else {
+      SmartDialog.showToast('已保存');
+    }
   }
 }
 
@@ -179,6 +220,7 @@ Future<void> startMediaProxyService(
   InstalledPlugin plugin,
 ) async {
   final controller = Get.find<PluginCenterController>();
+  // 从 Hive 读最新端口与参数，避免 plugin 是旧快照时用错端口启动
   final port = _getProxyPort(plugin);
 
   final exePath = _resolveMediaProxyExe(plugin);
@@ -187,18 +229,16 @@ Future<void> startMediaProxyService(
     return;
   }
 
-  const serviceId = 'svc-mkt-mediaProxy-win';
-
-  final extra = plugin.extras['mediaProxyExtraArgs']?.toString() ?? '';
+  final extra = _getExtraArgs(plugin);
   final argsList = <String>['-port', '$port'];
   if (extra.trim().isNotEmpty) {
     argsList.addAll(extra.trim().split(RegExp(r'\s+')));
   }
 
-  final serverDir = await PluginPaths.serverDir(serviceId);
+  final serverDir = await PluginPaths.serverDir(_serviceId);
 
   final config = ServiceConfig(
-    id: serviceId,
+    id: _serviceId,
     name: '媒体代理服务',
     port: port,
     runtime: plugin.id,
@@ -210,8 +250,17 @@ Future<void> startMediaProxyService(
   await ServiceManager.instance.addOrUpdate(config);
   controller.reloadServices();
 
+  // 关键修复：如果服务已在运行（端口可能已变更），先停止再启动。
+  // 否则 ServiceManager.start 检测到 running 状态会直接 return，
+  // 导致 Hive 里配置端口已改、但实际运行进程还在用旧端口。
+  final currentStatus = ServiceManager.instance.getStatus(_serviceId);
+  if (currentStatus == ServiceStatus.running ||
+      currentStatus == ServiceStatus.starting) {
+    await ServiceManager.instance.stop(_serviceId);
+  }
+
   try {
-    await ServiceManager.instance.start(serviceId);
+    await ServiceManager.instance.start(_serviceId);
     // 成功/失败提示由 ServiceManager.onEvent 统一处理
   } catch (_) {
     // 错误由 ServiceManager.onEvent 统一处理

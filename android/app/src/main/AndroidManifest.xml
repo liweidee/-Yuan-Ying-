@@ -25,6 +25,10 @@
         <package android:name="com.dsplayer.plugin.python" />
         <package android:name="com.dsplayer.plugin.qjs" />
         <package android:name="com.dsplayer.plugin.agent" />
+        <package android:name="com.dsplayer.plugin.mpv" />
+        <package android:name="com.dsplayer.plugin.ijk" />
+        <package android:name="com.dsplayer.plugin.bundle" />
+        <package android:name="com.dsplayer.plugin.ffmpeg" />
         <package android:name="idm.internet.download.manager.plus" />
         <package android:name="bin.mt.plus.canary" />
         <package android:name="dev.aigw.app" />

@@ -127,11 +127,15 @@ class InstallManager {
   static const knownImportPackages = <String>[
     'com.dsplayer.plugin.qjs',
     'com.dsplayer.plugin.agent',
+    'com.dsplayer.plugin.mpv',
   ];
 
   /// 已知的系统安装型包名清单（installMode=apk，market.json 可能未声明 pkg）
   static const knownApkPackages = <String>[
     'com.dsplayer.plugin.python',
+    'com.dsplayer.plugin.ijk',
+    'com.dsplayer.plugin.bundle',
+    'com.dsplayer.plugin.ffmpeg',
     'idm.internet.download.manager.plus',
     'bin.mt.plus.canary',
     'dev.aigw.app',
@@ -151,6 +155,14 @@ class InstallManager {
   /// id → 系统安装型包名映射（market.json 无 pkg 时兜底）
   static const _idToApkPackage = <String, String>{
     'py': 'com.dsplayer.plugin.python',
+    'ijk': 'com.dsplayer.plugin.ijk',
+    'bundle': 'com.dsplayer.plugin.bundle',
+    'ffmpeg': 'com.dsplayer.plugin.ffmpeg',
+    'idmplus': 'idm.internet.download.manager.plus',
+    'mtmanager': 'bin.mt.plus.canary',
+    'aigw': 'dev.aigw.app',
+    'raccoon': 'dev.raccoon2api',
+    'zhipu-gw': 'dev.agentmore2api',
   };
 
   String? _knownApkPackageFor(String id) => _idToApkPackage[id];
@@ -158,7 +170,11 @@ class InstallManager {
   static const _pkgToId = <String, String>{
     'com.dsplayer.plugin.qjs': 'qjs',
     'com.dsplayer.plugin.agent': 'agent',
+    'com.dsplayer.plugin.mpv': 'mpv',
     'com.dsplayer.plugin.python': 'py',
+    'com.dsplayer.plugin.ijk': 'ijk',
+    'com.dsplayer.plugin.bundle': 'bundle',
+    'com.dsplayer.plugin.ffmpeg': 'ffmpeg',
     'idm.internet.download.manager.plus': 'idmplus',
     'bin.mt.plus.canary': 'mtmanager',
     'dev.aigw.app': 'aigw',
@@ -169,7 +185,11 @@ class InstallManager {
   static const _pkgToTitle = <String, String>{
     'com.dsplayer.plugin.qjs': 'QJS 爬虫引擎插件',
     'com.dsplayer.plugin.agent': 'AI 助手界面插件',
+    'com.dsplayer.plugin.mpv': 'MPV 播放内核插件',
     'com.dsplayer.plugin.python': 'Python 爬虫引擎插件',
+    'com.dsplayer.plugin.ijk': 'IJK 播放内核插件',
+    'com.dsplayer.plugin.bundle': '插件整合包',
+    'com.dsplayer.plugin.ffmpeg': 'FFmpeg 软解插件',
     'idm.internet.download.manager.plus': 'IDM+ 下载器',
     'bin.mt.plus.canary': 'MT管理器',
     'dev.aigw.app': 'AI 聚合网关',
@@ -413,26 +433,52 @@ class InstallManager {
   // 系统安装的直装型插件：扫描 + 固化
   // ============================================================
 
-  Future<List<SystemInstalledPlugin>> scanSystemImportPlugins() async {
+  /// 扫描系统安装的直装型插件。
+  ///
+  /// [marketEntries]：市场条目列表。传入后会从 market.json 的 `pkg` 字段
+  /// 动态补充「包名 → 市场 id」映射。不传（null）时退化为纯硬编码，
+  /// 与旧版行为完全一致。
+  ///
+  /// 返回项已排除「注册表里已登记」的条目。
+  Future<List<SystemInstalledPlugin>> scanSystemImportPlugins({
+    List<MarketEntry>? marketEntries,
+  }) async {
     if (!Platform.isAndroid) return [];
     final result = <SystemInstalledPlugin>[];
 
-    // 合并 import 型（qjs/agent）和 apk 型（python）所有已知包
-    final allPackages = <String>[
+    // 合并 import 型（qjs/agent/mpv）和 apk 型（python/ijk/bundle/ffmpeg 等）所有已知包
+    final pkgToId = <String, String>{..._pkgToId};
+    final pkgToTitle = <String, String>{..._pkgToTitle};
+    final allPackages = <String>{
       ...knownImportPackages,
       ...knownApkPackages,
-    ];
+    };
+
+    // 市场数据兜底：market.json 里带 pkg 的条目会动态纳入扫描范围
+    if (marketEntries != null) {
+      for (final entry in marketEntries) {
+        final pkg = entry.pkg;
+        if (pkg == null || pkg.isEmpty) continue;
+        // 只关注可能以 APK 形态系统安装的条目：
+        // type=apk，或 type=import 但下载物是 .apk（解压型 APK 容器）
+        if (entry.type != 'apk' && !_isApkUrl(entry.url)) continue;
+        allPackages.add(pkg);
+        // 硬编码优先：人工核对过的映射不被市场数据覆盖
+        pkgToId.putIfAbsent(pkg, () => entry.id);
+        pkgToTitle.putIfAbsent(pkg, () => entry.name);
+      }
+    }
 
     for (final pkg in allPackages) {
       final installed = await _isPackageInstalled(pkg);
       if (!installed) continue;
-      final id = _pkgToId[pkg] ?? pkg;
+      final id = pkgToId[pkg] ?? pkg;
       if (findInstalled(id) != null) continue;
       final version = await _getPackageVersion(pkg) ?? '';
       result.add(SystemInstalledPlugin(
         packageName: pkg,
         pluginId: id,
-        title: _pkgToTitle[pkg] ?? id,
+        title: pkgToTitle[pkg] ?? id,
         version: version,
       ));
     }
@@ -441,32 +487,6 @@ class InstallManager {
 
   Future<bool> solidifySystemPlugin(SystemInstalledPlugin info) async {
     if (!Platform.isAndroid) return false;
-
-    // 第三方应用直接登记，不需要读 APK 内容
-    if (_thirdPartyPackages.contains(info.packageName)) {
-      final apkPath = await _getApkPath(info.packageName);
-      await register(InstalledPlugin(
-        id: info.pluginId,
-        version: info.version.isEmpty ? '0.0.0' : info.version,
-        source: '系统应用',
-        installPath: apkPath ?? '',
-        enabled: true,
-        pinned: false,
-        installedAtMs: DateTime.now().millisecondsSinceEpoch,
-        type: 'apk',
-        desc: '第三方应用（通过 APK 安装，卸载需走系统卸载）',
-        extras: {
-          'platform': 'android',
-          'installMode': 'apk',
-          'apkPackage': info.packageName,
-          'thirdParty': true,
-        },
-      ));
-      debugPrint('[InstallManager] 已登记第三方应用：${info.pluginId} '
-          '(pkg=${info.packageName}, v=${info.version})');
-      return true;
-    }
-
     try {
       final apkPath = await _getApkPath(info.packageName);
       if (apkPath == null || apkPath.isEmpty) return false;
@@ -521,13 +541,26 @@ class InstallManager {
         return true;
       }
 
-      // ===== installMode = import：可固化的插件（qjs/agent）=====
+      // ===== installMode = import：可固化的插件（qjs/agent/mpv）=====
       if (installMode != 'import') return false;
+
+      // 版本来源优先级：plugin.json.pluginVersion > APK versionName > '0.0.0'
+      // 原因：市场安装时登记的 version 取自 market.json 的 version 字段
+      // （实际对应 plugin.json.pluginVersion）。固化时若用 APK 的 versionName，
+      // 同一插件会出现「市场安装」与「系统固化」登记出不同 version，
+      // 导致 installStateOf 误判为「可更新」或「未安装」。
+      // 当前 qjs(1.0.5) / agent(1.1.0) / mpv(1.0.2) 三包两值恰好一致，
+      // 此改动对现有场景零行为变化；仅在未来版本号分叉时防止错判。
+      final pluginVersionInJson = pluginJson['pluginVersion']?.toString();
+      final effectiveVersion = (pluginVersionInJson != null &&
+              pluginVersionInJson.isNotEmpty)
+          ? pluginVersionInJson
+          : (info.version.isEmpty ? '0.0.0' : info.version);
 
       final fakeEntry = MarketEntry(
         id: info.pluginId,
         name: info.title,
-        version: info.version.isEmpty ? '0.0.0' : info.version,
+        version: effectiveVersion,
         url: '',
         sizeBytes: 0,
         type: 'apk',
@@ -927,6 +960,20 @@ class InstallManager {
       }
 
       final apkPackage = entry.pkg ?? _knownApkPackageFor(entry.id);
+      if (apkPackage == null || apkPackage.isEmpty) {
+        // 数据缺陷告警：type=apk 但 pkg 缺失。
+        // 不抛错（避免"系统已装但注册表无记录"导致市场反复拉起安装器，
+        // 形成用户无法自愈的死循环）。
+        // 不阻塞 register（保证插件 Tab 不显示固化卡片）。
+        // 后果：isInstalled 因 pkg 缺失返回 false，市场卡片保持"安装"状态；
+        // 用户可从插件 Tab 扫描 → 固化 → solidifySystemPlugin 的 apk 分支
+        // 会用 info.packageName 正确登记 extras.apkPackage 而自愈。
+        // 发现此日志时应：在 market.json 补 pkg，或在 _idToApkPackage 补兜底。
+        debugPrint(
+          '[InstallManager] WARN: 插件 ${entry.id} 缺少 pkg，'
+          'apkPackage 将登记为空，isInstalled 判定会始终为 false',
+        );
+      }
       await register(InstalledPlugin(
         id: entry.id,
         version: entry.version,
