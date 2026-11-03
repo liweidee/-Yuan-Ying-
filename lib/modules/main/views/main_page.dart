@@ -225,6 +225,8 @@ class _MainPageState extends State<MainPage> {
     // 1. 基础 NavigationBar
     // ============================================================
     final baseNavigationBar = NavigationBar(
+      backgroundColor: SettingPref.bgActive ? Colors.transparent : null,
+      surfaceTintColor: SettingPref.bgActive ? Colors.transparent : null,
       height: 56,
       elevation: 0,
       selectedIndex: selectedIndex,
@@ -267,6 +269,7 @@ class _MainPageState extends State<MainPage> {
 
     // ========== 紧凑风格 BottomNavigationBar ==========
     Widget compactBottomBar = BottomNavigationBar(
+      backgroundColor: SettingPref.bgActive ? Colors.transparent : null,
       currentIndex: selectedIndex,
       onTap: _controller.switchPage,
       type: BottomNavigationBarType.fixed,
@@ -287,6 +290,8 @@ class _MainPageState extends State<MainPage> {
     // 2. 胶囊 NavigationBar
     // ============================================================
     final capsuleNavigationBar = NavigationBar(
+      backgroundColor: SettingPref.bgActive ? Colors.transparent : null,
+      surfaceTintColor: SettingPref.bgActive ? Colors.transparent : null,
       height: 70,
       elevation: 0,
       selectedIndex: selectedIndex,
@@ -325,7 +330,8 @@ class _MainPageState extends State<MainPage> {
     // 2.5 极简 NavigationBar（仅图标，隐藏文字）
     // ============================================================
     final minimalNavigationBar = NavigationBar(
-      // 与 _getBottomBarHeight 中 minimal 分支保持一致
+      backgroundColor: SettingPref.bgActive ? Colors.transparent : null,
+      surfaceTintColor: SettingPref.bgActive ? Colors.transparent : null,
       height: 48,
       elevation: 0,
       selectedIndex: selectedIndex,

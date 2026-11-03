@@ -71,6 +71,8 @@ class _NetworkMainShellState extends State<NetworkMainShell> {
           switch (style) {
             case NavigationBarStyle.default_:
               bottomBar = NavigationBar(
+                backgroundColor: SettingPref.bgActive ? Colors.transparent : null,
+                surfaceTintColor: SettingPref.bgActive ? Colors.transparent : null,
                 height: 56,
                 elevation: 0,
                 selectedIndex: _selectedIndex.value,
@@ -98,6 +100,7 @@ class _NetworkMainShellState extends State<NetworkMainShell> {
 
             case NavigationBarStyle.defaultCompact:
               bottomBar = BottomNavigationBar(
+                backgroundColor: SettingPref.bgActive ? Colors.transparent : null,
                 currentIndex: _selectedIndex.value,
                 onTap: (i) => _selectedIndex.value = i,
                 type: BottomNavigationBarType.fixed,
@@ -137,6 +140,8 @@ class _NetworkMainShellState extends State<NetworkMainShell> {
             case NavigationBarStyle.capsule:
             default:
               bottomBar = NavigationBar(
+                backgroundColor: SettingPref.bgActive ? Colors.transparent : null,
+                surfaceTintColor: SettingPref.bgActive ? Colors.transparent : null,
                 height: 70,
                 elevation: 0,
                 selectedIndex: _selectedIndex.value,

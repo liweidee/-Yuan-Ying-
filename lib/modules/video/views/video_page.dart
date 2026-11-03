@@ -345,6 +345,19 @@ class _DetailPageState extends State<DetailPage>
       onPopInvokedWithResult: controller.playerController.onPopInvokedWithResult,
       child: Obx(
         () {
+          // 显式依赖 isFullScreen 和 engineSwitchNotifier
+          // 原因一：PLVideoPlayer 内部的 build 方法使用局部变量 isFullScreen
+          //   （取自 plPlayerController.isFullScreen.value），只在 PLVideoPlayer
+          //   重建时才会重新读取。若不依赖 isFullScreen，全屏切换时 PLVideoPlayer
+          //   不重建，AppBarAni 的 isFullScreen 参数永远是旧值，导致
+          //   ViewSafeArea(bottom: isFullScreen) 在全屏时也不会加底部 padding，
+          //   控件被 iOS Home Indicator 遮挡。
+          // 原因二：引擎切换后 isFullScreen 的 RxBool 会换成新引擎的，
+          //   依赖 engineSwitchNotifier 可以在引擎切换完成时强制 PLVideoPlayer
+          //   重建，从而订阅新引擎的 isFullScreen 和 dataStatus。
+          final _isFullScreen = controller.playerController.isFullScreen.value;
+          final _engineSwitch = controller.engineSwitchNotifier.value;
+
           final bool hasVideo = controller.currentPlayUrl.value.isNotEmpty &&
               controller.playerController.dataStatus.value == DataStatus.loaded;
           if (!hasVideo) {
@@ -629,6 +642,18 @@ class _DetailPageState extends State<DetailPage>
     themeData = theme;
 
     return Obx(() {
+      // 显式依赖 engineSwitchNotifier
+      // 根本原因：PlPlayerController.isFullScreen 的 getter 每次调用都返回
+      // _ensureEngine().isFullScreen，即「当前引擎」的 RxBool。引擎切换后，
+      // 旧引擎的 RxBool 被废弃，新引擎的 RxBool 是新对象。
+      // 但 Obx 在首次 build 时已订阅旧引擎的 RxBool，引擎切换后不会自动
+      // 重新订阅新引擎的 RxBool，导致之后 isFullScreen 的变化无法感知，
+      // 全屏按钮「点了没反应」。
+      // 加入对 engineSwitchNotifier 的依赖后，引擎切换完成时会强制重建
+      // 当前 Obx，重建时重新调用 playerController.isFullScreen 并订阅
+      // 新引擎的 RxBool，之后全屏状态变化就能正常感知。
+      final _engineSwitch = controller.engineSwitchNotifier.value;
+
       final ColorScheme colorScheme = theme.colorScheme;
 
       if (controller.isLoadingDetail.value) {

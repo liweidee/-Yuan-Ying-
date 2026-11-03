@@ -116,6 +116,8 @@ class JellyfinMainShell extends StatelessWidget {
           ];
 
           final baseNavigationBar = NavigationBar(
+            backgroundColor: SettingPref.bgActive ? Colors.transparent : null,
+            surfaceTintColor: SettingPref.bgActive ? Colors.transparent : null,
             height: 56,
             elevation: 0,
             selectedIndex: selectedIndex.value,
@@ -157,6 +159,7 @@ class JellyfinMainShell extends StatelessWidget {
           );
 
           final compactBottomBar = BottomNavigationBar(
+            backgroundColor: SettingPref.bgActive ? Colors.transparent : null,
             currentIndex: selectedIndex.value,
             onTap: (index) => selectedIndex.value = index,
             type: BottomNavigationBarType.fixed,
@@ -174,6 +177,8 @@ class JellyfinMainShell extends StatelessWidget {
           );
 
           final capsuleNavigationBar = NavigationBar(
+            backgroundColor: SettingPref.bgActive ? Colors.transparent : null,
+            surfaceTintColor: SettingPref.bgActive ? Colors.transparent : null,
             height: 70,
             elevation: 0,
             selectedIndex: selectedIndex.value,
