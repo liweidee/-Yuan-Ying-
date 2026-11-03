@@ -92,9 +92,9 @@ abstract final class ThemeUtils {
       brightness: brightness,
       textTheme: baseTextTheme,  // 应用字重
 
-      // 背景壁纸激活时，让默认 Scaffold 背景透出壁纸
+      // 全局 Scaffold 底色：开启壁纸给 15% 极淡底，否则 100% 实色
       scaffoldBackgroundColor: SettingPref.bgActive
-          ? Colors.transparent
+          ? colorScheme.surface.withValues(alpha: 0.15)
           : colorScheme.surface,
 
       appBarTheme: AppBarTheme(
