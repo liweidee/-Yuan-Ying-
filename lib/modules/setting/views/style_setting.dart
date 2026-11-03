@@ -67,18 +67,10 @@ class _StyleSettingState extends State<StyleSetting> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-    // 动态背景色
-    final bgColor = SettingPref.bgActive ? Colors.transparent : colorScheme.surface;
 
     return Scaffold(
-      backgroundColor: bgColor,
       appBar: AppBar(
         title: const Text('外观设置'),
-        centerTitle: false,
-        elevation: 0,
-        backgroundColor: bgColor,
-        foregroundColor: theme.colorScheme.onSurface,
       ),
       body: ListView(
         padding: const EdgeInsets.all(Style.safeSpace),

@@ -4,7 +4,6 @@ import 'package:get/get.dart';
 import 'package:yuanying/core/theme/style.dart';
 import 'package:yuanying/plugin/pl_player/player_pref.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
-import 'package:yuanying/modules/setting/models/setting_pref.dart';
 
 class PlaySpeedSetPage extends StatefulWidget {
   const PlaySpeedSetPage({super.key});
@@ -163,16 +162,10 @@ class _PlaySpeedSetPageState extends State<PlaySpeedSetPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    final bgColor = SettingPref.bgActive ? Colors.transparent : colorScheme.surface;
 
     return Scaffold(
-      backgroundColor: bgColor,
       appBar: AppBar(
         title: const Text('倍速设置'),
-        centerTitle: false,
-        elevation: 0,
-        backgroundColor: colorScheme.surface,
-        foregroundColor: colorScheme.onSurface,
         actions: [
           TextButton(
             onPressed: _reset,

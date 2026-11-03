@@ -24,19 +24,13 @@ class _ExtraSettingPageState extends State<ExtraSettingPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    final bgColor = SettingPref.bgActive ? Colors.transparent : colorScheme.surface;
     final showAppBar = widget.showAppBar;
 
     return Scaffold(
-      backgroundColor: bgColor,
       resizeToAvoidBottomInset: false,
       appBar: showAppBar
           ? AppBar(
               title: const Text('其它设置'),
-              centerTitle: false,
-              elevation: 0,
-              backgroundColor: bgColor,
-              foregroundColor: theme.colorScheme.onSurface,
             )
           : null,
       body: ListView(

@@ -45,17 +45,10 @@ class _PlaySettingPageState extends State<PlaySettingPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-    final bgColor = SettingPref.bgActive ? Colors.transparent : colorScheme.surface;
 
     return Scaffold(
-      backgroundColor: bgColor,
       appBar: AppBar(
         title: const Text('播放设置'),
-        centerTitle: false,
-        elevation: 0,
-        backgroundColor: bgColor,
-        foregroundColor: colorScheme.onSurface,
       ),
       body: ListView(
         padding: const EdgeInsets.all(Style.safeSpace),

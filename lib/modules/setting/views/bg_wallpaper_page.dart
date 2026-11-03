@@ -39,18 +39,10 @@ class _BgWallpaperPageState extends State<BgWallpaperPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
-    
-    // 页面底色：如果没有开启壁纸，用实色；如果开启了，用透明让底层壁纸透出来
-    final bgColor = SettingPref.bgActive ? Colors.transparent : cs.surface;
 
     return Scaffold(
-      backgroundColor: bgColor,
       appBar: AppBar(
         title: const Text('背景壁纸'),
-        centerTitle: false,
-        elevation: 0,
-        backgroundColor: bgColor,
-        foregroundColor: cs.onSurface,
       ),
       body: Obx(() {
         final _ = ctrl.version.value;

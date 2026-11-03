@@ -7,7 +7,6 @@ import 'package:yuanying/core/theme/style.dart';
 import 'package:yuanying/modules/subtitle_translation/services/subtitle_translation_service.dart';
 import 'package:yuanying/modules/subtitle_translation/services/translation_engine.dart';
 import 'package:yuanying/plugin/pl_player/player_pref.dart';
-import 'package:yuanying/modules/setting/models/setting_pref.dart';
 
 class SubtitleTranslationPage extends StatefulWidget {
   const SubtitleTranslationPage({super.key});
@@ -106,17 +105,10 @@ class _SubtitleTranslationPageState extends State<SubtitleTranslationPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-    final bgColor = SettingPref.bgActive ? Colors.transparent : colorScheme.surface;
 
     return Scaffold(
-      backgroundColor: bgColor,
       appBar: AppBar(
         title: const Text('字幕翻译'),
-        centerTitle: false,
-        elevation: 0,
-        backgroundColor: bgColor,
-        foregroundColor: colorScheme.onSurface,
       ),
       body: ListView(
         padding: const EdgeInsets.all(Style.safeSpace),

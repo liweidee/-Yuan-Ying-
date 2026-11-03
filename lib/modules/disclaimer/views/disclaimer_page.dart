@@ -12,8 +12,6 @@ class DisclaimerPage extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         title: const Text('免责声明'),
-        centerTitle: false,
-        elevation: 0,
       ),
       body: Column(
         children: [

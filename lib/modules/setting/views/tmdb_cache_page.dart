@@ -7,7 +7,6 @@ import 'package:yuanying/services/tmdb_match_cache_service.dart';
 import 'package:yuanying/t4/services/source_manager.dart';
 import 'package:yuanying/modules/setting/controllers/tmdb_config_controller.dart';
 import 'package:yuanying/models/tmdb_match_record.dart';
-import 'package:yuanying/modules/setting/models/setting_pref.dart';
 
 class TmdbCachePage extends StatefulWidget {
   const TmdbCachePage({super.key});
@@ -94,19 +93,13 @@ class _TmdbCachePageState extends State<TmdbCachePage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    final bgColor = SettingPref.bgActive ? Colors.transparent : colorScheme.surface;
 
     return Scaffold(
-      backgroundColor: bgColor,
       appBar: AppBar(
         title: const Text(
           'TMDB 匹配缓存',
           style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
         ),
-        centerTitle: true,
-        elevation: 0,
-        backgroundColor: bgColor,
-        foregroundColor: colorScheme.onSurface,
         leading: IconButton(
           icon: Icon(Icons.arrow_back_ios_new, color: colorScheme.onSurface),
           onPressed: () => Get.back(),

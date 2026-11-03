@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:yuanying/core/theme/style.dart';
 import 'package:yuanying/modules/setting/controllers/tmdb_config_controller.dart';
-import 'package:yuanying/modules/setting/models/setting_pref.dart';
 
 class TmdbMatchPage extends StatefulWidget {
   const TmdbMatchPage({super.key});
@@ -41,18 +40,12 @@ class _TmdbMatchPageState extends State<TmdbMatchPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    final bgColor = SettingPref.bgActive ? Colors.transparent : colorScheme.surface;
     final enabledCount = controller.getEnabledCount();
     final totalCount = controller.getSites().length;
 
     return Scaffold(
-      backgroundColor: bgColor,
       appBar: AppBar(
         title: const Text('站源 TMDB 匹配', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
-        centerTitle: true,
-        elevation: 0,
-        backgroundColor: bgColor,
-        foregroundColor: colorScheme.onSurface,
         leading: IconButton(
           icon: Icon(Icons.arrow_back_ios_new, color: colorScheme.onSurface),
           onPressed: () => Get.back(),

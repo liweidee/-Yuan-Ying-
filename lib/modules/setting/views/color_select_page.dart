@@ -4,7 +4,6 @@ import 'package:yuanying/core/theme/style.dart';
 import 'package:yuanying/models/common/theme/theme_color_type.dart';
 import 'package:yuanying/common/widgets/color_palette.dart';
 import 'package:yuanying/utils/theme_utils.dart';
-import 'package:yuanying/modules/setting/models/setting_pref.dart';
 
 class ColorSelectPage extends StatefulWidget {
   const ColorSelectPage({super.key});
@@ -26,16 +25,10 @@ class _ColorSelectPageState extends State<ColorSelectPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    final bgColor = SettingPref.bgActive ? Colors.transparent : colorScheme.surface;
 
     return Scaffold(
-      backgroundColor: bgColor,
       appBar: AppBar(
         title: const Text('选择应用主题'),
-        centerTitle: false,
-        elevation: 0,
-        backgroundColor: bgColor,
-        foregroundColor: colorScheme.onSurface,
         actions: [
           TextButton(
             onPressed: () {

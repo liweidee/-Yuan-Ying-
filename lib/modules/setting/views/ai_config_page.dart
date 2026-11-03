@@ -10,7 +10,6 @@ import 'package:yuanying/modules/plugin_center/services/install_manager.dart';
 import 'package:yuanying/modules/setting/controllers/ai_config_controller.dart';
 import 'package:yuanying/modules/setting/models/ai_config.dart';
 import 'package:yuanying/modules/setting/widgets/model_picker_sheet.dart';
-import 'package:yuanying/modules/setting/models/setting_pref.dart';
 
 class AiConfigPage extends StatefulWidget {
   const AiConfigPage({super.key});
@@ -201,19 +200,13 @@ class _AiConfigPageState extends State<AiConfigPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    final bgColor = SettingPref.bgActive ? Colors.transparent : colorScheme.surface;
 
     return Scaffold(
-      backgroundColor: bgColor,
       appBar: AppBar(
         title: const Text(
           'AI 助手',
           style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
         ),
-        centerTitle: false,
-        elevation: 0,
-        backgroundColor: bgColor,
-        foregroundColor: colorScheme.onSurface,
       ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(
