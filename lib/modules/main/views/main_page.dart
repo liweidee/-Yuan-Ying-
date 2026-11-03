@@ -24,7 +24,6 @@ class _MainPageState extends State<MainPage> {
   void initState() {
     super.initState();
     _controller = Get.put(MainController());
-    // 不再监听生命周期，保活逻辑已移入 NodeJSService
   }
 
   @override
@@ -76,10 +75,8 @@ class _MainPageState extends State<MainPage> {
         }
       },
       child: Obx(() {
-        // 依赖 navStyleVersion，样式切换后触发重建
         final _ = _controller.navStyleVersion.value;
 
-        // 监听壁纸版本变化，确保底栏/侧边栏实时响应壁纸开启与关闭
         if (Get.isRegistered<BgConfigController>()) {
           final _ = Get.find<BgConfigController>().version.value;
         }
@@ -93,7 +90,6 @@ class _MainPageState extends State<MainPage> {
           return Scaffold(
             extendBody: true,
             resizeToAvoidBottomInset: false,
-            // 开启壁纸时让 Scaffold 透明，否则继承原有表面颜色
             backgroundColor: bgActive ? Colors.transparent : colorScheme.surface,
             appBar: AppBar(
               toolbarHeight: 0,
@@ -101,7 +97,7 @@ class _MainPageState extends State<MainPage> {
               elevation: 0,
               systemOverlayStyle: SystemUiOverlayStyle(
                 statusBarColor: Colors.transparent,
-                statusBarIconBrightness: Theme.of(context).brightness == Brightness.light
+                statusBarIconBrightness: theme.brightness == Brightness.light
                     ? Brightness.dark
                     : Brightness.light,
               ),
@@ -115,6 +111,8 @@ class _MainPageState extends State<MainPage> {
           );
         } else {
           // ================= 桌面端 =================
+          final isDark = theme.brightness == Brightness.dark;
+          
           return Scaffold(
             resizeToAvoidBottomInset: false,
             backgroundColor: bgActive ? Colors.transparent : colorScheme.surface,
@@ -124,14 +122,14 @@ class _MainPageState extends State<MainPage> {
               elevation: 0,
               systemOverlayStyle: SystemUiOverlayStyle(
                 statusBarColor: Colors.transparent,
-                statusBarIconBrightness: Theme.of(context).brightness == Brightness.light
+                statusBarIconBrightness: theme.brightness == Brightness.light
                     ? Brightness.dark
                     : Brightness.light,
               ),
             ),
             body: Row(
               children: [
-                // 桌面端左侧导航栏：经过性能与清晰度优化的毛玻璃
+                // 桌面端左侧导航栏：必须有 ClipRect 限制范围！
                 RepaintBoundary(
                   child: ClipRect(
                     child: BackdropFilter(
@@ -144,56 +142,31 @@ class _MainPageState extends State<MainPage> {
                           top: padding.top + 15,
                           bottom: padding.bottom + 15,
                         ),
-                        decoration: BoxDecoration(
-                          // 桌面端侧栏透明度回调至 0.60，平衡色彩透出与图标清晰度
-                          color: bgActive
-                              ? colorScheme.surface.withValues(alpha: 0.60)
-                              : colorScheme.surface,
-                          border: Border(
-                            right: BorderSide(
-                              color: colorScheme.outline.withValues(alpha: 0.08),
-                              width: 1,
-                            ),
-                          ),
-                        ),
-                        // 饱和度滤镜系数降为 1.1
-                        child: ColorFiltered(
-                          colorFilter: bgActive
-                              ? const ColorFilter.matrix(<double>[
-                                  1.1, 0, 0, 0, 0,
-                                  0, 1.1, 0, 0, 0,
-                                  0, 0, 1.1, 0, 0,
-                                  0, 0, 0, 1, 0,
-                                ])
-                              : const ColorFilter.matrix(<double>[
-                                  1, 0, 0, 0, 0,
-                                  0, 1, 0, 0, 0,
-                                  0, 0, 1, 0, 0,
-                                  0, 0, 0, 1, 0,
-                                ]),
-                          child: Column(
-                            children: [
-                              _buildAppLogo(),
-                              const SizedBox(height: 16),
-                              Expanded(
-                                child: ListView.separated(
-                                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                                  itemCount: navigationBars.length,
-                                  separatorBuilder: (_, __) => const SizedBox(height: 6),
-                                  itemBuilder: (context, index) {
-                                    final item = navigationBars[index];
-                                    final isSelected = index == selectedIndex;
-                                    return _NavItem(
-                                      key: ValueKey('nav_$index'),
-                                      item: item,
-                                      isSelected: isSelected,
-                                      onTap: () => _controller.switchPage(index),
-                                    );
-                                  },
-                                ),
+                        color: bgActive
+                            ? colorScheme.surface.withValues(alpha: isDark ? 0.75 : 0.65)
+                            : colorScheme.surface,
+                        child: Column(
+                          children: [
+                            _buildAppLogo(),
+                            const SizedBox(height: 16),
+                            Expanded(
+                              child: ListView.separated(
+                                padding: const EdgeInsets.symmetric(horizontal: 12),
+                                itemCount: navigationBars.length,
+                                separatorBuilder: (_, __) => const SizedBox(height: 6),
+                                itemBuilder: (context, index) {
+                                  final item = navigationBars[index];
+                                  final isSelected = index == selectedIndex;
+                                  return _NavItem(
+                                    key: ValueKey('nav_$index'),
+                                    item: item,
+                                    isSelected: isSelected,
+                                    onTap: () => _controller.switchPage(index),
+                                  );
+                                },
                               ),
-                            ],
-                          ),
+                            ),
+                          ],
                         ),
                       ),
                     ),
@@ -210,10 +183,6 @@ class _MainPageState extends State<MainPage> {
     );
   }
 
-  // ============================================================
-  // 底部栏方式：始终渲染，通过偏移量控制位置
-  // ============================================================
-
   Widget _buildMobileBottomBar({
     required ColorScheme colorScheme,
     required int selectedIndex,
@@ -221,9 +190,6 @@ class _MainPageState extends State<MainPage> {
   }) {
     final style = SettingPref.navigationBarStyle;
 
-    // ============================================================
-    // 1. 基础 NavigationBar
-    // ============================================================
     final baseNavigationBar = NavigationBar(
       backgroundColor: SettingPref.bgActive ? Colors.transparent : null,
       surfaceTintColor: SettingPref.bgActive ? Colors.transparent : null,
@@ -232,43 +198,24 @@ class _MainPageState extends State<MainPage> {
       selectedIndex: selectedIndex,
       onDestinationSelected: _controller.switchPage,
       indicatorColor: Colors.transparent,
-      labelPadding: const EdgeInsets.only(top: 0), // 或者 top: 2，默认是 4
+      labelPadding: const EdgeInsets.only(top: 0),
       labelTextStyle: WidgetStateProperty.resolveWith((states) {
         if (states.contains(WidgetState.selected)) {
-          return TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w600,
-            color: colorScheme.primary,
-          );
+          return TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: colorScheme.primary);
         }
-        return TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.normal,
-          color: colorScheme.outline,
-        );
+        return TextStyle(fontSize: 11, fontWeight: FontWeight.normal, color: colorScheme.outline);
       }),
-      overlayColor: WidgetStateProperty.resolveWith((states) {
-        if (states.any((state) =>
-            state == WidgetState.pressed ||
-            state == WidgetState.hovered ||
-            state == WidgetState.focused
-        )) {
-          return Colors.transparent;
-        }
-        return null;
-      }),
-      destinations: navigationBars.map((item) {
-        return NavigationDestination(
-          tooltip: '',
-          icon: Icon(item.icon.icon, size: 24, color: colorScheme.outline),
-          selectedIcon: Icon(item.selectIcon.icon, size: 24, color: colorScheme.primary),
-          label: item.label,
-        );
-      }).toList(),
+      overlayColor: WidgetStateProperty.resolveWith((states) => Colors.transparent),
+      destinations: navigationBars.map((item) => NavigationDestination(
+        tooltip: '',
+        icon: Icon(item.icon.icon, size: 24, color: colorScheme.outline),
+        selectedIcon: Icon(item.selectIcon.icon, size: 24, color: colorScheme.primary),
+        label: item.label,
+      )).toList(),
     );
 
-    // ========== 紧凑风格 BottomNavigationBar ==========
     Widget compactBottomBar = BottomNavigationBar(
+      elevation: 0,
       backgroundColor: SettingPref.bgActive ? Colors.transparent : null,
       currentIndex: selectedIndex,
       onTap: _controller.switchPage,
@@ -276,19 +223,13 @@ class _MainPageState extends State<MainPage> {
       iconSize: 16,
       selectedFontSize: 12,
       unselectedFontSize: 12,
-      items: navigationBars.map((item) {
-        return BottomNavigationBarItem(
-          icon: Icon(item.icon.icon, size: 16, color: colorScheme.outline),
-          activeIcon: Icon(item.selectIcon.icon, size: 16, color: colorScheme.primary),
-          label: item.label,
-        );
-      }).toList(),
-      // 不设置 selectedItemColor / unselectedItemColor，完全继承主题默认值
+      items: navigationBars.map((item) => BottomNavigationBarItem(
+        icon: Icon(item.icon.icon, size: 16, color: colorScheme.outline),
+        activeIcon: Icon(item.selectIcon.icon, size: 16, color: colorScheme.primary),
+        label: item.label,
+      )).toList(),
     );
 
-    // ============================================================
-    // 2. 胶囊 NavigationBar
-    // ============================================================
     final capsuleNavigationBar = NavigationBar(
       backgroundColor: SettingPref.bgActive ? Colors.transparent : null,
       surfaceTintColor: SettingPref.bgActive ? Colors.transparent : null,
@@ -298,37 +239,19 @@ class _MainPageState extends State<MainPage> {
       onDestinationSelected: _controller.switchPage,
       labelTextStyle: WidgetStateProperty.resolveWith((states) {
         if (states.contains(WidgetState.selected)) {
-          return TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w600,
-            color: colorScheme.primary,
-          );
+          return TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: colorScheme.primary);
         }
-        return TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.normal,
-          color: colorScheme.outline,
-        );
+        return TextStyle(fontSize: 11, fontWeight: FontWeight.normal, color: colorScheme.outline);
       }),
-      overlayColor: WidgetStateProperty.resolveWith((states) {
-        if (states.contains(WidgetState.hovered)) {
-          return Colors.transparent;
-        }
-        return null;
-      }),
-      destinations: navigationBars.map((item) {
-        return NavigationDestination(
-          tooltip: '',
-          icon: Icon(item.icon.icon, size: 24, color: colorScheme.outline),
-          selectedIcon: Icon(item.selectIcon.icon, size: 24, color: colorScheme.primary),
-          label: item.label,
-        );
-      }).toList(),
+      overlayColor: WidgetStateProperty.resolveWith((states) => Colors.transparent),
+      destinations: navigationBars.map((item) => NavigationDestination(
+        tooltip: '',
+        icon: Icon(item.icon.icon, size: 24, color: colorScheme.outline),
+        selectedIcon: Icon(item.selectIcon.icon, size: 24, color: colorScheme.primary),
+        label: item.label,
+      )).toList(),
     );
 
-    // ============================================================
-    // 2.5 极简 NavigationBar（仅图标，隐藏文字）
-    // ============================================================
     final minimalNavigationBar = NavigationBar(
       backgroundColor: SettingPref.bgActive ? Colors.transparent : null,
       surfaceTintColor: SettingPref.bgActive ? Colors.transparent : null,
@@ -336,115 +259,66 @@ class _MainPageState extends State<MainPage> {
       elevation: 0,
       selectedIndex: selectedIndex,
       onDestinationSelected: _controller.switchPage,
-      // 选中态用轻底色；想更"裸"可改为 Colors.transparent
       indicatorColor: colorScheme.primaryContainer.withValues(alpha: 0.5),
-      // 核心：始终隐藏文字标签
       labelBehavior: NavigationDestinationLabelBehavior.alwaysHide,
-      overlayColor: WidgetStateProperty.resolveWith((states) {
-        if (states.any((state) =>
-            state == WidgetState.pressed ||
-            state == WidgetState.hovered ||
-            state == WidgetState.focused)) {
-          return Colors.transparent;
-        }
-        return null;
-      }),
-      destinations: navigationBars.map((item) {
-        return NavigationDestination(
-          // 极简模式下文字不可见，tooltip 是唯一的"文字出口"
-          tooltip: item.label,
-          icon: Icon(item.icon.icon, size: 24, color: colorScheme.outline),
-          selectedIcon: Icon(
-            item.selectIcon.icon,
-            size: 24,
-            color: colorScheme.primary,
-          ),
-          // label 仍然要传：Semantics 用它读屏，只是不渲染
-          label: item.label,
-        );
-      }).toList(),
+      overlayColor: WidgetStateProperty.resolveWith((states) => Colors.transparent),
+      destinations: navigationBars.map((item) => NavigationDestination(
+        tooltip: item.label,
+        icon: Icon(item.icon.icon, size: 24, color: colorScheme.outline),
+        selectedIcon: Icon(item.selectIcon.icon, size: 24, color: colorScheme.primary),
+        label: item.label,
+      )).toList(),
     );
 
-    // ============================================================
-    // 3. 根据样式选择
-    // ============================================================
     Widget bottomBar;
     switch (style) {
       case NavigationBarStyle.default_:
         bottomBar = baseNavigationBar;
         break;
-
       case NavigationBarStyle.defaultCompact:
         bottomBar = compactBottomBar;
         break;
-
       case NavigationBarStyle.floating:
         bottomBar = FloatingNavigationBar(
           selectedIndex: selectedIndex,
           onDestinationSelected: _controller.switchPage,
-          // 悬浮样式：开启壁纸时稍微降低不透明度，融入背景
           backgroundColor: SettingPref.bgActive
               ? colorScheme.surface.withValues(alpha: 0.85)
               : colorScheme.surface,
           bottomPadding: 8.0,
-          destinations: navigationBars.map((item) {
-            return FloatingNavigationDestination(
-              label: item.label,
-              icon: Icon(item.icon.icon, size: 24, color: colorScheme.outline),
-              selectedIcon: Icon(item.selectIcon.icon, size: 24, color: colorScheme.primary),
-            );
-          }).toList(),
+          destinations: navigationBars.map((item) => FloatingNavigationDestination(
+            label: item.label,
+            icon: Icon(item.icon.icon, size: 24, color: colorScheme.outline),
+            selectedIcon: Icon(item.selectIcon.icon, size: 24, color: colorScheme.primary),
+          )).toList(),
         );
         break;
-
       case NavigationBarStyle.capsule:
         bottomBar = capsuleNavigationBar;
         break;
-
       case NavigationBarStyle.minimal:
         bottomBar = minimalNavigationBar;
         break;
     }
 
-    // 更新底部栏高度（用于计算偏移比例，但实际偏移由 topBarHeight 决定）
     final double actualHeight = _getBottomBarHeight(style);
     _controller.bottomBarHeight.value = actualHeight;
 
-    // 统一处理底栏的毛玻璃效果（性能优化版）
+    // 统一处理底栏的毛玻璃效果（必须有 ClipRect 包裹！）
     Widget finalBottomBar = bottomBar;
     if (SettingPref.bgActive) {
       final isDark = Theme.of(context).brightness == Brightness.dark;
       final surfaceColor = colorScheme.surface;
-      // 透明度回调一点：浅色 0.75，深色 0.80（妥协清晰度）
-      final alpha = isDark ? 0.80 : 0.75;
 
-      // 悬浮样式内部自带边距和圆角，已经在上面处理了颜色；其他样式在此套上高斯模糊
       if (style != NavigationBarStyle.floating) {
         finalBottomBar = RepaintBoundary(
-          child: ClipRect(
+          child: ClipRect( // 限制模糊范围，绝对不让整页模糊
             child: BackdropFilter(
-              // 模糊度降到 12，依然很糊，但省 GPU
-              filter: ui.ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+              filter: ui.ImageFilter.blur(sigmaX: 15, sigmaY: 15),
               child: Container(
-                decoration: BoxDecoration(
-                  color: surfaceColor.withValues(alpha: alpha),
-                  border: Border(
-                    top: BorderSide(
-                      color: colorScheme.outline.withValues(alpha: 0.1),
-                      width: 0.5,
-                    ),
-                  ),
-                ),
-                // 移动端饱和度提升降到 1.1，避免过度鲜艳影响文字
-                child: ColorFiltered(
-                  colorFilter: const ColorFilter.matrix(<double>[
-                    1.1, 0, 0, 0, 0,
-                    0, 1.1, 0, 0, 0,
-                    0, 0, 1.1, 0, 0,
-                    0, 0, 0, 1, 0,
-                  ]),
-                  child: bottomBar,
-                ),
+                width: double.infinity, // 撑满全宽去白边
+                color: surfaceColor.withValues(alpha: isDark ? 0.75 : 0.65), // 无边框
+                child: bottomBar,
               ),
             ),
           ),
@@ -456,9 +330,7 @@ class _MainPageState extends State<MainPage> {
       if (!_controller.hideBottomBar.value) {
         return finalBottomBar;
       }
-
       if (_controller.isInstantMode) {
-        // 即时模式：使用 showBottomBar + AnimatedSlide
         final bool show = _controller.showBottomBar.value;
         return AnimatedSlide(
           offset: Offset(0, show ? 0 : 1),
@@ -467,8 +339,6 @@ class _MainPageState extends State<MainPage> {
           child: finalBottomBar,
         );
       } else {
-        // 同步模式：使用 barOffset + FractionalTranslation
-        // 平移比例 = barOffset / topBarHeight，确保与顶部栏同步
         final double slideFactor = (_controller.barOffset.value / Style.topBarHeight).clamp(0.0, 1.0);
         return FractionalTranslation(
           translation: Offset(0, slideFactor),
@@ -520,9 +390,7 @@ class _NavItem extends StatelessWidget {
 
     return Material(
       color: Colors.transparent,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       clipBehavior: Clip.hardEdge,
       child: InkWell(
         onTap: onTap,

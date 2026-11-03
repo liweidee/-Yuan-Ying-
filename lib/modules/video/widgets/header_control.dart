@@ -91,7 +91,7 @@ class _HeaderControlState extends State<HeaderControl> {
 
       return Container(
         height: 68, // 固定高度，永不变化
-        padding: const EdgeInsets.only(top: 10, left: 8, right: 8),
+        padding: const EdgeInsets.only(top: 4, left: 8, right: 8),
         decoration: const BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topCenter,

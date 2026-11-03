@@ -6,8 +6,6 @@ import 'package:yuanying/modules/setting/models/setting_pref.dart';
 import 'package:yuanying/modules/setting/controllers/bg_config_controller.dart';
 import 'package:yuanying/common/widgets/floating_navigation_bar.dart';
 
-/// 通用网络模块壳：2 个 Tab（文件 / 下载）
-/// 底栏样式跟随源影全局设置（默认/紧凑/胶囊/悬浮）
 class NetworkMainShell extends StatefulWidget {
   const NetworkMainShell({
     super.key,
@@ -40,7 +38,6 @@ class _NetworkMainShellState extends State<NetworkMainShell> {
     ];
 
     return Obx(() {
-      // 监听壁纸开关状态变化
       if (Get.isRegistered<BgConfigController>()) {
         final _ = Get.find<BgConfigController>().version.value;
       }
@@ -86,20 +83,18 @@ class _NetworkMainShellState extends State<NetworkMainShell> {
                     color: sel ? cs.primary : cs.outline,
                   );
                 }),
-                destinations: destinations
-                    .map((d) => NavigationDestination(
-                          tooltip: '',
-                          icon: Icon(d.icon, size: 24, color: cs.outline),
-                          selectedIcon:
-                              Icon(d.selectedIcon, size: 24, color: cs.primary),
-                          label: d.label,
-                        ))
-                    .toList(),
+                destinations: destinations.map((d) => NavigationDestination(
+                  tooltip: '',
+                  icon: Icon(d.icon, size: 24, color: cs.outline),
+                  selectedIcon: Icon(d.selectedIcon, size: 24, color: cs.primary),
+                  label: d.label,
+                )).toList(),
               );
               break;
 
             case NavigationBarStyle.defaultCompact:
               bottomBar = BottomNavigationBar(
+                elevation: 0,
                 backgroundColor: SettingPref.bgActive ? Colors.transparent : null,
                 currentIndex: _selectedIndex.value,
                 onTap: (i) => _selectedIndex.value = i,
@@ -107,14 +102,11 @@ class _NetworkMainShellState extends State<NetworkMainShell> {
                 iconSize: 16,
                 selectedFontSize: 12,
                 unselectedFontSize: 12,
-                items: destinations
-                    .map((d) => BottomNavigationBarItem(
-                          icon: Icon(d.icon, size: 16, color: cs.outline),
-                          activeIcon:
-                              Icon(d.selectedIcon, size: 16, color: cs.primary),
-                          label: d.label,
-                        ))
-                    .toList(),
+                items: destinations.map((d) => BottomNavigationBarItem(
+                  icon: Icon(d.icon, size: 16, color: cs.outline),
+                  activeIcon: Icon(d.selectedIcon, size: 16, color: cs.primary),
+                  label: d.label,
+                )).toList(),
               );
               break;
 
@@ -122,18 +114,13 @@ class _NetworkMainShellState extends State<NetworkMainShell> {
               bottomBar = FloatingNavigationBar(
                 selectedIndex: _selectedIndex.value,
                 onDestinationSelected: (i) => _selectedIndex.value = i,
-                backgroundColor: bgActive
-                    ? cs.surface.withValues(alpha: 0.85)
-                    : cs.surface,
+                backgroundColor: bgActive ? cs.surface.withValues(alpha: 0.85) : cs.surface,
                 bottomPadding: 8.0,
-                destinations: destinations
-                    .map((d) => FloatingNavigationDestination(
-                          label: d.label,
-                          icon: Icon(d.icon, size: 24, color: cs.outline),
-                          selectedIcon:
-                              Icon(d.selectedIcon, size: 24, color: cs.primary),
-                        ))
-                    .toList(),
+                destinations: destinations.map((d) => FloatingNavigationDestination(
+                  label: d.label,
+                  icon: Icon(d.icon, size: 24, color: cs.outline),
+                  selectedIcon: Icon(d.selectedIcon, size: 24, color: cs.primary),
+                )).toList(),
               );
               break;
 
@@ -154,49 +141,30 @@ class _NetworkMainShellState extends State<NetworkMainShell> {
                     color: sel ? cs.primary : cs.outline,
                   );
                 }),
-                destinations: destinations
-                    .map((d) => NavigationDestination(
-                          tooltip: '',
-                          icon: Icon(d.icon, size: 24, color: cs.outline),
-                          selectedIcon:
-                              Icon(d.selectedIcon, size: 24, color: cs.primary),
-                          label: d.label,
-                        ))
-                    .toList(),
+                destinations: destinations.map((d) => NavigationDestination(
+                  tooltip: '',
+                  icon: Icon(d.icon, size: 24, color: cs.outline),
+                  selectedIcon: Icon(d.selectedIcon, size: 24, color: cs.primary),
+                  label: d.label,
+                )).toList(),
               );
               break;
           }
 
-          // 统一处理底栏的毛玻璃效果（性能与清晰度优化版）
           Widget finalBottomBar = bottomBar;
           if (bgActive) {
             final isDark = theme.brightness == Brightness.dark;
-            final alpha = isDark ? 0.80 : 0.75;
+            final surfaceColor = cs.surface;
 
             if (style != NavigationBarStyle.floating) {
               finalBottomBar = RepaintBoundary(
                 child: ClipRect(
                   child: BackdropFilter(
-                    filter: ui.ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                    filter: ui.ImageFilter.blur(sigmaX: 15, sigmaY: 15),
                     child: Container(
-                      decoration: BoxDecoration(
-                        color: cs.surface.withValues(alpha: alpha),
-                        border: Border(
-                          top: BorderSide(
-                            color: cs.outline.withValues(alpha: 0.1),
-                            width: 0.5,
-                          ),
-                        ),
-                      ),
-                      child: ColorFiltered(
-                        colorFilter: const ColorFilter.matrix(<double>[
-                          1.1, 0, 0, 0, 0,
-                          0, 1.1, 0, 0, 0,
-                          0, 0, 1.1, 0, 0,
-                          0, 0, 0, 1, 0,
-                        ]),
-                        child: bottomBar,
-                      ),
+                      width: double.infinity,
+                      color: surfaceColor.withValues(alpha: isDark ? 0.75 : 0.65),
+                      child: bottomBar,
                     ),
                   ),
                 ),

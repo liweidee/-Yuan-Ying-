@@ -22,12 +22,17 @@ class AppBarAni extends StatelessWidget {
     end: Offset.zero,
   );
 
+  // 弱化渐变的黑色不透明度
+  // 0xBF = 191 = 75%，0x80 = 128 = 50%
+  // 全屏时底部 34pt 安全区（Home Indicator 所在区域）若被 75% 黑色覆盖，
+  // 视觉上底栏按钮会"沉在黑色里"，看起来像被遮挡。改为 50% 后
+  // 既保留了渐变遮罩的可读性，又不会吞没底部控件。
   static const _topDecoration = LinearGradient(
     begin: Alignment.bottomCenter,
     end: Alignment.topCenter,
     colors: <Color>[
       Colors.transparent,
-      Color(0xBF000000),
+      Color(0x80000000),
     ],
     tileMode: TileMode.mirror,
   );
@@ -42,7 +47,7 @@ class AppBarAni extends StatelessWidget {
     end: Alignment.bottomCenter,
     colors: <Color>[
       Colors.transparent,
-      Color(0xBF000000),
+      Color(0x80000000),
     ],
     tileMode: TileMode.mirror,
   );

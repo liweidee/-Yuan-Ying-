@@ -42,7 +42,6 @@ class JellyfinMainShell extends StatelessWidget {
     final RxInt selectedIndex = 0.obs;
 
     return Obx(() {
-      // 监听壁纸开关状态变化
       if (Get.isRegistered<BgConfigController>()) {
         final _ = Get.find<BgConfigController>().version.value;
       }
@@ -88,31 +87,11 @@ class JellyfinMainShell extends StatelessWidget {
           final style = SettingPref.navigationBarStyle;
 
           final jellyfinNavigationBars = [
-            _JellyfinNavItem(
-              icon: Icons.home_outlined,
-              selectedIcon: Icons.home,
-              label: '首页',
-            ),
-            _JellyfinNavItem(
-              icon: Icons.favorite_outline,
-              selectedIcon: Icons.favorite,
-              label: '收藏',
-            ),
-            _JellyfinNavItem(
-              icon: Icons.history_outlined,
-              selectedIcon: Icons.history,
-              label: '历史',
-            ),
-            _JellyfinNavItem(
-              icon: Icons.search_outlined,
-              selectedIcon: Icons.search,
-              label: '搜索',
-            ),
-            _JellyfinNavItem(
-              icon: Icons.download_outlined,
-              selectedIcon: Icons.download,
-              label: '下载',
-            ),
+            _JellyfinNavItem(icon: Icons.home_outlined, selectedIcon: Icons.home, label: '首页'),
+            _JellyfinNavItem(icon: Icons.favorite_outline, selectedIcon: Icons.favorite, label: '收藏'),
+            _JellyfinNavItem(icon: Icons.history_outlined, selectedIcon: Icons.history, label: '历史'),
+            _JellyfinNavItem(icon: Icons.search_outlined, selectedIcon: Icons.search, label: '搜索'),
+            _JellyfinNavItem(icon: Icons.download_outlined, selectedIcon: Icons.download, label: '下载'),
           ];
 
           final baseNavigationBar = NavigationBar(
@@ -126,39 +105,21 @@ class JellyfinMainShell extends StatelessWidget {
             labelPadding: const EdgeInsets.only(top: 0),
             labelTextStyle: WidgetStateProperty.resolveWith((states) {
               if (states.contains(WidgetState.selected)) {
-                return TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  color: colorScheme.primary,
-                );
+                return TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: colorScheme.primary);
               }
-              return TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.normal,
-                color: colorScheme.outline,
-              );
+              return TextStyle(fontSize: 11, fontWeight: FontWeight.normal, color: colorScheme.outline);
             }),
-            overlayColor: WidgetStateProperty.resolveWith((states) {
-              if (states.any((state) =>
-                  state == WidgetState.pressed ||
-                  state == WidgetState.hovered ||
-                  state == WidgetState.focused)) {
-                return Colors.transparent;
-              }
-              return null;
-            }),
-            destinations: jellyfinNavigationBars.map((item) {
-              return NavigationDestination(
-                tooltip: '',
-                icon: Icon(item.icon, size: 24, color: colorScheme.outline),
-                selectedIcon: Icon(item.selectedIcon,
-                    size: 24, color: colorScheme.primary),
-                label: item.label,
-              );
-            }).toList(),
+            overlayColor: WidgetStateProperty.resolveWith((states) => Colors.transparent),
+            destinations: jellyfinNavigationBars.map((item) => NavigationDestination(
+              tooltip: '',
+              icon: Icon(item.icon, size: 24, color: colorScheme.outline),
+              selectedIcon: Icon(item.selectedIcon, size: 24, color: colorScheme.primary),
+              label: item.label,
+            )).toList(),
           );
 
           final compactBottomBar = BottomNavigationBar(
+            elevation: 0,
             backgroundColor: SettingPref.bgActive ? Colors.transparent : null,
             currentIndex: selectedIndex.value,
             onTap: (index) => selectedIndex.value = index,
@@ -166,14 +127,11 @@ class JellyfinMainShell extends StatelessWidget {
             iconSize: 16,
             selectedFontSize: 12,
             unselectedFontSize: 12,
-            items: jellyfinNavigationBars.map((item) {
-              return BottomNavigationBarItem(
-                icon: Icon(item.icon, size: 16, color: colorScheme.outline),
-                activeIcon: Icon(item.selectedIcon,
-                    size: 16, color: colorScheme.primary),
-                label: item.label,
-              );
-            }).toList(),
+            items: jellyfinNavigationBars.map((item) => BottomNavigationBarItem(
+              icon: Icon(item.icon, size: 16, color: colorScheme.outline),
+              activeIcon: Icon(item.selectedIcon, size: 16, color: colorScheme.primary),
+              label: item.label,
+            )).toList(),
           );
 
           final capsuleNavigationBar = NavigationBar(
@@ -185,33 +143,17 @@ class JellyfinMainShell extends StatelessWidget {
             onDestinationSelected: (index) => selectedIndex.value = index,
             labelTextStyle: WidgetStateProperty.resolveWith((states) {
               if (states.contains(WidgetState.selected)) {
-                return TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  color: colorScheme.primary,
-                );
+                return TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: colorScheme.primary);
               }
-              return TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.normal,
-                color: colorScheme.outline,
-              );
+              return TextStyle(fontSize: 11, fontWeight: FontWeight.normal, color: colorScheme.outline);
             }),
-            overlayColor: WidgetStateProperty.resolveWith((states) {
-              if (states.contains(WidgetState.hovered)) {
-                return Colors.transparent;
-              }
-              return null;
-            }),
-            destinations: jellyfinNavigationBars.map((item) {
-              return NavigationDestination(
-                tooltip: '',
-                icon: Icon(item.icon, size: 24, color: colorScheme.outline),
-                selectedIcon: Icon(item.selectedIcon,
-                    size: 24, color: colorScheme.primary),
-                label: item.label,
-              );
-            }).toList(),
+            overlayColor: WidgetStateProperty.resolveWith((states) => Colors.transparent),
+            destinations: jellyfinNavigationBars.map((item) => NavigationDestination(
+              tooltip: '',
+              icon: Icon(item.icon, size: 24, color: colorScheme.outline),
+              selectedIcon: Icon(item.selectedIcon, size: 24, color: colorScheme.primary),
+              label: item.label,
+            )).toList(),
           );
 
           Widget bottomBar;
@@ -226,19 +168,13 @@ class JellyfinMainShell extends StatelessWidget {
               bottomBar = FloatingNavigationBar(
                 selectedIndex: selectedIndex.value,
                 onDestinationSelected: (index) => selectedIndex.value = index,
-                backgroundColor: bgActive
-                    ? colorScheme.surface.withValues(alpha: 0.85)
-                    : colorScheme.surface,
+                backgroundColor: bgActive ? colorScheme.surface.withValues(alpha: 0.85) : colorScheme.surface,
                 bottomPadding: 8.0,
-                destinations: jellyfinNavigationBars.map((item) {
-                  return FloatingNavigationDestination(
-                    label: item.label,
-                    icon:
-                        Icon(item.icon, size: 24, color: colorScheme.outline),
-                    selectedIcon: Icon(item.selectedIcon,
-                        size: 24, color: colorScheme.primary),
-                  );
-                }).toList(),
+                destinations: jellyfinNavigationBars.map((item) => FloatingNavigationDestination(
+                  label: item.label,
+                  icon: Icon(item.icon, size: 24, color: colorScheme.outline),
+                  selectedIcon: Icon(item.selectedIcon, size: 24, color: colorScheme.primary),
+                )).toList(),
               );
               break;
             case NavigationBarStyle.capsule:
@@ -247,37 +183,20 @@ class JellyfinMainShell extends StatelessWidget {
               break;
           }
 
-          // 统一处理底栏的毛玻璃效果（性能与清晰度优化版）
           Widget finalBottomBar = bottomBar;
           if (bgActive) {
             final isDark = theme.brightness == Brightness.dark;
             final surfaceColor = colorScheme.surface;
-            final alpha = isDark ? 0.80 : 0.75;
 
             if (style != NavigationBarStyle.floating) {
               finalBottomBar = RepaintBoundary(
                 child: ClipRect(
                   child: BackdropFilter(
-                    filter: ui.ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                    filter: ui.ImageFilter.blur(sigmaX: 15, sigmaY: 15),
                     child: Container(
-                      decoration: BoxDecoration(
-                        color: surfaceColor.withValues(alpha: alpha),
-                        border: Border(
-                          top: BorderSide(
-                            color: colorScheme.outline.withValues(alpha: 0.1),
-                            width: 0.5,
-                          ),
-                        ),
-                      ),
-                      child: ColorFiltered(
-                        colorFilter: const ColorFilter.matrix(<double>[
-                          1.1, 0, 0, 0, 0,
-                          0, 1.1, 0, 0, 0,
-                          0, 0, 1.1, 0, 0,
-                          0, 0, 0, 1, 0,
-                        ]),
-                        child: bottomBar,
-                      ),
+                      width: double.infinity,
+                      color: surfaceColor.withValues(alpha: isDark ? 0.75 : 0.65),
+                      child: bottomBar,
                     ),
                   ),
                 ),
@@ -290,7 +209,6 @@ class JellyfinMainShell extends StatelessWidget {
     });
   }
 
-  /// 清空全部播放历史（带确认 + 进度提示）
   Future<void> _confirmClearHistory(BuildContext context) async {
     if (!Get.isRegistered<JellyfinHistoryController>()) {
       SmartDialog.showToast('历史未初始化');
@@ -307,17 +225,10 @@ class JellyfinMainShell extends StatelessWidget {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('清空历史'),
-        content: const Text('将删除所有播放历史记录。\n\n'
-            '注意：仅清理历史记录，不会删除服务器上的任何视频文件。'),
+        content: const Text('将删除所有播放历史记录。\n\n注意：仅清理历史记录，不会删除服务器上的任何视频文件。'),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('清空', style: TextStyle(color: Colors.red)),
-          ),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('清空', style: TextStyle(color: Colors.red))),
         ],
       ),
     );
@@ -329,26 +240,13 @@ class JellyfinMainShell extends StatelessWidget {
       clickMaskDismiss: false,
       builder: (_) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
-        decoration: BoxDecoration(
-          color: Colors.black87,
-          borderRadius: BorderRadius.circular(12),
-        ),
+        decoration: BoxDecoration(color: Colors.black87, borderRadius: BorderRadius.circular(12)),
         child: const Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            SizedBox(
-              width: 36,
-              height: 36,
-              child: CircularProgressIndicator(
-                strokeWidth: 3,
-                color: Colors.white,
-              ),
-            ),
+            SizedBox(width: 36, height: 36, child: CircularProgressIndicator(strokeWidth: 3, color: Colors.white)),
             SizedBox(height: 14),
-            Text(
-              '正在清空历史...',
-              style: TextStyle(color: Colors.white, fontSize: 14),
-            ),
+            Text('正在清空历史...', style: TextStyle(color: Colors.white, fontSize: 14)),
           ],
         ),
       ),
@@ -373,9 +271,5 @@ class _JellyfinNavItem {
   final IconData icon;
   final IconData selectedIcon;
   final String label;
-  const _JellyfinNavItem({
-    required this.icon,
-    required this.selectedIcon,
-    required this.label,
-  });
+  const _JellyfinNavItem({required this.icon, required this.selectedIcon, required this.label});
 }

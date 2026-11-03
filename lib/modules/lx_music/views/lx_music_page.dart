@@ -1,3 +1,4 @@
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
@@ -5,6 +6,7 @@ import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import '../../../common/widgets/floating_navigation_bar.dart';
 import '../../../models/common/nav_bar_config.dart';
 import '../../../modules/setting/models/setting_pref.dart';
+import '../../../modules/setting/controllers/bg_config_controller.dart';
 import '../../music/views/music_player_view.dart';
 import '../controllers/lx_board_controller.dart';
 import '../controllers/lx_download_controller.dart';
@@ -62,206 +64,249 @@ class _LxMusicPageState extends State<LxMusicPage> {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
 
-    return Scaffold(
-      // backgroundColor: colorScheme.surface,
-      appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new),
-          onPressed: () => Get.back(),
-          tooltip: '返回',
+    return Obx(() {
+      // 监听壁纸状态变化
+      if (Get.isRegistered<BgConfigController>()) {
+        final _ = Get.find<BgConfigController>().version.value;
+      }
+      final bgActive = SettingPref.bgActive;
+      final bgColor = bgActive ? Colors.transparent : colorScheme.surface;
+
+      return Scaffold(
+        backgroundColor: bgColor,
+        appBar: AppBar(
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back_ios_new),
+            onPressed: () => Get.back(),
+            tooltip: '返回',
+          ),
+          title: Obx(() => Text(
+                _navItems[selectedIndex.value].label,
+                style: const TextStyle(fontSize: 18),
+              )),
+          centerTitle: false,
+          backgroundColor: bgColor,
+          foregroundColor: colorScheme.onSurface,
+          elevation: 0,
+          actions: [
+            IconButton(
+              tooltip: '我的歌单',
+              icon: const Icon(Icons.library_music_rounded, size: 22),
+              onPressed: () => Get.to(() => const LxPlaylistPage()),
+            ),
+            IconButton(
+              tooltip: '自定义源',
+              icon: const Icon(Icons.code_rounded, size: 22),
+              onPressed: () => Get.to(() => const LxSourceManagePage()),
+            ),
+            IconButton(
+              tooltip: '调试日志',
+              icon: const Icon(Icons.bug_report_outlined, size: 22),
+              onPressed: () => Get.to(() => const LxDebugLogPage()),
+            ),
+            const SizedBox(width: 4),
+          ],
         ),
-        title: Obx(() => Text(
-              _navItems[selectedIndex.value].label,
-              style: const TextStyle(fontSize: 18),
-            )),
-        centerTitle: false,
-        // backgroundColor: colorScheme.surface,
-        // foregroundColor: colorScheme.onSurface,
-        elevation: 0,
-        actions: [
-          IconButton(
-            tooltip: '我的歌单',
-            icon: const Icon(Icons.library_music_rounded, size: 22),
-            onPressed: () => Get.to(() => const LxPlaylistPage()),
-          ),
-          IconButton(
-            tooltip: '自定义源',
-            icon: const Icon(Icons.code_rounded, size: 22),
-            onPressed: () => Get.to(() => const LxSourceManagePage()),
-          ),
-          IconButton(
-            tooltip: '调试日志',
-            icon: const Icon(Icons.bug_report_outlined, size: 22),
-            onPressed: () => Get.to(() => const LxDebugLogPage()),
-          ),
-          const SizedBox(width: 4),
-        ],
-      ),
-      body: Column(
-        children: [
-          Expanded(
-            child: Obx(() {
-              if (!_musicController.engineReady.value) {
-                return const Center(child: CircularProgressIndicator());
+        body: Column(
+          children: [
+            Expanded(
+              child: Obx(() {
+                if (!_musicController.engineReady.value) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                return IndexedStack(
+                  index: selectedIndex.value,
+                  children: const [
+                    LxBoardTab(),
+                    LxSearchTab(),
+                    LxDownloadTab(),
+                    LxSettingsTab(),
+                  ],
+                );
+              }),
+            ),
+            // 全局播放条：仅在"本次会话播过洛雪歌曲" + "当前是洛雪渠道"时显示
+            Obx(() {
+              if (!LxPlayerHelper.hasPlayedInSession.value) {
+                return const SizedBox.shrink();
               }
-              return IndexedStack(
-                index: selectedIndex.value,
-                children: const [
-                  LxBoardTab(),
-                  LxSearchTab(),
-                  LxDownloadTab(),
-                  LxSettingsTab(),
-                ],
+              final controller = Get.find<MusicPlayerController>();
+              if (!controller.isLxChannel) {
+                return const SizedBox.shrink();
+              }
+              return MusicPlayerView(
+                cancelMargin: true,
+                onClose: () async {
+                  // 暂停播放 + 隐藏底条（保留队列）
+                  // controller.pause();
+                  await controller.closePlayer();
+                  LxPlayerHelper.hasPlayedInSession.value = false;
+                  SmartDialog.showToast('已停止播放');
+                },
               );
             }),
-          ),
-          // 全局播放条：仅在"本次会话播过洛雪歌曲" + "当前是洛雪渠道"时显示
-          Obx(() {
-            if (!LxPlayerHelper.hasPlayedInSession.value) {
-              return const SizedBox.shrink();
-            }
-            final controller = Get.find<MusicPlayerController>();
-            if (!controller.isLxChannel) {
-              return const SizedBox.shrink();
-            }
-            return MusicPlayerView(
-              cancelMargin: true,
-              onClose: () async {
-                // 暂停播放 + 隐藏底条（保留队列）
-                // controller.pause();
-                await controller.closePlayer();
-                LxPlayerHelper.hasPlayedInSession.value = false;
-                SmartDialog.showToast('已停止播放');
-              },
-            );
-          }),
-        ],
-      ),
-      bottomNavigationBar: Obx(() {
-        final style = SettingPref.navigationBarStyle;
-        final idx = selectedIndex.value;
+          ],
+        ),
+        bottomNavigationBar: Obx(() {
+          final style = SettingPref.navigationBarStyle;
+          final idx = selectedIndex.value;
 
-        final baseNavigationBar = NavigationBar(
-          height: 56,
-          elevation: 0,
-          selectedIndex: idx,
-          onDestinationSelected: (i) => selectedIndex.value = i,
-          indicatorColor: Colors.transparent,
-          labelPadding: const EdgeInsets.only(top: 0),
-          labelTextStyle: WidgetStateProperty.resolveWith((states) {
-            if (states.contains(WidgetState.selected)) {
-              return TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                color: colorScheme.primary,
-              );
-            }
-            return TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.normal,
-              color: colorScheme.outline,
-            );
-          }),
-          overlayColor: WidgetStateProperty.resolveWith((states) {
-            if (states.any((s) =>
-                s == WidgetState.pressed ||
-                s == WidgetState.hovered ||
-                s == WidgetState.focused)) {
-              return Colors.transparent;
-            }
-            return null;
-          }),
-          destinations: _navItems.map((item) {
-            return NavigationDestination(
-              tooltip: '',
-              icon: Icon(item.icon, size: 24, color: colorScheme.outline),
-              selectedIcon: Icon(item.selectedIcon,
-                  size: 24, color: colorScheme.primary),
-              label: item.label,
-            );
-          }).toList(),
-        );
-
-        final compactBottomBar = BottomNavigationBar(
-          currentIndex: idx,
-          onTap: (i) => selectedIndex.value = i,
-          type: BottomNavigationBarType.fixed,
-          iconSize: 16,
-          selectedFontSize: 12,
-          unselectedFontSize: 12,
-          items: _navItems.map((item) {
-            return BottomNavigationBarItem(
-              icon: Icon(item.icon, size: 16, color: colorScheme.outline),
-              activeIcon: Icon(item.selectedIcon,
-                  size: 16, color: colorScheme.primary),
-              label: item.label,
-            );
-          }).toList(),
-        );
-
-        final capsuleNavigationBar = NavigationBar(
-          height: 70,
-          elevation: 0,
-          selectedIndex: idx,
-          onDestinationSelected: (i) => selectedIndex.value = i,
-          labelTextStyle: WidgetStateProperty.resolveWith((states) {
-            if (states.contains(WidgetState.selected)) {
-              return TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                color: colorScheme.primary,
-              );
-            }
-            return TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.normal,
-              color: colorScheme.outline,
-            );
-          }),
-          overlayColor: WidgetStateProperty.resolveWith((states) {
-            if (states.contains(WidgetState.hovered)) {
-              return Colors.transparent;
-            }
-            return null;
-          }),
-          destinations: _navItems.map((item) {
-            return NavigationDestination(
-              tooltip: '',
-              icon: Icon(item.icon, size: 24, color: colorScheme.outline),
-              selectedIcon: Icon(item.selectedIcon,
-                  size: 24, color: colorScheme.primary),
-              label: item.label,
-            );
-          }).toList(),
-        );
-
-        switch (style) {
-          case NavigationBarStyle.default_:
-            return baseNavigationBar;
-          case NavigationBarStyle.defaultCompact:
-            return compactBottomBar;
-          case NavigationBarStyle.floating:
-            return FloatingNavigationBar(
-              selectedIndex: idx,
-              onDestinationSelected: (i) => selectedIndex.value = i,
-              backgroundColor: colorScheme.surface,
-              bottomPadding: 8.0,
-              destinations: _navItems.map((item) {
-                return FloatingNavigationDestination(
-                  label: item.label,
-                  icon:
-                      Icon(item.icon, size: 24, color: colorScheme.outline),
-                  selectedIcon: Icon(item.selectedIcon,
-                      size: 24, color: colorScheme.primary),
+          final baseNavigationBar = NavigationBar(
+            backgroundColor: bgActive ? Colors.transparent : null,
+            surfaceTintColor: bgActive ? Colors.transparent : null,
+            height: 56,
+            elevation: 0,
+            selectedIndex: idx,
+            onDestinationSelected: (i) => selectedIndex.value = i,
+            indicatorColor: Colors.transparent,
+            labelPadding: const EdgeInsets.only(top: 0),
+            labelTextStyle: WidgetStateProperty.resolveWith((states) {
+              if (states.contains(WidgetState.selected)) {
+                return TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: colorScheme.primary,
                 );
-              }).toList(),
+              }
+              return TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.normal,
+                color: colorScheme.outline,
+              );
+            }),
+            overlayColor: WidgetStateProperty.resolveWith((states) {
+              if (states.any((s) =>
+                  s == WidgetState.pressed ||
+                  s == WidgetState.hovered ||
+                  s == WidgetState.focused)) {
+                return Colors.transparent;
+              }
+              return null;
+            }),
+            destinations: _navItems.map((item) {
+              return NavigationDestination(
+                tooltip: '',
+                icon: Icon(item.icon, size: 24, color: colorScheme.outline),
+                selectedIcon: Icon(item.selectedIcon,
+                    size: 24, color: colorScheme.primary),
+                label: item.label,
+              );
+            }).toList(),
+          );
+
+          final compactBottomBar = BottomNavigationBar(
+            elevation: 0, // 去除默认阴影白边
+            backgroundColor: bgActive ? Colors.transparent : null,
+            currentIndex: idx,
+            onTap: (i) => selectedIndex.value = i,
+            type: BottomNavigationBarType.fixed,
+            iconSize: 16,
+            selectedFontSize: 12,
+            unselectedFontSize: 12,
+            items: _navItems.map((item) {
+              return BottomNavigationBarItem(
+                icon: Icon(item.icon, size: 16, color: colorScheme.outline),
+                activeIcon: Icon(item.selectedIcon,
+                    size: 16, color: colorScheme.primary),
+                label: item.label,
+              );
+            }).toList(),
+          );
+
+          final capsuleNavigationBar = NavigationBar(
+            backgroundColor: bgActive ? Colors.transparent : null,
+            surfaceTintColor: bgActive ? Colors.transparent : null,
+            height: 70,
+            elevation: 0,
+            selectedIndex: idx,
+            onDestinationSelected: (i) => selectedIndex.value = i,
+            labelTextStyle: WidgetStateProperty.resolveWith((states) {
+              if (states.contains(WidgetState.selected)) {
+                return TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: colorScheme.primary,
+                );
+              }
+              return TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.normal,
+                color: colorScheme.outline,
+              );
+            }),
+            overlayColor: WidgetStateProperty.resolveWith((states) {
+              if (states.contains(WidgetState.hovered)) {
+                return Colors.transparent;
+              }
+              return null;
+            }),
+            destinations: _navItems.map((item) {
+              return NavigationDestination(
+                tooltip: '',
+                icon: Icon(item.icon, size: 24, color: colorScheme.outline),
+                selectedIcon: Icon(item.selectedIcon,
+                    size: 24, color: colorScheme.primary),
+                label: item.label,
+              );
+            }).toList(),
+          );
+
+          Widget bottomBar;
+          switch (style) {
+            case NavigationBarStyle.default_:
+              bottomBar = baseNavigationBar;
+              break;
+            case NavigationBarStyle.defaultCompact:
+              bottomBar = compactBottomBar;
+              break;
+            case NavigationBarStyle.floating:
+              bottomBar = FloatingNavigationBar(
+                selectedIndex: idx,
+                onDestinationSelected: (i) => selectedIndex.value = i,
+                backgroundColor: bgActive 
+                    ? colorScheme.surface.withValues(alpha: 0.85) 
+                    : colorScheme.surface,
+                bottomPadding: 8.0,
+                destinations: _navItems.map((item) {
+                  return FloatingNavigationDestination(
+                    label: item.label,
+                    icon:
+                        Icon(item.icon, size: 24, color: colorScheme.outline),
+                    selectedIcon: Icon(item.selectedIcon,
+                        size: 24, color: colorScheme.primary),
+                  );
+                }).toList(),
+              );
+              break;
+            case NavigationBarStyle.capsule:
+            default:
+              bottomBar = capsuleNavigationBar;
+              break;
+          }
+
+          // 统一处理底栏的毛玻璃效果（彻底去白边版）
+          if (bgActive && style != NavigationBarStyle.floating) {
+            final isDark = Theme.of(context).brightness == Brightness.dark;
+            final surfaceColor = colorScheme.surface;
+
+            bottomBar = RepaintBoundary(
+              child: ClipRect(
+                child: BackdropFilter(
+                  filter: ui.ImageFilter.blur(sigmaX: 15, sigmaY: 15),
+                  child: Container(
+                    width: double.infinity,
+                    color: surfaceColor.withValues(alpha: isDark ? 0.75 : 0.65),
+                    child: bottomBar,
+                  ),
+                ),
+              ),
             );
-          case NavigationBarStyle.capsule:
-          default:
-            return capsuleNavigationBar;
-        }
-      }),
-    );
+          }
+
+          return bottomBar;
+        }),
+      );
+    });
   }
 }
 

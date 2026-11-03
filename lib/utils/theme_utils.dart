@@ -105,6 +105,7 @@ abstract final class ThemeUtils {
         backgroundColor: SettingPref.bgActive
             ? Colors.transparent
             : colorScheme.surface,
+        // surfaceTintColor: Colors.transparent,
         foregroundColor: colorScheme.onSurface,
         titleTextStyle: TextStyle(
           fontSize: 18,
