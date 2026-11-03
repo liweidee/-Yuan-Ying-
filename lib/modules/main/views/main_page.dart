@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'dart:async';
+import 'dart:ui' as ui;
 import 'package:flutter/services.dart';
 import 'package:yuanying/common/assets.dart';
 import 'package:yuanying/models/common/nav_bar_config.dart';
 import 'package:yuanying/modules/main/controllers/main_controller.dart';
 import 'package:yuanying/modules/setting/models/setting_pref.dart';
+import 'package:yuanying/modules/setting/controllers/bg_config_controller.dart';
 import 'package:yuanying/common/widgets/floating_navigation_bar.dart';
 import 'package:yuanying/core/theme/style.dart';
 
@@ -77,6 +79,12 @@ class _MainPageState extends State<MainPage> {
         // 依赖 navStyleVersion，样式切换后触发重建
         final _ = _controller.navStyleVersion.value;
 
+        // 监听壁纸版本变化，确保底栏/侧边栏实时响应壁纸开启与关闭
+        if (Get.isRegistered<BgConfigController>()) {
+          final _ = Get.find<BgConfigController>().version.value;
+        }
+        final bgActive = SettingPref.bgActive;
+
         final useBottomNav = _controller.useBottomNav.value;
         final selectedIndex = _controller.selectedIndex.value;
         final navigationBars = _controller.navigationBars;
@@ -85,6 +93,8 @@ class _MainPageState extends State<MainPage> {
           return Scaffold(
             extendBody: true,
             resizeToAvoidBottomInset: false,
+            // 开启壁纸时让 Scaffold 透明，否则继承原有表面颜色
+            backgroundColor: bgActive ? Colors.transparent : colorScheme.surface,
             appBar: AppBar(
               toolbarHeight: 0,
               backgroundColor: Colors.transparent,
@@ -104,8 +114,10 @@ class _MainPageState extends State<MainPage> {
             ),
           );
         } else {
+          // ================= 桌面端 =================
           return Scaffold(
             resizeToAvoidBottomInset: false,
+            backgroundColor: bgActive ? Colors.transparent : colorScheme.surface,
             appBar: AppBar(
               toolbarHeight: 0,
               backgroundColor: Colors.transparent,
@@ -119,43 +131,72 @@ class _MainPageState extends State<MainPage> {
             ),
             body: Row(
               children: [
-                Container(
-                  width: 80,
-                  padding: EdgeInsets.only(
-                    top: padding.top + 15,
-                    bottom: padding.bottom + 15,
-                  ),
-                  decoration: BoxDecoration(
-                    color: colorScheme.surface,
-                    border: Border(
-                      right: BorderSide(
-                        color: colorScheme.outline.withValues(alpha: 0.06),
-                        width: 1,
-                      ),
-                    ),
-                  ),
-                  child: Column(
-                    children: [
-                      _buildAppLogo(),
-                      const SizedBox(height: 16),
-                      Expanded(
-                        child: ListView.separated(
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          itemCount: navigationBars.length,
-                          separatorBuilder: (_, __) => const SizedBox(height: 6),
-                          itemBuilder: (context, index) {
-                            final item = navigationBars[index];
-                            final isSelected = index == selectedIndex;
-                            return _NavItem(
-                              key: ValueKey('nav_$index'),
-                              item: item,
-                              isSelected: isSelected,
-                              onTap: () => _controller.switchPage(index),
-                            );
-                          },
+                // 桌面端左侧导航栏：经过性能与清晰度优化的毛玻璃
+                RepaintBoundary(
+                  child: ClipRect(
+                    child: BackdropFilter(
+                      filter: bgActive
+                          ? ui.ImageFilter.blur(sigmaX: 15, sigmaY: 15)
+                          : ui.ImageFilter.blur(sigmaX: 0, sigmaY: 0),
+                      child: Container(
+                        width: 80,
+                        padding: EdgeInsets.only(
+                          top: padding.top + 15,
+                          bottom: padding.bottom + 15,
+                        ),
+                        decoration: BoxDecoration(
+                          // 桌面端侧栏透明度回调至 0.60，平衡色彩透出与图标清晰度
+                          color: bgActive
+                              ? colorScheme.surface.withValues(alpha: 0.60)
+                              : colorScheme.surface,
+                          border: Border(
+                            right: BorderSide(
+                              color: colorScheme.outline.withValues(alpha: 0.08),
+                              width: 1,
+                            ),
+                          ),
+                        ),
+                        // 饱和度滤镜系数降为 1.1
+                        child: ColorFiltered(
+                          colorFilter: bgActive
+                              ? const ColorFilter.matrix(<double>[
+                                  1.1, 0, 0, 0, 0,
+                                  0, 1.1, 0, 0, 0,
+                                  0, 0, 1.1, 0, 0,
+                                  0, 0, 0, 1, 0,
+                                ])
+                              : const ColorFilter.matrix(<double>[
+                                  1, 0, 0, 0, 0,
+                                  0, 1, 0, 0, 0,
+                                  0, 0, 1, 0, 0,
+                                  0, 0, 0, 1, 0,
+                                ]),
+                          child: Column(
+                            children: [
+                              _buildAppLogo(),
+                              const SizedBox(height: 16),
+                              Expanded(
+                                child: ListView.separated(
+                                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                                  itemCount: navigationBars.length,
+                                  separatorBuilder: (_, __) => const SizedBox(height: 6),
+                                  itemBuilder: (context, index) {
+                                    final item = navigationBars[index];
+                                    final isSelected = index == selectedIndex;
+                                    return _NavItem(
+                                      key: ValueKey('nav_$index'),
+                                      item: item,
+                                      isSelected: isSelected,
+                                      onTap: () => _controller.switchPage(index),
+                                    );
+                                  },
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
-                    ],
+                    ),
                   ),
                 ),
                 Expanded(
@@ -335,7 +376,10 @@ class _MainPageState extends State<MainPage> {
         bottomBar = FloatingNavigationBar(
           selectedIndex: selectedIndex,
           onDestinationSelected: _controller.switchPage,
-          backgroundColor: colorScheme.surface,
+          // 悬浮样式：开启壁纸时稍微降低不透明度，融入背景
+          backgroundColor: SettingPref.bgActive
+              ? colorScheme.surface.withValues(alpha: 0.85)
+              : colorScheme.surface,
           bottomPadding: 8.0,
           destinations: navigationBars.map((item) {
             return FloatingNavigationDestination(
@@ -360,9 +404,51 @@ class _MainPageState extends State<MainPage> {
     final double actualHeight = _getBottomBarHeight(style);
     _controller.bottomBarHeight.value = actualHeight;
 
+    // 统一处理底栏的毛玻璃效果（性能优化版）
+    Widget finalBottomBar = bottomBar;
+    if (SettingPref.bgActive) {
+      final isDark = Theme.of(context).brightness == Brightness.dark;
+      final surfaceColor = colorScheme.surface;
+      // 透明度回调一点：浅色 0.75，深色 0.80（妥协清晰度）
+      final alpha = isDark ? 0.80 : 0.75;
+
+      // 悬浮样式内部自带边距和圆角，已经在上面处理了颜色；其他样式在此套上高斯模糊
+      if (style != NavigationBarStyle.floating) {
+        finalBottomBar = RepaintBoundary(
+          child: ClipRect(
+            child: BackdropFilter(
+              // 模糊度降到 12，依然很糊，但省 GPU
+              filter: ui.ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: surfaceColor.withValues(alpha: alpha),
+                  border: Border(
+                    top: BorderSide(
+                      color: colorScheme.outline.withValues(alpha: 0.1),
+                      width: 0.5,
+                    ),
+                  ),
+                ),
+                // 移动端饱和度提升降到 1.1，避免过度鲜艳影响文字
+                child: ColorFiltered(
+                  colorFilter: const ColorFilter.matrix(<double>[
+                    1.1, 0, 0, 0, 0,
+                    0, 1.1, 0, 0, 0,
+                    0, 0, 1.1, 0, 0,
+                    0, 0, 0, 1, 0,
+                  ]),
+                  child: bottomBar,
+                ),
+              ),
+            ),
+          ),
+        );
+      }
+    }
+
     return Obx(() {
       if (!_controller.hideBottomBar.value) {
-        return bottomBar;
+        return finalBottomBar;
       }
 
       if (_controller.isInstantMode) {
@@ -372,7 +458,7 @@ class _MainPageState extends State<MainPage> {
           offset: Offset(0, show ? 0 : 1),
           duration: const Duration(milliseconds: 250),
           curve: Curves.easeInOut,
-          child: bottomBar,
+          child: finalBottomBar,
         );
       } else {
         // 同步模式：使用 barOffset + FractionalTranslation
@@ -380,7 +466,7 @@ class _MainPageState extends State<MainPage> {
         final double slideFactor = (_controller.barOffset.value / Style.topBarHeight).clamp(0.0, 1.0);
         return FractionalTranslation(
           translation: Offset(0, slideFactor),
-          child: bottomBar,
+          child: finalBottomBar,
         );
       }
     });

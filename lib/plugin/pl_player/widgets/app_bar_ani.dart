@@ -58,6 +58,13 @@ class AppBarAni extends StatelessWidget {
         child: removeSafeArea
             ? child
             : ViewSafeArea(
+                // 全屏时四边都避让安全区
+                // - top:    避让 iOS 刘海 / Android 状态栏
+                // - bottom: 避让 iOS Home Indicator / Android 手势条
+                // - left / right: 避让横屏挖孔屏的挖孔
+                // 非全屏时全部为 false，与修改前完全一致。
+                top: isFullScreen,
+                bottom: isFullScreen,
                 left: isFullScreen,
                 right: isFullScreen,
                 child: child,

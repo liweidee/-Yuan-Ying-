@@ -171,8 +171,18 @@ class PlPlayerController {
 
     final oldEngine = _engine!;
 
-    // 捕获旧引擎的全屏状态
-    final wasFullScreen = oldEngine.isFullScreen.value;
+    // 切换前强制退出旧引擎全屏，避免 isFullScreen 状态污染
+    // 旧引擎的 isFullScreen 可能为 true，新引擎初始化为 false，
+    // 若不强制退出，UI 层可能在状态不一致的间隙读取到错误值，
+    // 导致全屏按钮的 onTap 计算出错误的 status 参数，触发 return 而不执行。
+    if (oldEngine.isFullScreen.value) {
+      await oldEngine.triggerFullScreen(status: false);
+    }
+
+    // 切换后不自动恢复全屏
+    // 用户在全屏状态下切换内核，期望的是回到普通状态重新操作，
+    // 而不是自动恢复全屏（可能导致布局和控件状态混乱）。
+    final wasFullScreen = false;
 
     // 捕获当前状态
     final dataSource = _lastParams?.dataSource;

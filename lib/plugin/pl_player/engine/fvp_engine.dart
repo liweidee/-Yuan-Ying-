@@ -44,6 +44,11 @@ class FvpEngine implements IPlayerEngine {
   bool _skipEndTriggered = false;
   bool _isPlaying = false;
 
+  // 全屏切换防重入标志
+  // 避免用户快速连续点击全屏按钮，或 Obx 重建导致 onTap 重复触发时，
+  // 多个并发的 triggerFullScreen 调用交错执行，导致方向切换和状态设置错乱。
+  bool _fsProcessing = false;
+
   // ---- 状态流（Rx） ----
   final playerStatus = PlPlayerStatus(PlayerStatus.paused);
   final Rx<DataStatus> dataStatus = Rx(DataStatus.none);
@@ -721,54 +726,69 @@ class FvpEngine implements IPlayerEngine {
   }) async {
     if (isFullScreen.value == status) return;
 
-    if (PlatformUtils.isMobile) {
-      if (status) {
-        hideSystemBar();
-        // 根据视频方向选择全屏方向
-        try {
-          if (_isVertical) {
+    // 防重入保护
+    if (_fsProcessing) return;
+    _fsProcessing = true;
+
+    try {
+      if (PlatformUtils.isMobile) {
+        if (status) {
+          hideSystemBar();
+          // 根据视频方向选择全屏方向
+          try {
+            if (_isVertical) {
+              await SystemChrome.setPreferredOrientations([
+                DeviceOrientation.portraitUp,
+                DeviceOrientation.portraitDown,
+              ]);
+            } else {
+              await SystemChrome.setPreferredOrientations([
+                DeviceOrientation.landscapeLeft,
+                DeviceOrientation.landscapeRight,
+              ]);
+            }
+          } catch (e) {
+            debugPrint('[FvpEngine] 设置全屏方向失败: $e');
+          }
+        } else {
+          // 原有退出逻辑
+          if (!removeSafeArea) {
+            showSystemBar();
+          }
+          try {
             await SystemChrome.setPreferredOrientations([
               DeviceOrientation.portraitUp,
               DeviceOrientation.portraitDown,
             ]);
+          } catch (e) {
+            debugPrint('[FvpEngine] 恢复竖屏方向失败: $e');
+          }
+        }
+      } else if (PlatformUtils.isDesktop) {
+        try {
+          if (status) {
+            await enterDesktopFullScreen(inAppFullScreen: inAppFullScreen);
           } else {
-            await SystemChrome.setPreferredOrientations([
-              DeviceOrientation.landscapeLeft,
-              DeviceOrientation.landscapeRight,
-            ]);
+            await exitDesktopFullScreen();
           }
         } catch (e) {
-          debugPrint('[FvpEngine] 设置全屏方向失败: $e');
-        }
-      } else {
-        // 原有退出逻辑
-        if (!removeSafeArea) {
-          showSystemBar();
-        }
-        try {
-          await SystemChrome.setPreferredOrientations([
-            DeviceOrientation.portraitUp,
-            DeviceOrientation.portraitDown,
-          ]);
-        } catch (e) {
-          debugPrint('[FvpEngine] 恢复竖屏方向失败: $e');
+          debugPrint('FvpEngine triggerFullScreen error: $e');
         }
       }
-    } else if (PlatformUtils.isDesktop) {
-      try {
-        if (status) {
-          await enterDesktopFullScreen(inAppFullScreen: inAppFullScreen);
-        } else {
-          await exitDesktopFullScreen();
-        }
-      } catch (e) {
-        debugPrint('FvpEngine triggerFullScreen error: $e');
-      }
-    }
 
-    _isFullscreen = status;
-    isFullScreen.value = status;
-    _syncBatteryListener();
+      // 方向切换后稍作延迟，确保 MediaQuery.orientationOf 已经更新
+      // setPreferredOrientations 是异步的，系统方向变化需要一帧左右的时间，
+      // 延迟 50ms 可以让后续的 UI 重建读取到正确的方向值。
+      if (PlatformUtils.isMobile) {
+        await Future.delayed(const Duration(milliseconds: 50));
+      }
+
+      _isFullscreen = status;
+      isFullScreen.value = status;
+      _syncBatteryListener();
+    } finally {
+      _fsProcessing = false;
+    }
   }
 
   @override

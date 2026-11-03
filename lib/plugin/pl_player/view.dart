@@ -634,11 +634,21 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
         icon: isFullScreen
             ? const Icon(Icons.fullscreen_exit, size: 24, color: Colors.white)
             : const Icon(Icons.fullscreen, size: 24, color: Colors.white),
-        onTap: () => plPlayerController.triggerFullScreen(status: !isFullScreen),
-        onSecondaryTap: () => plPlayerController.triggerFullScreen(
-          status: !isFullScreen,
-          inAppFullScreen: true,
-        ),
+        // 每次点击时实时读取 isFullScreen.value，避免闭包捕获旧值
+        // 原写法 !isFullScreen 使用的是 build 时捕获的 isFullScreen 变量，
+        // 如果 Obx 重建延迟或引擎切换导致状态变化，闭包中的旧值可能已过时，
+        // 传入的 status 可能与当前 isFullScreen.value 相同，触发 return。
+        onTap: () {
+          final currentFullScreen = plPlayerController.isFullScreen.value;
+          plPlayerController.triggerFullScreen(status: !currentFullScreen);
+        },
+        onSecondaryTap: () {
+          final currentFullScreen = plPlayerController.isFullScreen.value;
+          plPlayerController.triggerFullScreen(
+            status: !currentFullScreen,
+            inAppFullScreen: true,
+          );
+        },
       ),
       BottomControlType.pip => ComBtn(
         width: widgetWidth,
