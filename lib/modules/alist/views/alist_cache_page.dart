@@ -135,11 +135,11 @@ class _AlistCachePageState extends State<AlistCachePage> {
     final cs = theme.colorScheme;
 
     return Scaffold(
-      backgroundColor: cs.surface,
+      // backgroundColor: cs.surface,
       appBar: AppBar(
         title: const Text('缓存管理'),
-        backgroundColor: cs.surface,
-        foregroundColor: cs.onSurface,
+        // backgroundColor: cs.surface,
+        // foregroundColor: cs.onSurface,
         elevation: 0,
       ),
       body: ListView(

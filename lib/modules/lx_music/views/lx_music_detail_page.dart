@@ -323,11 +323,11 @@ class _LxMusicDetailPageState extends State<LxMusicDetailPage> {
     final colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
-      backgroundColor: colorScheme.surface,
+      // backgroundColor: colorScheme.surface,
       appBar: AppBar(
         title: const Text('洛雪音乐'),
-        backgroundColor: colorScheme.surface,
-        foregroundColor: colorScheme.onSurface,
+        // backgroundColor: colorScheme.surface,
+        // foregroundColor: colorScheme.onSurface,
         elevation: 0,
         actions: [
           Obx(() {

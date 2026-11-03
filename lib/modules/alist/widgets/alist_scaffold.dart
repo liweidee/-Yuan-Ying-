@@ -28,7 +28,7 @@ class AlistScaffold extends StatelessWidget {
 
     return Scaffold(
       resizeToAvoidBottomInset: resizeToAvoidBottomInset,
-      backgroundColor: colorScheme.surface,
+      // backgroundColor: colorScheme.surface,
       appBar: !showAppbar
           ? null
           : AppBar(
@@ -40,8 +40,8 @@ class AlistScaffold extends StatelessWidget {
                         )
                       : null),
               automaticallyImplyLeading: false,
-              backgroundColor: colorScheme.surface,
-              foregroundColor: colorScheme.onSurface,
+              // backgroundColor: colorScheme.surface,
+              // foregroundColor: colorScheme.onSurface,
               elevation: 0,
               title: appbarTitle,
               actions: appbarActions,

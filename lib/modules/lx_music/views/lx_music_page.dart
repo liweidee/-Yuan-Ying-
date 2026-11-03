@@ -63,7 +63,7 @@ class _LxMusicPageState extends State<LxMusicPage> {
     final colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
-      backgroundColor: colorScheme.surface,
+      // backgroundColor: colorScheme.surface,
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new),
@@ -75,8 +75,8 @@ class _LxMusicPageState extends State<LxMusicPage> {
               style: const TextStyle(fontSize: 18),
             )),
         centerTitle: false,
-        backgroundColor: colorScheme.surface,
-        foregroundColor: colorScheme.onSurface,
+        // backgroundColor: colorScheme.surface,
+        // foregroundColor: colorScheme.onSurface,
         elevation: 0,
         actions: [
           IconButton(

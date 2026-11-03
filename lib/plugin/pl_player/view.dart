@@ -1755,18 +1755,24 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
                                     size: 20,
                                     color: Colors.white,
                                   ),
-                                  onTap: () {
-                                    final orientation = MediaQuery.of(context).orientation;
-                                    if (orientation == Orientation.portrait) {
-                                      plPlayerController.setOrientation([
-                                        DeviceOrientation.landscapeLeft,
-                                        DeviceOrientation.landscapeRight,
-                                      ]);
-                                    } else {
-                                      plPlayerController.setOrientation([
-                                        DeviceOrientation.portraitUp,
-                                        DeviceOrientation.portraitDown,
-                                      ]);
+                                  onTap: () async {
+                                    if (!PlatformUtils.isMobile) return;   // 桌面端直接忽略
+                                    try {
+                                      final orientation = MediaQuery.orientationOf(context);
+                                      if (orientation == Orientation.portrait) {
+                                        await plPlayerController.setOrientation([
+                                          DeviceOrientation.landscapeLeft,
+                                          DeviceOrientation.landscapeRight,
+                                        ]);
+                                      } else {
+                                        await plPlayerController.setOrientation([
+                                          DeviceOrientation.portraitUp,
+                                          DeviceOrientation.portraitDown,
+                                        ]);
+                                      }
+                                    } catch (e) {
+                                      debugPrint('[PLVideoPlayer] 旋转屏幕失败: $e');
+                                      SmartDialog.showToast('当前设备不支持旋转');
                                     }
                                   },
                                 ),

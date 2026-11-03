@@ -209,12 +209,12 @@ class _LxPlaylistPageState extends State<LxPlaylistPage> {
     final colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
-      backgroundColor: colorScheme.surface,
+      // backgroundColor: colorScheme.surface,
       appBar: AppBar(
         title: const Text('我的歌单', style: TextStyle(fontSize: 18)),
         centerTitle: false,
-        backgroundColor: colorScheme.surface,
-        foregroundColor: colorScheme.onSurface,
+        // backgroundColor: colorScheme.surface,
+        // foregroundColor: colorScheme.onSurface,
         elevation: 0,
         actions: [
           IconButton(
@@ -712,13 +712,13 @@ class _LxPlaylistDetailPageState extends State<_LxPlaylistDetailPage> {
     final colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
-      backgroundColor: colorScheme.surface,
+      // backgroundColor: colorScheme.surface,
       appBar: AppBar(
         title: Text('$_title (${_songs.length})',
             style: const TextStyle(fontSize: 18)),
         centerTitle: false,
-        backgroundColor: colorScheme.surface,
-        foregroundColor: colorScheme.onSurface,
+        // backgroundColor: colorScheme.surface,
+        // foregroundColor: colorScheme.onSurface,
         elevation: 0,
         actions: [
           if (_songs.isNotEmpty)

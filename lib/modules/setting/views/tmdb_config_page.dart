@@ -8,6 +8,7 @@ import 'package:yuanying/modules/setting/controllers/tmdb_config_controller.dart
 import 'package:yuanying/modules/setting/views/tmdb_match_page.dart';
 import 'package:yuanying/services/tmdb_match_cache_service.dart';
 import 'package:yuanying/modules/setting/views/tmdb_cache_page.dart';
+import 'package:yuanying/modules/setting/models/setting_pref.dart';
 
 class TmdbConfigPage extends StatelessWidget {
   const TmdbConfigPage({super.key});
@@ -20,14 +21,15 @@ class TmdbConfigPage extends StatelessWidget {
         : Get.put(TmdbConfigController());
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final bgColor = SettingPref.bgActive ? Colors.transparent : colorScheme.surface;
 
     return Scaffold(
-      backgroundColor: colorScheme.surface,
+      backgroundColor: bgColor,
       appBar: AppBar(
         title: const Text('TMDB 配置', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
         centerTitle: true,
         elevation: 0,
-        backgroundColor: colorScheme.surface,
+        backgroundColor: bgColor,
         foregroundColor: colorScheme.onSurface,
         leading: IconButton(
           icon: Icon(Icons.arrow_back_ios_new, color: colorScheme.onSurface),

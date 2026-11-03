@@ -554,6 +554,9 @@ class MediaKitEngine implements IPlayerEngine {
 
   Map<String, String>? _cachedHeaders;
 
+  // cache-speed 观察状态
+  bool _isObservingCacheSpeed = false;
+
   void _initVideoFit() {
     if (_prefFit == VideoFitType.fill && _isVertical) {
       videoFit.value = VideoFitType.contain;
@@ -615,36 +618,114 @@ class MediaKitEngine implements IPlayerEngine {
     if (state != null) {
       final w = state.width ?? 0;
       final h = state.height ?? 0;
-      // 更新原有字段（兼容旧逻辑）
       _width = w;
       _height = h;
-      // 更新响应式变量
       _videoWidth.value = w;
       _videoHeight.value = h;
+      // 根据视频宽高推断是否竖屏
+      if (w > 0 && h > 0) {
+        _isVertical = h > w;
+      }
     }
   }
 
-  /// 启动网速监控（每秒估算一次）
+  // ============================================================
+  // 网速监控：优先使用 mpv cache-speed，失败时回退到 buffered 估算
+  // ============================================================
+
+  /// 启动网速监控。
+  /// - 网络源：优先尝试 cache-speed 精确观察
+  /// - 本地文件：不监控，网速置 0
   void _startSpeedMonitor() {
-    _stopSpeedMonitor();
+    _stopSpeedMonitor(); // 先清理旧状态
+
+    // 本地文件无需网速
+    if (dataSource is! NetworkSource) {
+      _downloadSpeed.value = 0;
+      return;
+    }
+
+    // 尝试精确观察
+    final observed = _tryStartCacheSpeedObserver();
+    if (!observed) {
+      // 观察失败 → 回退到 buffered 估算
+      _startFallbackSpeedMonitor();
+    }
+  }
+
+  /// 尝试通过 NativePlayer.observeProperty('cache-speed') 获取精确网速。
+  /// 返回 true 表示成功启动观察，false 表示需要回退。
+  bool _tryStartCacheSpeedObserver() {
+    final player = _videoPlayerController;
+    if (player == null) return false;
+
+    // Web 端或非 NativePlayer 不支持 observeProperty
+    if (player.platform is! NativePlayer) {
+      debugPrint('[MediaKitEngine] 非 NativePlayer，无法观察 cache-speed');
+      return false;
+    }
+
+    if (_isObservingCacheSpeed) return true;
+
+    try {
+      final nativePlayer = player.platform as NativePlayer;
+      nativePlayer.observeProperty('cache-speed', (value) async {
+        if (value.isEmpty) return;
+        try {
+          // mpv 以 MPV_FORMAT_INT64 返回，observeProperty 转为字符串
+          final bytesPerSecond = double.tryParse(value) ?? 0.0;
+          _downloadSpeed.value = bytesPerSecond > 0 ? bytesPerSecond : 0.0;
+        } catch (e) {
+          debugPrint('[MediaKitEngine] cache-speed 解析失败: $e (raw: $value)');
+        }
+      });
+      _isObservingCacheSpeed = true;
+      debugPrint('[MediaKitEngine] cache-speed 观察已启动');
+      return true;
+    } catch (e) {
+      debugPrint('[MediaKitEngine] cache-speed 观察失败: $e');
+      return false;
+    }
+  }
+
+  /// 停止网速监控（同时清理 cache-speed 观察和兜底计时器）
+  void _stopSpeedMonitor() {
+    // 停止 cache-speed 观察
+    if (_isObservingCacheSpeed) {
+      final player = _videoPlayerController;
+      if (player != null && player.platform is NativePlayer) {
+        try {
+          (player.platform as NativePlayer).unobserveProperty('cache-speed');
+        } catch (e) {
+          // 属性可能未被观察，忽略
+          debugPrint('[MediaKitEngine] unobserve cache-speed 忽略: $e');
+        }
+      }
+      _isObservingCacheSpeed = false;
+    }
+
+    // 停止兜底计时器
+    _speedTimer?.cancel();
+    _speedTimer = null;
+  }
+
+  /// 兜底方案：基于 buffered 增量的估算（仅在 cache-speed 不可用时使用）
+  void _startFallbackSpeedMonitor() {
     _lastBuffered = buffered.value;
     _lastSpeedTime = DateTime.now();
     _speedTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       final now = DateTime.now();
       final deltaSec = now.difference(_lastSpeedTime).inSeconds;
       if (deltaSec > 0) {
-        // 计算 buffer 增量（毫秒），粗略估算为字节数
-        final deltaBytes = (buffered.value.inMilliseconds - _lastBuffered.inMilliseconds) * 1024 ~/ 8;
+        final deltaBytes =
+            (buffered.value.inMilliseconds - _lastBuffered.inMilliseconds) *
+                1024 ~/
+                8;
         _downloadSpeed.value = deltaBytes / deltaSec;
       }
       _lastBuffered = buffered.value;
       _lastSpeedTime = now;
     });
-  }
-
-  void _stopSpeedMonitor() {
-    _speedTimer?.cancel();
-    _speedTimer = null;
   }
 
   bool _isValidSubtitleTrack(SubtitleTrack track) {
@@ -847,6 +928,9 @@ class MediaKitEngine implements IPlayerEngine {
     }
 
     _skipEndTriggered = false;   // 重置跳过片尾标志
+
+    // 切换源前先停止旧的网速监控
+    _stopSpeedMonitor();
 
     try {
       _processing = true;

@@ -17,6 +17,7 @@ import 'package:yuanying/modules/local_file/widgets/path_management_dialog.dart'
 import 'package:yuanying/modules/local_file/widgets/statistics_bar.dart';
 import 'package:yuanying/utils/platform_utils.dart';
 import 'package:yuanying/modules/plugin_center/widgets/storage_permission_button.dart';
+import 'package:yuanying/modules/setting/models/setting_pref.dart';
 
 class LocalFilePage extends StatefulWidget {
   const LocalFilePage({super.key});
@@ -50,8 +51,11 @@ class _LocalFilePageState extends State<LocalFilePage>
     final isWide = screenWidth > 800;
     final crossAxisCount = isWide ? 6 : 2;
 
+    // 动态背景色
+    final bgColor = SettingPref.bgActive ? Colors.transparent : colorScheme.surface;
+
     return Scaffold(
-      backgroundColor: colorScheme.surface,
+      backgroundColor: bgColor,
       appBar: _buildAppBar(context, colorScheme),
       body: Obx(() {
         // 初始化完成前只显示 loading，不显示空状态
@@ -118,12 +122,14 @@ class _LocalFilePageState extends State<LocalFilePage>
   }
 
   AppBar _buildAppBar(BuildContext context, ColorScheme colorScheme) {
+    final bgColor = SettingPref.bgActive ? Colors.transparent : colorScheme.surface;
+    
     return AppBar(
       automaticallyImplyLeading: false,
       title: const Text('本地文件'),
       centerTitle: false,
       elevation: 0,
-      backgroundColor: colorScheme.surface,
+      backgroundColor: bgColor,
       foregroundColor: colorScheme.onSurface,
       actions: [
         // 刷新按钮

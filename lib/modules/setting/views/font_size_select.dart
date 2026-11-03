@@ -28,6 +28,7 @@ class _FontSizeSelectPageState extends State<FontSizeSelectPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final bgColor = SettingPref.bgActive ? Colors.transparent : colorScheme.surface;
     return Scaffold(
       resizeToAvoidBottomInset: false,
       appBar: AppBar(
@@ -63,7 +64,7 @@ class _FontSizeSelectPageState extends State<FontSizeSelectPage> {
                     color: colorScheme.primary.withValues(alpha: 0.3),
                   ),
                 ),
-                color: colorScheme.surface,
+                color: bgColor,
               ),
               child: Row(
                 children: [

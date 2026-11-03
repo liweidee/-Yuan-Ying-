@@ -9,6 +9,7 @@ import 'package:yuanying/modules/local_php_t4/models/php_t4_source.dart';
 import 'package:yuanying/modules/local_php_t4/services/php_t4_service.dart';
 import 'package:yuanying/modules/plugin_center/models/service_config.dart';
 import 'package:yuanying/modules/plugin_center/services/service_manager.dart';
+import 'package:yuanying/modules/setting/models/setting_pref.dart';
 
 class PhpT4Page extends StatefulWidget {
   const PhpT4Page({super.key});
@@ -30,8 +31,9 @@ class _PhpT4PageState extends State<PhpT4Page> {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final bgColor = SettingPref.bgActive ? Colors.transparent : colorScheme.surface;
     return Scaffold(
-      backgroundColor: colorScheme.surface,
+      backgroundColor: bgColor,
       appBar: AppBar(
         title: const Text(
           'PHP-T4 本地服务',

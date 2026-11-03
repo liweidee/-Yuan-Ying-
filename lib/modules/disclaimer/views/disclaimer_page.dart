@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:yuanying/core/theme/style.dart';
+import 'package:yuanying/modules/setting/models/setting_pref.dart';
 
 class DisclaimerPage extends StatelessWidget {
   const DisclaimerPage({super.key});
@@ -8,14 +9,15 @@ class DisclaimerPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final bgColor = SettingPref.bgActive ? Colors.transparent : colorScheme.surface;
 
     return Scaffold(
-      backgroundColor: colorScheme.surface,
+      backgroundColor: bgColor,
       appBar: AppBar(
         title: const Text('免责声明'),
         centerTitle: false,
         elevation: 0,
-        backgroundColor: colorScheme.surface,
+        backgroundColor: bgColor,
         foregroundColor: colorScheme.onSurface,
       ),
       body: Column(

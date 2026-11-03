@@ -20,12 +20,12 @@ class _LxDebugLogPageState extends State<LxDebugLogPage> {
     final logText = LxLogger.text;
 
     return Scaffold(
-      backgroundColor: colorScheme.surface,
+      // backgroundColor: colorScheme.surface,
       appBar: AppBar(
         title: const Text('调试日志', style: TextStyle(fontSize: 18)),
         centerTitle: false,
-        backgroundColor: colorScheme.surface,
-        foregroundColor: colorScheme.onSurface,
+        // backgroundColor: colorScheme.surface,
+        // foregroundColor: colorScheme.onSurface,
         elevation: 0,
         actions: [
           IconButton(

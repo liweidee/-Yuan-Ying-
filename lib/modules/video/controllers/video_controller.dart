@@ -2542,8 +2542,14 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
   }
 
   /// 重新加载当前剧集（重新请求播放地址）
-  /// [seekTo] 指定起始位置，若不传则从头开始
-  Future<void> reloadCurrentEpisode({Duration? seekTo}) async {
+  ///
+  /// [seekTo] 指定起始位置，若不传则从头开始。
+  /// [autoPlay] 是否自动播放，默认 true。
+  ///   切换内核时可传入切换前的播放状态，以保留用户「暂停中」的意图。
+  Future<void> reloadCurrentEpisode({
+    Duration? seekTo,
+    bool autoPlay = true,
+  }) async {
     final episode = introController.currentPlayEpisode;
     if (episode == null) {
       SmartDialog.showToast('当前没有播放的剧集');
@@ -2555,7 +2561,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
       episode,
       sourceIndex: sourceIndex,
       episodeIndex: episodeIndex,
-      autoPlay: true,
+      autoPlay: autoPlay,
       seekTo: seekTo ?? Duration.zero,
     );
   }

@@ -66,8 +66,8 @@ class FnosMainShell extends StatelessWidget {
           tooltip: '返回服务器列表',
         ),
         title: Text(server.name),
-        backgroundColor: colorScheme.surface,
-        foregroundColor: colorScheme.onSurface,
+        // backgroundColor: colorScheme.surface,
+        // foregroundColor: colorScheme.onSurface,
         elevation: 0,
       ),
       body: Obx(() => IndexedStack(

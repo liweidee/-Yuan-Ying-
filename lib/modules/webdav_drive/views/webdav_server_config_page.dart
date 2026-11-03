@@ -6,6 +6,7 @@ import 'package:yuanying/modules/network_media/widgets/server_form_kit.dart';
 import '../controllers/webdav_server_controller.dart';
 import '../models/webdav_server.dart';
 import '../services/webdav_service.dart';
+import 'package:yuanying/modules/setting/models/setting_pref.dart';
 
 class WebDavServerConfigPage extends StatelessWidget {
   const WebDavServerConfigPage({super.key});
@@ -18,11 +19,12 @@ class WebDavServerConfigPage extends StatelessWidget {
     final c = Get.find<WebDavServerController>();
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
+    final bgColor = SettingPref.bgActive ? Colors.transparent : cs.surface;
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('WebDAV 服务器'),
-        backgroundColor: cs.surface,
+        backgroundColor: bgColor,
         foregroundColor: cs.onSurface,
         elevation: 0,
         actions: [

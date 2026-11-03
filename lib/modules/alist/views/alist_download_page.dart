@@ -24,11 +24,11 @@ class AlistDownloadPage extends StatelessWidget {
     final theme = Theme.of(context);
 
     return Scaffold(
-      backgroundColor: theme.colorScheme.surface,
+      // backgroundColor: theme.colorScheme.surface,
       appBar: AppBar(
         title: const Text('下载管理'),
-        backgroundColor: theme.colorScheme.surface,
-        foregroundColor: theme.colorScheme.onSurface,
+        // backgroundColor: theme.colorScheme.surface,
+        // foregroundColor: theme.colorScheme.onSurface,
         elevation: 0,
         actions: [
           PopupMenuButton<String>(

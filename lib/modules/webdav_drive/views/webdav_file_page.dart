@@ -9,6 +9,7 @@ import '../controllers/webdav_file_controller.dart';
 import '../controllers/webdav_server_controller.dart';
 import '../models/webdav_entry.dart';
 import '../services/webdav_service.dart';
+import 'package:yuanying/modules/setting/models/setting_pref.dart';
 
 class WebDavFilePage extends StatelessWidget {
   const WebDavFilePage({super.key});
@@ -61,9 +62,10 @@ class WebDavFilePage extends StatelessWidget {
   Widget _buildBreadcrumb(BuildContext context, WebDavFileController c) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
+    final bgColor = SettingPref.bgActive ? Colors.transparent : cs.surfaceContainerLow;
 
     return Material(
-      color: cs.surfaceContainerLow,
+      color: bgColor,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(4, 4, 4, 4),
         child: Row(

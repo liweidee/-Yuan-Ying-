@@ -45,8 +45,8 @@ class _NetworkMainShellState extends State<NetworkMainShell> {
           tooltip: '返回',
         ),
         title: Text(widget.title),
-        backgroundColor: cs.surface,
-        foregroundColor: cs.onSurface,
+        // backgroundColor: cs.surface,
+        // foregroundColor: cs.onSurface,
         elevation: 0,
       ),
       body: Obx(() => IndexedStack(

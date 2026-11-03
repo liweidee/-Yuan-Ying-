@@ -7,6 +7,7 @@ import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:yuanying/core/theme/style.dart';
 import 'package:yuanying/models/live/live_config.dart';
 import 'package:yuanying/modules/setting/controllers/live_config_controller.dart';
+import 'package:yuanying/modules/setting/models/setting_pref.dart';
 
 class LiveConfigPage extends StatelessWidget {
   const LiveConfigPage({super.key});
@@ -15,14 +16,16 @@ class LiveConfigPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final controller = Get.put(LiveConfigController());
     final theme = Theme.of(context);
+    final colorScheme = Theme.of(context).colorScheme;
+    final bgColor = SettingPref.bgActive ? Colors.transparent : colorScheme.surface;
 
     return Scaffold(
-      backgroundColor: theme.colorScheme.surface,
+      backgroundColor: bgColor,
       appBar: AppBar(
         title: const Text('直播配置', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
         centerTitle: false,
         elevation: 0,
-        backgroundColor: theme.colorScheme.surface,
+        backgroundColor: bgColor,
         foregroundColor: theme.colorScheme.onSurface,
         actions: [
           IconButton(

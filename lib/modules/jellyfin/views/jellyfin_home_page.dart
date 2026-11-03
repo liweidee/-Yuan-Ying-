@@ -127,17 +127,23 @@ class JellyfinHomePage extends StatelessWidget {
                                           Image.network(
                                             libImageUrl,
                                             fit: BoxFit.cover,
-                                            errorBuilder: (_, __, ___) =>
-                                                Container(
-                                              color: theme
-                                                  .colorScheme.surfaceVariant,
+                                            width: double.infinity,
+                                            height: double.infinity,
+                                            loadingBuilder: (_, child, progress) =>
+                                                progress == null ? child : Container(
+                                                  color: theme.colorScheme.surfaceVariant,
+                                                  child: Icon(
+                                                    lib.isMusicLibrary ? Icons.music_note : Icons.video_library,
+                                                    size: 40,
+                                                    color: theme.colorScheme.outline,
+                                                  ),
+                                                ),
+                                            errorBuilder: (_, __, ___) => Container(
+                                              color: theme.colorScheme.surfaceVariant,
                                               child: Icon(
-                                                lib.isMusicLibrary
-                                                    ? Icons.music_note
-                                                    : Icons.video_library,
+                                                lib.isMusicLibrary ? Icons.music_note : Icons.video_library,
                                                 size: 40,
-                                                color:
-                                                    theme.colorScheme.outline,
+                                                color: theme.colorScheme.outline,
                                               ),
                                             ),
                                           ),
@@ -384,19 +390,9 @@ class JellyfinHomePage extends StatelessWidget {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Expanded(
-                                    child: ClipRRect(
-                                      borderRadius: BorderRadius.circular(6),
-                                      child: Image.network(
-                                        imageUrl,
-                                        fit: BoxFit.cover,
-                                        errorBuilder: (_, __, ___) => Container(
-                                          color: theme
-                                              .colorScheme.surfaceVariant,
-                                          child: Icon(Icons.movie,
-                                              color:
-                                                  theme.colorScheme.outline),
-                                        ),
-                                      ),
+                                    child: _PosterImage(
+                                      imageUrl: imageUrl,
+                                      fallbackIcon: item.isAudio ? Icons.music_note : Icons.movie,
                                     ),
                                   ),
                                   const SizedBox(height: 4),
@@ -508,19 +504,9 @@ class JellyfinHomePage extends StatelessWidget {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Expanded(
-                                    child: ClipRRect(
-                                      borderRadius: BorderRadius.circular(6),
-                                      child: Image.network(
-                                        imageUrl,
-                                        fit: BoxFit.cover,
-                                        errorBuilder: (_, __, ___) => Container(
-                                          color: theme
-                                              .colorScheme.surfaceVariant,
-                                          child: Icon(Icons.movie,
-                                              color:
-                                                  theme.colorScheme.outline),
-                                        ),
-                                      ),
+                                    child: _PosterImage(
+                                      imageUrl: imageUrl,
+                                      fallbackIcon: item.isAudio ? Icons.music_note : Icons.movie,
                                     ),
                                   ),
                                   const SizedBox(height: 4),
@@ -620,5 +606,59 @@ class JellyfinHomePage extends StatelessWidget {
       return '${item.productionYear}';
     }
     return '';
+  }
+}
+
+/// 统一的海报图：始终撑满父级约束，
+/// 加载中 / 加载失败 / URL 为空 时都显示同尺寸的占位，
+/// 避免出现「窄条占位 → 突然变宽」的跳动。
+class _PosterImage extends StatelessWidget {
+  const _PosterImage({
+    required this.imageUrl,
+    this.fallbackIcon = Icons.movie,
+    this.borderRadius = 6,
+  });
+
+  final String imageUrl;
+  final IconData fallbackIcon;
+  final double borderRadius;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    final placeholder = Container(
+      width: double.infinity,
+      height: double.infinity,
+      // 用 surfaceVariant 打底 + 一点点描边，比纯色块更像"占位设计"
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceVariant,
+        border: Border.all(
+          color: theme.colorScheme.outlineVariant.withOpacity(0.3),
+          width: 0.5,
+        ),
+      ),
+      alignment: Alignment.center,
+      child: Icon(
+        fallbackIcon,
+        size: 28,
+        color: theme.colorScheme.outline,
+      ),
+    );
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(borderRadius),
+      child: Image.network(
+        imageUrl,
+        fit: BoxFit.cover,
+        width: double.infinity,
+        height: double.infinity,
+        // 加载中：显示同尺寸占位，避免闪一下白/透明
+        loadingBuilder: (_, child, progress) =>
+            progress == null ? child : placeholder,
+        // 加载失败：同样撑满
+        errorBuilder: (_, __, ___) => placeholder,
+      ),
+    );
   }
 }

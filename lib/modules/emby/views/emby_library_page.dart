@@ -26,7 +26,7 @@ class EmbyLibraryPage extends StatelessWidget {
         EmbyLibraryController(
           libraryId: libraryId,
           libraryName: libraryName,
-          collectionType: collectionType, // ← 传入
+          collectionType: collectionType,
         ),
         tag: libraryId,
       );
@@ -37,8 +37,8 @@ class EmbyLibraryPage extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         title: Text(libraryName),
-        backgroundColor: theme.colorScheme.surface,
-        foregroundColor: theme.colorScheme.onSurface,
+        // backgroundColor: theme.colorScheme.surface,
+        // foregroundColor: theme.colorScheme.onSurface,
         elevation: 0,
         actions: [
           IconButton(

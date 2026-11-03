@@ -12,6 +12,7 @@ import 'package:yuanying/modules/manual_source/models/manual_source_item.dart';
 import 'package:yuanying/modules/manual_source/services/manual_source_scanner.dart';
 import 'package:yuanying/modules/manual_source/widgets/manual_source_edit_dialog.dart';
 import 'package:yuanying/t4/services/source_manager.dart';
+import 'package:yuanying/modules/setting/models/setting_pref.dart';
 
 class ManualSourcePage extends StatefulWidget {
   const ManualSourcePage({super.key});
@@ -36,10 +37,11 @@ class _ManualSourcePageState extends State<ManualSourcePage> {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final bgColor = SettingPref.bgActive ? Colors.transparent : colorScheme.surface;
     return Obx(() {
       final sel = _ctrl.selectionMode.value;
       return Scaffold(
-        backgroundColor: colorScheme.surface,
+        backgroundColor: bgColor,
         appBar: sel
             ? _buildSelectionAppBar(colorScheme)
             : _buildAppBar(colorScheme),
@@ -138,7 +140,7 @@ class _ManualSourcePageState extends State<ManualSourcePage> {
       return Container(
         width: double.infinity,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        color: colorScheme.surface,
+        color: Colors.transparent,
         child: SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           child: Row(

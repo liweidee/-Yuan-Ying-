@@ -3,6 +3,7 @@ import 'package:get/get.dart';
 import 'package:yuanying/modules/favorite/controllers/favorite_controller.dart';
 import 'package:yuanying/common/widgets/media_card.dart';
 import 'package:yuanying/t4/models/video_item.dart';
+import 'package:yuanying/modules/setting/models/setting_pref.dart';
 
 class FavoritePage extends StatefulWidget {
   const FavoritePage({super.key});
@@ -25,9 +26,12 @@ class _FavoritePageState extends State<FavoritePage> {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
     final screenWidth = MediaQuery.of(context).size.width;
+    
+    // 动态背景色
+    final bgColor = SettingPref.bgActive ? Colors.transparent : colorScheme.surface;
 
     return Scaffold(
-      backgroundColor: colorScheme.surface,
+      backgroundColor: bgColor,
       appBar: AppBar(
         leading: IconButton(
           icon: Icon(Icons.arrow_back_ios, color: colorScheme.onSurface, size: 20),
@@ -35,7 +39,7 @@ class _FavoritePageState extends State<FavoritePage> {
           splashRadius: 20,
         ),
         title: Text('我的收藏', style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
-        backgroundColor: colorScheme.surface,
+        backgroundColor: bgColor,
         elevation: 0,
         actions: [
           if (controller.videoList.isNotEmpty)
@@ -67,7 +71,7 @@ class _FavoritePageState extends State<FavoritePage> {
     );
   }
 
-  /// 筛选栏 – 分段控制器样式（与推送弹窗完全一致，居中显示）
+  /// 筛选栏 – 分段控制器样式（已修复溢出风险）
   Widget _buildFilterBar(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final filters = [
@@ -81,59 +85,65 @@ class _FavoritePageState extends State<FavoritePage> {
     return Obx(() {
       final current = controller.filterType.value;
       return Center(
-        child: Container(
-          decoration: BoxDecoration(
-            border: Border.all(
-              color: colorScheme.outline.withOpacity(0.15),
-              width: 1,
+        // 使用 SingleChildScrollView 包裹防止小屏溢出
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Container(
+            decoration: BoxDecoration(
+              border: Border.all(
+                color: colorScheme.outline.withOpacity(0.15),
+                width: 1,
+              ),
+              borderRadius: BorderRadius.circular(8),
             ),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: filters.map((item) {
-              final value = item['value'] as String;
-              final label = item['label'] as String;
-              final icon = item['icon'] as IconData;
-              final isSelected = current == value;
-              return GestureDetector(
-                onTap: () => controller.filterType.value = value,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: isSelected
-                        ? colorScheme.primary.withOpacity(0.12)
-                        : Colors.transparent,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        icon,
-                        size: 16,
-                        color: isSelected ? colorScheme.primary : colorScheme.outline,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        label,
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                          color: isSelected ? colorScheme.primary : colorScheme.onSurface,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: filters.map((item) {
+                final value = item['value'] as String;
+                final label = item['label'] as String;
+                final icon = item['icon'] as IconData;
+                final isSelected = current == value;
+                return GestureDetector(
+                  onTap: () => controller.filterType.value = value,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: isSelected
+                          ? colorScheme.primary.withOpacity(0.12)
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          icon,
+                          size: 16,
+                          color: isSelected ? colorScheme.primary : colorScheme.outline,
                         ),
-                      ),
-                    ],
+                        const SizedBox(width: 4),
+                        Text(
+                          label,
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                            color: isSelected ? colorScheme.primary : colorScheme.onSurface,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              );
-            }).toList(),
+                );
+              }).toList(),
+            ),
           ),
         ),
       );
     });
   }
 
+  // ... (_buildEmptyState, _buildContent, 弹窗等保持不变)
   Widget _buildEmptyState(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;

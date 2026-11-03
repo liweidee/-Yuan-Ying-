@@ -29,6 +29,22 @@ class _HeaderControlState extends State<HeaderControl> {
 
   final _titleKey = GlobalKey();
 
+  // 网速显示平滑
+  double _displaySpeed = 0;
+
+  double _smoothSpeed(double raw) {
+    if (raw <= 0) {
+      _displaySpeed = 0;
+      return 0;
+    }
+    if (_displaySpeed == 0) {
+      _displaySpeed = raw;
+    } else {
+      _displaySpeed = _displaySpeed * 0.7 + raw * 0.3;
+    }
+    return _displaySpeed;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -44,7 +60,8 @@ class _HeaderControlState extends State<HeaderControl> {
     return Obx(() {
       final w = playerController.videoWidth.value;
       final h = playerController.videoHeight.value;
-      final speed = playerController.downloadSpeed.value;
+      final rawSpeed = playerController.downloadSpeed.value;
+      final speed = _smoothSpeed(rawSpeed);
       final isFvpEngine = PlayerPref.playerEngine == PlayerEngineType.fvp;
 
       // ---- 构建显示内容 ----
@@ -489,27 +506,39 @@ class _HeaderControlState extends State<HeaderControl> {
     SmartDialog.showLoading(msg: '切换内核中...');
 
     try {
-      if (playerController.playerStatus.value.isPlaying) {
+      // 切换前抓取播放进度和播放状态
+      // 抓取时机：pause() 之前，此时 position 已稳定在用户看到的最后一帧
+      final savedPosition = playerController.position;
+      final wasPlaying = playerController.playerStatus.value.isPlaying;
+
+      if (wasPlaying) {
         await playerController.pause();
       }
-      // 重置状态
+
+      // 重置数据状态，避免旧引擎的 loaded/error 残留影响新引擎
       playerController.dataStatus.value = DataStatus.none;
-      
+
       // 只切换引擎，不恢复数据源
-      // （避免内部 setDataSource 触发一次 loading，下面 reloadCurrentEpisode 会完整加载）
+      // 调用方（本方法）会在切换完成后通过 reloadCurrentEpisode 完整重载
       await playerController.switchEngine(newType, restoreData: false);
-      
-      // 引擎切换完成，立即关弹窗，让后续 reload 的 loading 露出来
+
+      // 引擎切换完成，关闭「切换内核中」loading，让后续重载的 loading 露出来
       SmartDialog.dismiss();
-      
-      // 重新加载当前剧集（重新请求播放地址）
-      await controller.reloadCurrentEpisode();
+
+      // 传入切换前的进度和播放状态
+      await controller.reloadCurrentEpisode(
+        seekTo: savedPosition,
+        autoPlay: wasPlaying,
+      );
 
       // 通知详情页 Obx 重新收集 isFullScreen 依赖
+      // （新引擎的 isFullScreen 默认值可能与旧引擎不同）
       controller.engineSwitchNotifier.value++;
-      
+
       if (mounted) setState(() {});
-      SmartDialog.showToast('已切换到 ${newType == PlayerEngineType.fvp ? 'MDK' : 'MPV'} 内核');
+      SmartDialog.showToast(
+        '已切换到 ${newType == PlayerEngineType.fvp ? 'MDK' : 'MPV'} 内核',
+      );
     } catch (e) {
       SmartDialog.dismiss();
       SmartDialog.showToast('切换失败: $e');

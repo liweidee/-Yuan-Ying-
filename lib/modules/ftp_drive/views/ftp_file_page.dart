@@ -12,6 +12,7 @@ import '../controllers/ftp_server_controller.dart';
 import '../models/ftp_entry.dart';
 import '../services/ftp_proxy_server.dart';
 import '../services/ftp_service.dart';
+import 'package:yuanying/modules/setting/models/setting_pref.dart';
 
 class FtpFilePage extends StatelessWidget {
   const FtpFilePage({super.key});
@@ -60,8 +61,9 @@ class FtpFilePage extends StatelessWidget {
   Widget _buildBreadcrumb(BuildContext context, FtpFileController c) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
+    final bgColor = SettingPref.bgActive ? Colors.transparent : cs.surfaceContainerLow;
     return Material(
-      color: cs.surfaceContainerLow,
+      color: bgColor,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(4, 4, 4, 4),
         child: Row(

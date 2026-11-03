@@ -23,8 +23,8 @@ class FtpServerConfigPage extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         title: const Text('FTP / SFTP 服务器'),
-        backgroundColor: cs.surface,
-        foregroundColor: cs.onSurface,
+        // backgroundColor: cs.surface,
+        // foregroundColor: cs.onSurface,
         elevation: 0,
         actions: [
           IconButton(

@@ -12,6 +12,7 @@ import 'emby_favorite_page.dart';
 import 'emby_history_page.dart';
 import 'emby_search_page.dart';
 import 'emby_download_page.dart';
+import 'package:yuanying/modules/setting/models/setting_pref.dart';
 
 class EmbyMainShell extends StatelessWidget {
   const EmbyMainShell({super.key});
@@ -24,6 +25,7 @@ class EmbyMainShell extends StatelessWidget {
     final controller = Get.find<EmbyServerController>();
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final bgColor = SettingPref.bgActive ? Colors.transparent : colorScheme.surface;
 
     final serverId = Get.arguments?['serverId'] as String?;
     if (serverId != null &&
@@ -47,7 +49,7 @@ class EmbyMainShell extends StatelessWidget {
           tooltip: '返回服务器列表',
         ),
         title: Text(server.name),
-        backgroundColor: colorScheme.surface,
+        backgroundColor: bgColor,
         foregroundColor: colorScheme.onSurface,
         elevation: 0,
         // 动态 actions：仅在"历史"Tab（index=2）显示清空按钮

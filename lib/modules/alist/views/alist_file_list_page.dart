@@ -55,7 +55,7 @@ class _AlistFileListBody extends StatelessWidget {
 
     return AlistScaffold(
       appbarTitle: AlistOverflowText(text: controller.pageName),
-      // ★ 顶部返回按钮：直接返回服务器列表
+      // 顶部返回按钮：直接返回服务器列表
       //   面包屑已经承担了"逐级返回"的功能，所以顶部按钮语义改为"退出浏览"
       leading: IconButton(
         icon: const Icon(Icons.arrow_back),
@@ -498,7 +498,7 @@ class _AlistFileListBody extends StatelessWidget {
 
     switch (file.type) {
       case AlistFileType.folder:
-        // ★ 仍用 push 进入子目录，但顶部返回按钮已改为回服务器列表
+        // 仍用 push 进入子目录，但顶部返回按钮已改为回服务器列表
         Get.to(
           () => AlistFileListWrapper(),
           arguments: {'path': file.path},

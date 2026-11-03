@@ -91,11 +91,20 @@ abstract final class ThemeUtils {
       colorScheme: colorScheme,
       brightness: brightness,
       textTheme: baseTextTheme,  // 应用字重
+
+      // 背景壁纸激活时，让默认 Scaffold 背景透出壁纸
+      scaffoldBackgroundColor: SettingPref.bgActive
+          ? Colors.transparent
+          : colorScheme.surface,
+
       appBarTheme: AppBarTheme(
         elevation: 0,
         scrolledUnderElevation: 0.0,  // 禁用滚动颜色变化
         centerTitle: false,
-        backgroundColor: colorScheme.surface,
+        // 同样透明，否则顶栏实色会割裂视觉
+        backgroundColor: SettingPref.bgActive
+            ? Colors.transparent
+            : colorScheme.surface,
         foregroundColor: colorScheme.onSurface,
         titleTextStyle: TextStyle(
           fontSize: 18,

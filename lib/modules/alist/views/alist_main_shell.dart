@@ -60,7 +60,7 @@ class _AlistMainShellState extends State<AlistMainShell> {
     final colorScheme = theme.colorScheme;
 
     return Scaffold(
-      backgroundColor: colorScheme.surface,
+      // backgroundColor: colorScheme.surface,
       body: Obx(() => IndexedStack(
             index: _selectedIndex.value,
             children: const [

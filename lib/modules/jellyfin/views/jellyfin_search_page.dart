@@ -19,7 +19,7 @@ class JellyfinSearchPage extends StatelessWidget {
     final theme = Theme.of(context);
 
     return Scaffold(
-      backgroundColor: theme.colorScheme.surface,
+      // backgroundColor: theme.colorScheme.surface,
       body: Column(
         children: [
           // 搜索框（带防抖）

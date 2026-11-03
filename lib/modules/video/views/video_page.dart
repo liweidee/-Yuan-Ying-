@@ -381,9 +381,13 @@ class _DetailPageState extends State<DetailPage>
         const Positioned.fill(child: ColoredBox(color: Colors.black)),
         // 播放器（已加载时显示）
         plPlayer(width: width, height: height),
-        // 手动播放界面（autoPlay == false 时显示）
+        // 手动播放界面：仅在「确实没有可显示的视频内容」时展示封面
+        // 有播放地址且数据已加载时，即使 autoPlay == false（暂停状态）也应显示视频画面
         Obx(() {
-          if (!controller.autoPlay.value) {
+          final hasVideo = controller.currentPlayUrl.value.isNotEmpty &&
+              controller.playerController.dataStatus.value == DataStatus.loaded;
+          final showCover = !controller.autoPlay.value && !hasVideo;
+          if (showCover) {
             return _buildManualPlayerUI(width: width, height: height);
           }
           return const SizedBox.shrink();
@@ -442,7 +446,7 @@ class _DetailPageState extends State<DetailPage>
                 ? SizedBox(
                     width: size.width,
                     height: headerHeight,
-                    child: videoPlayer(width: size.width, height: videoHeight),
+                    child: videoPlayer(width: size.width, height: headerHeight,),
                   )
                 : Padding(
                     // 关键：顶部留出状态栏高度
@@ -684,7 +688,15 @@ class _DetailPageState extends State<DetailPage>
           ),
         );
       } else {
-        final bool isWide = MediaQuery.sizeOf(context).width > 800;
+        final bool isWide;
+        if (isFullScreen) {
+          // 全屏时优先按系统方向判断：横屏用左右分栏，竖屏用上下分栏
+          final orientation = MediaQuery.orientationOf(context);
+          isWide = orientation == Orientation.landscape
+              && size.width > 600;   // 手机横屏通常 > 600，平板更宽
+        } else {
+          isWide = size.width > 800;
+        }
         content = isWide ? _buildLandscapeLayout() : _buildPortraitLayout();
       }
 

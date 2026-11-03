@@ -6,6 +6,7 @@ import 'package:yuanying/core/theme/style.dart';
 import '../controllers/jellyfin_server_controller.dart';
 import '../models/jellyfin_server_model.dart';
 import '../services/jellyfin_api_service.dart';
+import 'package:yuanying/modules/setting/models/setting_pref.dart';
 
 class JellyfinServerConfigPage extends StatelessWidget {
   const JellyfinServerConfigPage({super.key});
@@ -17,14 +18,16 @@ class JellyfinServerConfigPage extends StatelessWidget {
     }
     final controller = Get.find<JellyfinServerController>();
     final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final bgColor = SettingPref.bgActive ? Colors.transparent : colorScheme.surface;
 
     return Scaffold(
-      backgroundColor: theme.colorScheme.surface,
+      backgroundColor: bgColor,
       appBar: AppBar(
         title: const Text('Jellyfin 服务器', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
         centerTitle: false,
         elevation: 0,
-        backgroundColor: theme.colorScheme.surface,
+        backgroundColor: bgColor,
         foregroundColor: theme.colorScheme.onSurface,
         actions: [
           IconButton(

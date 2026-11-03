@@ -1,7 +1,8 @@
-import 'dart:async'; // ★ 新增：StreamSubscription
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:yuanying/core/theme/style.dart';
 import 'package:yuanying/common/widgets/flutter/refresh_indicator.dart' as custom;
 import 'package:yuanying/common/widgets/video_card/video_card_v.dart';
 import 'package:yuanying/common/widgets/video_card/video_card_h.dart';
@@ -11,6 +12,7 @@ import 'package:yuanying/utils/grid.dart';
 import 'package:yuanying/models/common/card_layout_mode.dart';
 import 'package:yuanying/modules/main/controllers/main_controller.dart';
 import 'package:yuanying/t4/models/video_item.dart';
+import 'package:yuanying/modules/setting/models/setting_pref.dart';
 
 class CategoryPage extends StatefulWidget {
   final CategoryController controller;
@@ -205,6 +207,11 @@ class _CategoryPageState extends State<CategoryPage>
         if (Grid.isListMode(mode)) {
           content = ListView.builder(
             controller: ctrl.scrollController,
+            padding: EdgeInsets.only(
+              left: Style.safeSpace,
+              right: Style.safeSpace,
+              bottom: 16,
+            ),
             itemCount: videoList.length + 1,
             itemBuilder: (context, index) {
               if (index == videoList.length) {
@@ -237,6 +244,11 @@ class _CategoryPageState extends State<CategoryPage>
           );
           content = GridView.builder(
             controller: ctrl.scrollController,
+            padding: EdgeInsets.only(
+              left: Style.safeSpace,
+              right: Style.safeSpace,
+              bottom: 16,
+            ),
             gridDelegate: gridDelegate,
             itemCount: videoList.length,
             itemBuilder: (context, index) {
@@ -261,8 +273,8 @@ class _CategoryPageState extends State<CategoryPage>
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (shouldShowFilter) _buildFilterBar(theme, filterGroups!),
-          if (shouldShowFilter) const SizedBox(height: 4),
+          if (shouldShowFilter) 
+            _buildFilterBar(theme, filterGroups!),
           Expanded(
             child: MediaQuery.removePadding(
               context: context,
@@ -276,10 +288,13 @@ class _CategoryPageState extends State<CategoryPage>
   }
 
   Widget _buildFilterBar(ThemeData theme, List<FilterGroup> groups) {
+    // 壁纸下全透明
+    final bgColor = SettingPref.bgActive ? Colors.transparent : theme.colorScheme.surface;
+
     return Container(
       width: double.infinity,
-      color: theme.colorScheme.surface,
-      padding: const EdgeInsets.symmetric(vertical: 0, horizontal: 0),
+      color: bgColor, 
+      padding: EdgeInsets.only(left: Style.safeSpace, bottom: 4),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
@@ -314,13 +329,17 @@ class _CategoryPageState extends State<CategoryPage>
           }).toList();
 
           return Padding(
-            padding: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.only(bottom: 4),
             child: SingleChildScrollView(
+              // 内容滑动区域依然可以满屏滑，只在首尾留白，视觉与原版对齐
               scrollDirection: Axis.horizontal,
               physics: const ClampingScrollPhysics(),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: children,
+              child: Padding(
+                padding: EdgeInsets.only(right: Style.safeSpace), // 右侧留白
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: children,
+                ),
               ),
             ),
           );

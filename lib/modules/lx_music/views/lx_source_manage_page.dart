@@ -32,7 +32,7 @@ class _LxSourceManagePageState extends State<LxSourceManagePage> {
     final colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
-      backgroundColor: colorScheme.surface,
+      // backgroundColor: colorScheme.surface,
       appBar: AppBar(
         title: Obx(() {
           final count = _controller.scripts.length;
@@ -63,8 +63,8 @@ class _LxSourceManagePageState extends State<LxSourceManagePage> {
           );
         }),
         centerTitle: false,
-        backgroundColor: colorScheme.surface,
-        foregroundColor: colorScheme.onSurface,
+        // backgroundColor: colorScheme.surface,
+        // foregroundColor: colorScheme.onSurface,
         elevation: 0,
         actions: [
           IconButton(

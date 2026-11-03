@@ -16,6 +16,7 @@ import 'package:yuanying/utils/storage.dart';
 import 'package:yuanying/utils/permission_handler.dart';
 import 'package:yuanying/utils/platform_utils.dart';
 import 'package:yuanying/utils/storage_utils.dart';
+import 'package:yuanying/modules/setting/models/setting_pref.dart';
 
 class SiteConfigPage extends StatelessWidget {
   const SiteConfigPage({super.key});
@@ -28,14 +29,16 @@ class SiteConfigPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final controller = Get.put(SiteConfigController());
     final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final bgColor = SettingPref.bgActive ? Colors.transparent : colorScheme.surface;
 
     return Scaffold(
-      backgroundColor: theme.colorScheme.surface,
+      backgroundColor: bgColor,
       appBar: AppBar(
         title: const Text('接口配置', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
         centerTitle: false,
         elevation: 0,
-        backgroundColor: theme.colorScheme.surface,
+        backgroundColor: bgColor,
         foregroundColor: theme.colorScheme.onSurface,
         actions: [
           PopupMenuButton<String>(

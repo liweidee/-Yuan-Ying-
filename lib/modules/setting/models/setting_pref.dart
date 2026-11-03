@@ -3,6 +3,7 @@ import 'package:yuanying/core/constants/storage_keys.dart';
 import 'package:yuanying/models/common/bar_hide_type.dart';
 import 'package:yuanying/models/common/nav_bar_config.dart';
 import 'package:yuanying/utils/storage_manager.dart';
+import 'package:yuanying/models/common/bg_source_type.dart';
 
 /// 外观设置偏好管理
 abstract final class SettingPref {
@@ -317,4 +318,58 @@ abstract final class SettingPref {
       StorageManager.getSetting<bool>(SettingBoxKey.enableAdBlock) ?? false;
   static set enableAdBlock(bool v) =>
       StorageManager.setSetting(SettingBoxKey.enableAdBlock, v);
+
+  // ===== 背景壁纸 =====
+  static bool get bgEnabled =>
+      StorageManager.getSetting<bool>(SettingBoxKey.bgEnabled) ?? false;
+  static set bgEnabled(bool v) =>
+      StorageManager.setSetting(SettingBoxKey.bgEnabled, v);
+
+  static int get bgSourceTypeIndex =>
+      StorageManager.getSetting<int>(SettingBoxKey.bgSourceType) ?? 0;
+  static set bgSourceTypeIndex(int v) =>
+      StorageManager.setSetting(SettingBoxKey.bgSourceType, v);
+
+  static int get bgGradientIndex =>
+      StorageManager.getSetting<int>(SettingBoxKey.bgGradientIndex) ?? 0;
+  static set bgGradientIndex(int v) =>
+      StorageManager.setSetting(SettingBoxKey.bgGradientIndex, v);
+
+  static int get bgPresetIndex =>
+      StorageManager.getSetting<int>(SettingBoxKey.bgPresetIndex) ?? 1;
+  static set bgPresetIndex(int v) =>
+      StorageManager.setSetting(SettingBoxKey.bgPresetIndex, v);
+
+  static String get bgCustomPath =>
+      StorageManager.getSetting<String>(SettingBoxKey.bgCustomPath) ?? '';
+  static set bgCustomPath(String v) =>
+      StorageManager.setSetting(SettingBoxKey.bgCustomPath, v);
+
+  static double get bgOpacity =>
+      StorageManager.getSetting<double>(SettingBoxKey.bgOpacity) ?? 0.6;
+  static set bgOpacity(double v) =>
+      StorageManager.setSetting(SettingBoxKey.bgOpacity, v);
+
+  static double get bgBlur =>
+      StorageManager.getSetting<double>(SettingBoxKey.bgBlur) ?? 0.0;
+  static set bgBlur(double v) =>
+      StorageManager.setSetting(SettingBoxKey.bgBlur, v);
+
+  static double get bgTint =>
+      StorageManager.getSetting<double>(SettingBoxKey.bgTint) ?? 0.0;
+  static set bgTint(double v) =>
+      StorageManager.setSetting(SettingBoxKey.bgTint, v);
+
+  /// 是否真的激活（开关 + 类型不为空 + 类型对应的数据齐全）
+  static bool get bgActive {
+    if (!bgEnabled) return false;
+    final idx = bgSourceTypeIndex.clamp(0, BgSourceType.values.length - 1);
+    final t = BgSourceType.values[idx];
+    return switch (t) {
+      BgSourceType.none => false,
+      BgSourceType.gradient => true,
+      BgSourceType.preset => true,
+      BgSourceType.custom => bgCustomPath.isNotEmpty,
+    };
+  }
 }

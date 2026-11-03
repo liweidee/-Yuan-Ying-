@@ -63,13 +63,13 @@ class _LxFavoritesPageState extends State<LxFavoritesPage> {
     final colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
-      backgroundColor: colorScheme.surface,
+      // backgroundColor: colorScheme.surface,
       appBar: AppBar(
         title: Text('我喜欢 (${_favorites.length})',
             style: const TextStyle(fontSize: 18)),
         centerTitle: false,
-        backgroundColor: colorScheme.surface,
-        foregroundColor: colorScheme.onSurface,
+        // backgroundColor: colorScheme.surface,
+        // foregroundColor: colorScheme.onSurface,
         elevation: 0,
         actions: [
           if (_favorites.isNotEmpty) ...[

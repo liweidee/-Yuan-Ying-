@@ -24,6 +24,8 @@ import 'package:yuanying/utils/theme_utils.dart';
 import 'package:yuanying/common/widgets/scale_app.dart';
 import 'package:yuanying/models/common/nav_bar_config.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
+import 'package:yuanying/models/common/bg_source_type.dart';
+import 'package:yuanying/modules/setting/models/setting_pref.dart';
 
 class StyleSetting extends StatefulWidget {
   const StyleSetting({super.key});
@@ -37,6 +39,23 @@ class _StyleSettingState extends State<StyleSetting> {
   late int _currentColorIndex;
   late bool _pureBlackEnabled;
 
+  String _bgSubtitle() {
+    if (!SettingPref.bgEnabled) return '为 App 设置背景（默认关闭）';
+    final type = BgSourceType.values[
+        SettingPref.bgSourceTypeIndex.clamp(0, BgSourceType.values.length - 1)];
+    switch (type) {
+      case BgSourceType.none:
+        return '已启用 · 未选择背景';
+      case BgSourceType.gradient:
+        final i = SettingPref.bgGradientIndex.clamp(0, kBgGradients.length - 1);
+        return '已启用 · 渐变 · ${kBgGradients[i].label}';
+      case BgSourceType.preset:
+        return '已启用 · 预设图 ${SettingPref.bgPresetIndex} 号';
+      case BgSourceType.custom:
+        return '已启用 · 自定义图片';
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -48,14 +67,17 @@ class _StyleSettingState extends State<StyleSetting> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    // 动态背景色
+    final bgColor = SettingPref.bgActive ? Colors.transparent : colorScheme.surface;
 
     return Scaffold(
-      backgroundColor: theme.colorScheme.surface,
+      backgroundColor: bgColor,
       appBar: AppBar(
         title: const Text('外观设置'),
         centerTitle: false,
         elevation: 0,
-        backgroundColor: theme.colorScheme.surface,
+        backgroundColor: bgColor,
         foregroundColor: theme.colorScheme.onSurface,
       ),
       body: ListView(
@@ -81,6 +103,18 @@ class _StyleSettingState extends State<StyleSetting> {
           ),
           const SizedBox(height: 8),
 
+          _buildSettingItem(
+            context: context,
+            icon: Icons.wallpaper_outlined,
+            title: '背景壁纸',
+            subtitle: _bgSubtitle(),
+            onTap: () async {
+              await Get.toNamed(AppPages.bgWallpaper);
+              setState(() {});
+            },
+          ),
+          const SizedBox(height: 8),
+
           // ===== 原有功能：纯黑主题 =====
           _buildSwitchItem(
             context: context,
@@ -90,7 +124,7 @@ class _StyleSettingState extends State<StyleSetting> {
             value: _pureBlackEnabled,
             onChanged: _onPureBlackChanged,
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 8),
 
           // ============================================================
           // 新增功能1：App字体字重

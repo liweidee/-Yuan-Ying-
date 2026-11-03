@@ -71,7 +71,7 @@ class _LxBoardTabState extends State<LxBoardTab> {
     return Container(
       height: 52,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      color: colorScheme.surface,
+      // color: colorScheme.surface,
       child: Obx(() {
         final current = _controller.source.value;
         return ListView.separated(
@@ -120,7 +120,7 @@ class _LxBoardTabState extends State<LxBoardTab> {
     return Container(
       height: 44,
       padding: const EdgeInsets.symmetric(horizontal: 16),
-      color: colorScheme.surface,
+      // color: colorScheme.surface,
       child: Obx(() {
         final boards = _controller.boards;
         final currentId = _controller.currentBoard.value?.id;

@@ -6,6 +6,7 @@ import 'package:yuanying/common/widgets/video_card/video_card_h.dart';
 import 'package:yuanying/t4/models/video_item.dart';
 import 'package:yuanying/models/common/card_layout_mode.dart';
 import 'package:yuanying/modules/home/controllers/home_controller.dart';
+import 'package:yuanying/core/theme/style.dart';
 
 /// 推荐分类页面
 /// 无下拉刷新，无加载更多，数据来自 HomeController.recommendList
@@ -52,7 +53,12 @@ class _RecommendPageState extends State<RecommendPage>
       // 列表模式
       if (Grid.isListMode(mode)) {
         return ListView.builder(
-          padding: const EdgeInsets.only(bottom: 100),
+          // 加上左右安全边距
+          padding: EdgeInsets.only(
+            left: Style.safeSpace,
+            right: Style.safeSpace,
+            bottom: 100,
+          ),
           itemCount: widget.data.length,
           itemBuilder: (context, index) {
             final item = widget.data[index];
@@ -71,7 +77,12 @@ class _RecommendPageState extends State<RecommendPage>
         minHeight: 25,
       );
       return GridView.builder(
-        padding: const EdgeInsets.only(bottom: 100),
+        // 加上左右安全边距
+        padding: EdgeInsets.only(
+          left: Style.safeSpace,
+          right: Style.safeSpace,
+          bottom: 100,
+        ),
         gridDelegate: gridDelegate,
         itemCount: widget.data.length,
         itemBuilder: (context, index) {

@@ -1,3 +1,4 @@
+import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
@@ -35,6 +36,7 @@ import 'package:yuanying/core/constants/storage_keys.dart';
 import 'package:yuanying/modules/tmdb/views/tmdb_detail_page.dart';
 import 'package:yuanying/services/tmdb_match_cache_service.dart';
 import 'package:yuanying/t4/models/video_detail.dart';
+import 'package:yuanying/modules/setting/models/setting_pref.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -596,35 +598,38 @@ class _HomePageState extends CommonPageState<HomePage>
   }
 
   Widget _buildTopBarContent(ThemeData theme) {
-    return Row(
-      children: [
-        Expanded(child: _buildSourceInfo(theme)),
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconButton(
-              icon: const Icon(Icons.search, size: 22),
-              onPressed: () => Get.toNamed(AppPages.search),
-              splashRadius: 22,
-            ),
-            IconButton(
-              icon: const Icon(Icons.send, size: 20),
-              onPressed: _showPushDialog,
-              splashRadius: 20,
-            ),
-            IconButton(
-              icon: const Icon(Icons.history, size: 22),
-              onPressed: () => Get.toNamed(AppPages.history),
-              splashRadius: 22,
-            ),
-            IconButton(
-              icon: const Icon(Icons.favorite_border, size: 22),
-              onPressed: () => Get.toNamed(AppPages.favorite),
-              splashRadius: 22,
-            ),
-          ],
-        ),
-      ],
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: Style.safeSpace),
+      child: Row(
+        children: [
+          Expanded(child: _buildSourceInfo(theme)),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.search, size: 22),
+                onPressed: () => Get.toNamed(AppPages.search),
+                splashRadius: 22,
+              ),
+              IconButton(
+                icon: const Icon(Icons.send, size: 20),
+                onPressed: _showPushDialog,
+                splashRadius: 20,
+              ),
+              IconButton(
+                icon: const Icon(Icons.history, size: 22),
+                onPressed: () => Get.toNamed(AppPages.history),
+                splashRadius: 22,
+              ),
+              IconButton(
+                icon: const Icon(Icons.favorite_border, size: 22),
+                onPressed: () => Get.toNamed(AppPages.favorite),
+                splashRadius: 22,
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
@@ -951,6 +956,27 @@ class _HomePageState extends CommonPageState<HomePage>
     return textPainter.width.clamp(0.0, MediaQuery.of(context).size.width * 0.25);
   }
 
+  /// 获取顶栏背景色：开启壁纸时全透明，否则实色
+  Color _getTopBarColor(ThemeData theme) {
+    return SettingPref.bgActive ? Colors.transparent : theme.colorScheme.surface;
+  }
+
+  /// 开启壁纸时，全透明底（仅保留一条 0.5px 的极细分割线，用于区分滚动内容）
+  Widget _maybeBlur(Widget child) {
+    if (!SettingPref.bgActive) return child;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(
+            color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.08),
+            width: 0.5,
+          ),
+        ),
+      ),
+      child: child,
+    );
+  }
+
   Widget _buildNormalContent(ThemeData theme) {
     final mainController = Get.find<MainController>();
 
@@ -964,37 +990,43 @@ class _HomePageState extends CommonPageState<HomePage>
           return AnimatedOpacity(
             opacity: show ? 1.0 : 0.0,
             duration: const Duration(milliseconds: 300),
-            child: AnimatedContainer(
-              curve: Curves.easeInOutCubicEmphasized,
-              duration: const Duration(milliseconds: 500),
-              height: show ? Style.topBarHeight : 0,
-              color: theme.colorScheme.surface,
-              padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
-              child: topBarContent,
+            child: _maybeBlur(
+              AnimatedContainer(
+                curve: Curves.easeInOutCubicEmphasized,
+                duration: const Duration(milliseconds: 500),
+                height: show ? Style.topBarHeight : 0,
+                color: _getTopBarColor(theme), // 使用动态颜色
+                padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
+                child: topBarContent,
+              ),
             ),
           );
         });
       } else {
         topBar = Obx(() {
           final offset = mainController.barOffset.value.clamp(0.0, Style.topBarHeight);
-          return CustomHeightWidget(
-            height: Style.topBarHeight - offset,
-            offset: Offset(0, -offset),
-            child: Container(
-              height: Style.topBarHeight,
-              color: theme.colorScheme.surface,
-              padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
-              child: topBarContent,
+          return _maybeBlur(
+            CustomHeightWidget(
+              height: Style.topBarHeight - offset,
+              offset: Offset(0, -offset),
+              child: Container(
+                height: Style.topBarHeight,
+                color: _getTopBarColor(theme), // 使用动态颜色
+                padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
+                child: topBarContent,
+              ),
             ),
           );
         });
       }
     } else {
-      topBar = Container(
-        height: Style.topBarHeight,
-        color: theme.colorScheme.surface,
-        padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
-        child: topBarContent,
+      topBar = _maybeBlur(
+        Container(
+          height: Style.topBarHeight,
+          color: _getTopBarColor(theme), // 使用动态颜色
+          padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
+          child: topBarContent,
+        ),
       );
     }
 
@@ -1003,105 +1035,113 @@ class _HomePageState extends CommonPageState<HomePage>
     final siteKey = sourceManager.currentSite.value?['key'] ?? '';
     final showFilter = controller.getFilterVisibility(siteKey);
 
-    Widget tabBar = Container(
-      height: 46,
-      color: theme.colorScheme.surface,
-      child: Row(
-        children: [
-          Expanded(
-            flex: 3,
-            child: TabBar(
-              controller: controller.tabController,
-              isScrollable: true,
-              tabAlignment: TabAlignment.start,
-              dividerColor: Colors.transparent,
-              dividerHeight: 0,
-              indicatorColor: theme.colorScheme.primary,
-              indicatorSize: TabBarIndicatorSize.label,
-              indicatorWeight: 0.1,
-              labelColor: theme.colorScheme.primary,
-              unselectedLabelColor: theme.colorScheme.onSurface,
-              labelStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
-              unselectedLabelStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.normal),
-              overlayColor: WidgetStateProperty.all(Colors.transparent),
-              splashFactory: NoSplash.splashFactory,
-              tabs: categories.map((item) => Tab(text: item.typeName)).toList(),
-              onTap: (index) => controller.switchCategory(categories[index]),
-            ),
-          ),
-          Container(
-            padding: const EdgeInsets.only(left: 6.0),
-            color: theme.colorScheme.surface,
-            child: Row(
-              children: [
-                // 合并播放按钮（仅 mergeList=1 的源显示）
-                Obx(() {
-                  final site = sourceManager.currentSite.value;
-                  if (site == null || !SourceManager.isMergeListSite(site)) {
-                    return const SizedBox.shrink();
-                  }
-                  final curSiteKey = site['key']?.toString() ?? '';
-                  final isOn = controller.mergeListMode[curSiteKey] ?? false;
-                  return IconButton(
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
-                    style: IconButton.styleFrom(
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
-                    icon: Icon(
-                      isOn
-                          ? Icons.playlist_play
-                          : Icons.playlist_remove,
-                      size: 24,
-                    ),
-                    onPressed: () =>
-                        controller.toggleMergeListMode(curSiteKey),
-                    tooltip: isOn ? '关闭合并播放' : '开启合并播放',
-                    splashRadius: 20,
-                  );
-                }),
-                const SizedBox(width: 4),
-                Obx(() {
-                  final cid = controller.currentCategory.value?.typeId;
-                  final hasFilter = cid != null &&
-                      controller.filters.containsKey(cid) &&
-                      controller.filters[cid]!.isNotEmpty;
-                  if (!hasFilter) return const SizedBox.shrink();
-                  return IconButton(
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
-                    style: IconButton.styleFrom(tapTargetSize: MaterialTapTargetSize.shrinkWrap),
-                    icon: Icon(showFilter ? Icons.filter_alt : Icons.filter_alt_off, size: 20),
-                    onPressed: () => controller.toggleFilterBar(siteKey),
-                    splashRadius: 20,
-                  );
-                }),
-                const SizedBox(width: 4),
-                Obx(() {
-                  final mode = controller.cardLayoutMode.value;
-                  return IconButton(
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
-                    style: IconButton.styleFrom(tapTargetSize: MaterialTapTargetSize.shrinkWrap),
-                    icon: Icon(mode.icon, size: 20),
-                    onPressed: controller.toggleCardLayout,
-                    tooltip: mode.label,
-                    splashRadius: 20,
-                  );
-                }),
-                const SizedBox(width: 4),
-                IconButton(
+    Widget tabBar = Material(
+      type: MaterialType.transparency,
+      child: Container(
+        // height: 46,
+        color: _getTopBarColor(theme),
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Row(
+          children: [
+            Expanded(
+              flex: 3,
+              child: Padding(
+                padding: const EdgeInsets.only(left: Style.safeSpace),
+                child: TabBar(
+                  controller: controller.tabController,
+                  isScrollable: true,
+                  tabAlignment: TabAlignment.start,
+                  dividerColor: Colors.transparent,
+                  dividerHeight: 0,
                   padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                  style: IconButton.styleFrom(tapTargetSize: MaterialTapTargetSize.shrinkWrap),
-                  icon: const Icon(Icons.expand_more, size: 20),
-                  onPressed: () => _showAllCategoriesDialog(context),
-                  splashRadius: 20,
+                  indicatorColor: theme.colorScheme.primary,
+                  indicatorSize: TabBarIndicatorSize.label,
+                  indicatorWeight: 0.1,
+                  labelColor: theme.colorScheme.primary,
+                  unselectedLabelColor: theme.colorScheme.onSurface,
+                  labelStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                  unselectedLabelStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.normal),
+                  overlayColor: WidgetStateProperty.all(Colors.transparent),
+                  splashFactory: NoSplash.splashFactory,
+                  tabs: categories.map((item) => Tab(text: item.typeName)).toList(),
+                  onTap: (index) => controller.switchCategory(categories[index]),
                 ),
-              ],
+              ),
             ),
-          ),
-        ],
+            Container(
+              padding: const EdgeInsets.only(left: 6.0, right: Style.safeSpace),
+              color: Colors.transparent,
+              child: Row(
+                children: [
+                  // 合并播放按钮（仅 mergeList=1 的源显示）
+                  Obx(() {
+                    final site = sourceManager.currentSite.value;
+                    if (site == null || !SourceManager.isMergeListSite(site)) {
+                      return const SizedBox.shrink();
+                    }
+                    final curSiteKey = site['key']?.toString() ?? '';
+                    final isOn = controller.mergeListMode[curSiteKey] ?? false;
+                    return IconButton(
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      style: IconButton.styleFrom(
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      icon: Icon(
+                        isOn
+                            ? Icons.playlist_play
+                            : Icons.playlist_remove,
+                        size: 24,
+                      ),
+                      onPressed: () =>
+                          controller.toggleMergeListMode(curSiteKey),
+                      tooltip: isOn ? '关闭合并播放' : '开启合并播放',
+                      splashRadius: 20,
+                    );
+                  }),
+                  const SizedBox(width: 4),
+                  Obx(() {
+                    final cid = controller.currentCategory.value?.typeId;
+                    final hasFilter = cid != null &&
+                        controller.filters.containsKey(cid) &&
+                        controller.filters[cid]!.isNotEmpty;
+                    if (!hasFilter) return const SizedBox.shrink();
+                    return IconButton(
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      style: IconButton.styleFrom(tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                      icon: Icon(showFilter ? Icons.filter_alt : Icons.filter_alt_off, size: 20),
+                      onPressed: () => controller.toggleFilterBar(siteKey),
+                      splashRadius: 20,
+                    );
+                  }),
+                  const SizedBox(width: 4),
+                  Obx(() {
+                    final mode = controller.cardLayoutMode.value;
+                    return IconButton(
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      style: IconButton.styleFrom(tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                      icon: Icon(mode.icon, size: 20),
+                      onPressed: controller.toggleCardLayout,
+                      tooltip: mode.label,
+                      splashRadius: 20,
+                    );
+                  }),
+                  const SizedBox(width: 4),
+                  IconButton(
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                    style: IconButton.styleFrom(tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                    icon: const Icon(Icons.expand_more, size: 20),
+                    onPressed: () => _showAllCategoriesDialog(context),
+                    splashRadius: 20,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
 
@@ -1133,7 +1173,7 @@ class _HomePageState extends CommonPageState<HomePage>
       children: [
         topBar,
         tabBar,
-        const SizedBox(height: 8),
+        // const SizedBox(height: 8),
         Expanded(child: wrappedTabView),
       ],
     );
@@ -1241,7 +1281,7 @@ class _HomePageState extends CommonPageState<HomePage>
     return Container(
       height: 52,
       padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
-      color: theme.colorScheme.surface,
+      color: _getTopBarColor(theme), // 使用动态颜色
       child: _buildTopBarContent(theme),
     );
   }
@@ -1252,121 +1292,117 @@ class _HomePageState extends CommonPageState<HomePage>
     final theme = Theme.of(context);
 
     return Scaffold(
-      body: Container(
-        clipBehavior: Clip.hardEdge,
-        margin: const EdgeInsets.symmetric(horizontal: Style.safeSpace),
-        decoration: const BoxDecoration(borderRadius: Style.mdRadius),
-        child: Obx(() {
-          if (sourceManager.isConfigLoading.value) {
-            return Column(
-              children: [
-                _buildNormalTopBar(theme),
-                Expanded(
-                  child: Center(
-                    child: SizedBox(
-                      width: 40,
-                      height: 40,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 3,
-                        color: theme.colorScheme.primary,
-                      ),
+      backgroundColor: Colors.transparent,
+      body: Obx(() {
+        if (sourceManager.isConfigLoading.value) {
+          return Column(
+            children: [
+              _buildNormalTopBar(theme),
+              Expanded(
+                child: Center(
+                  child: SizedBox(
+                    width: 40,
+                    height: 40,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 3,
+                      color: theme.colorScheme.primary,
                     ),
                   ),
                 ),
-              ],
-            );
-          }
+              ),
+            ],
+          );
+        }
 
-          if (sourceManager.configLoadError.value) {
-            return _buildConfigError(theme);
-          }
+        if (sourceManager.configLoadError.value) {
+          return _buildConfigError(theme);
+        }
 
-          if (controller.isHomeLoading.value) {
-            return Column(
-              children: [
-                _buildNormalTopBar(theme),
-                Expanded(
-                  child: Center(
-                    child: SizedBox(
-                      width: 40,
-                      height: 40,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 3,
-                        color: theme.colorScheme.primary,
-                      ),
+        if (controller.isHomeLoading.value) {
+          return Column(
+            children: [
+              _buildNormalTopBar(theme),
+              Expanded(
+                child: Center(
+                  child: SizedBox(
+                    width: 40,
+                    height: 40,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 3,
+                      color: theme.colorScheme.primary,
                     ),
                   ),
                 ),
-              ],
-            );
-          }
+              ),
+            ],
+          );
+        }
 
-          if (controller.isSwitchingSource.value) {
-            return Column(
-              children: [
-                _buildNormalTopBar(theme),
-                Expanded(
-                  child: Center(
-                    child: SizedBox(
-                      width: 40,
-                      height: 40,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 3,
-                        color: theme.colorScheme.primary,
-                      ),
+        if (controller.isSwitchingSource.value) {
+          return Column(
+            children: [
+              _buildNormalTopBar(theme),
+              Expanded(
+                child: Center(
+                  child: SizedBox(
+                    width: 40,
+                    height: 40,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 3,
+                      color: theme.colorScheme.primary,
                     ),
                   ),
                 ),
-              ],
-            );
-          }
+              ),
+            ],
+          );
+        }
 
-          if (sourceManager.sites.isEmpty) {
-            return _buildEmptyConfig(theme);
-          }
+        if (sourceManager.sites.isEmpty) {
+          return _buildEmptyConfig(theme);
+        }
 
-          if (controller.isHomeError.value) {
-            return Column(
-              children: [
-                _buildNormalTopBar(theme),
-                Expanded(
-                  child: Center(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 32),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text(
-                            controller.errorMsg.value.isNotEmpty
-                                ? controller.errorMsg.value
-                                : '暂无数据',
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: theme.colorScheme.outline,
-                            ),
-                            textAlign: TextAlign.center,
-                            maxLines: 6,
-                            overflow: TextOverflow.ellipsis,
+        if (controller.isHomeError.value) {
+          return Column(
+            children: [
+              _buildNormalTopBar(theme),
+              Expanded(
+                child: Center(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 32),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          controller.errorMsg.value.isNotEmpty
+                              ? controller.errorMsg.value
+                              : '暂无数据',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: theme.colorScheme.outline,
                           ),
-                          const SizedBox(height: 16),
-                          FilledButton(
-                            onPressed: () {
-                              controller.refreshData();
-                            },
-                            child: const Text('重试'),
-                          ),
-                        ],
-                      ),
+                          textAlign: TextAlign.center,
+                          maxLines: 6,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 16),
+                        FilledButton(
+                          onPressed: () {
+                            controller.refreshData();
+                          },
+                          child: const Text('重试'),
+                        ),
+                      ],
                     ),
                   ),
                 ),
-              ],
-            );
-          }
+              ),
+            ],
+          );
+        }
 
-          return _buildNormalContent(theme);
-        }),
-      ),
+        return _buildNormalContent(theme);
+      }),
     );
   }
 

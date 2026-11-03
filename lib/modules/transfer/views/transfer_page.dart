@@ -5,6 +5,7 @@ import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:yuanying/modules/transfer/services/transfer_server.dart';
 import 'package:yuanying/utils/storage_manager.dart';
 import 'package:yuanying/core/constants/storage_keys.dart';
+import 'package:yuanying/modules/setting/models/setting_pref.dart';
 
 class TransferPage extends StatefulWidget {
   const TransferPage({super.key});
@@ -80,11 +81,12 @@ class _TransferPageState extends State<TransferPage> {
   Widget build(BuildContext context) {
     final running = _server.running;
     final colorScheme = Theme.of(context).colorScheme;
+    final bgColor = SettingPref.bgActive ? Colors.transparent : colorScheme.surface;
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('WiFi 互传'),
-        backgroundColor: colorScheme.surface,
+        backgroundColor: bgColor,
         foregroundColor: colorScheme.onSurface,
       ),
       body: ListView(

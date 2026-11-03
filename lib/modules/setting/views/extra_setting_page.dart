@@ -23,17 +23,19 @@ class _ExtraSettingPageState extends State<ExtraSettingPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final bgColor = SettingPref.bgActive ? Colors.transparent : colorScheme.surface;
     final showAppBar = widget.showAppBar;
 
     return Scaffold(
-      backgroundColor: theme.colorScheme.surface,
+      backgroundColor: bgColor,
       resizeToAvoidBottomInset: false,
       appBar: showAppBar
           ? AppBar(
               title: const Text('其它设置'),
               centerTitle: false,
               elevation: 0,
-              backgroundColor: theme.colorScheme.surface,
+              backgroundColor: bgColor,
               foregroundColor: theme.colorScheme.onSurface,
             )
           : null,
@@ -44,6 +46,7 @@ class _ExtraSettingPageState extends State<ExtraSettingPage> {
           bottom: MediaQuery.viewPaddingOf(context).bottom + 100,
         ),
         children: [
+          const SizedBox(height: 8),
           // ===== 禁用 SSL 证书验证 =====
           _buildSwitchItem(
             icon: Icons.security,

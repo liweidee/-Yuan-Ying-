@@ -6,6 +6,7 @@ import 'package:yuanying/core/theme/style.dart';
 import '../controllers/emby_server_controller.dart';
 import '../models/emby_server_model.dart';
 import '../services/emby_api_service.dart';
+import 'package:yuanying/modules/setting/models/setting_pref.dart';
 
 class EmbyServerConfigPage extends StatelessWidget {
   const EmbyServerConfigPage({super.key});
@@ -17,14 +18,16 @@ class EmbyServerConfigPage extends StatelessWidget {
     }
     final controller = Get.find<EmbyServerController>();
     final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final bgColor = SettingPref.bgActive ? Colors.transparent : colorScheme.surface;
 
     return Scaffold(
-      backgroundColor: theme.colorScheme.surface,
+      backgroundColor: bgColor,
       appBar: AppBar(
         title: const Text('Emby 服务器', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
         centerTitle: false,
         elevation: 0,
-        backgroundColor: theme.colorScheme.surface,
+        backgroundColor: bgColor,
         foregroundColor: theme.colorScheme.onSurface,
         actions: [
           IconButton(

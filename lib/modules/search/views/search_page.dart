@@ -3,6 +3,7 @@ import 'package:get/get.dart';
 import 'package:yuanying/common/widgets/source_filter_sheet.dart';
 import 'package:yuanying/core/routes/app_pages.dart';
 import 'package:yuanying/modules/search/controllers/search_controller.dart';
+import 'package:yuanying/modules/setting/models/setting_pref.dart';
 
 // ============================================================================
 // 热搜布局模式枚举（三种视图）
@@ -54,8 +55,11 @@ class _SearchPageState extends State<SearchPage> {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
 
+    // 动态背景色
+    final bgColor = SettingPref.bgActive ? Colors.transparent : colorScheme.surface;
+
     return Scaffold(
-      backgroundColor: colorScheme.surface,
+      backgroundColor: bgColor,
       body: SafeArea(
         child: Column(
           children: [

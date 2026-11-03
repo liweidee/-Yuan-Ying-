@@ -231,8 +231,9 @@ class FvpEngine implements IPlayerEngine {
   double get playbackSpeed => _playbackSpeed;
   @override
   double get longPressSpeed => PlayerPref.longPressSpeedDefault;
+  bool _isVertical = false;
   @override
-  bool get isVertical => false;
+  bool get isVertical => _isVertical;
   @override
   bool get isFileSource => dataSource is FileSource;
   @override
@@ -379,9 +380,10 @@ class FvpEngine implements IPlayerEngine {
     final controller = _controller;
     if (controller == null || !_isInitialized) return;
     final size = controller.value.size;
-    if (size != null) {
+    if (size != null && size.width > 0 && size.height > 0) {
       _videoWidth.value = size.width.toInt();
       _videoHeight.value = size.height.toInt();
+      _isVertical = size.height > size.width;
     }
   }
 
@@ -722,18 +724,35 @@ class FvpEngine implements IPlayerEngine {
     if (PlatformUtils.isMobile) {
       if (status) {
         hideSystemBar();
-        await SystemChrome.setPreferredOrientations([
-          DeviceOrientation.landscapeLeft,
-          DeviceOrientation.landscapeRight,
-        ]);
+        // 根据视频方向选择全屏方向
+        try {
+          if (_isVertical) {
+            await SystemChrome.setPreferredOrientations([
+              DeviceOrientation.portraitUp,
+              DeviceOrientation.portraitDown,
+            ]);
+          } else {
+            await SystemChrome.setPreferredOrientations([
+              DeviceOrientation.landscapeLeft,
+              DeviceOrientation.landscapeRight,
+            ]);
+          }
+        } catch (e) {
+          debugPrint('[FvpEngine] 设置全屏方向失败: $e');
+        }
       } else {
+        // 原有退出逻辑
         if (!removeSafeArea) {
           showSystemBar();
         }
-        await SystemChrome.setPreferredOrientations([
-          DeviceOrientation.portraitUp,
-          DeviceOrientation.portraitDown,
-        ]);
+        try {
+          await SystemChrome.setPreferredOrientations([
+            DeviceOrientation.portraitUp,
+            DeviceOrientation.portraitDown,
+          ]);
+        } catch (e) {
+          debugPrint('[FvpEngine] 恢复竖屏方向失败: $e');
+        }
       }
     } else if (PlatformUtils.isDesktop) {
       try {
@@ -755,7 +774,11 @@ class FvpEngine implements IPlayerEngine {
   @override
   Future<void> setOrientation(List<DeviceOrientation> orientations) async {
     if (!PlatformUtils.isMobile) return;
-    await SystemChrome.setPreferredOrientations(orientations);
+    try {
+      await SystemChrome.setPreferredOrientations(orientations);
+    } catch (e) {
+      debugPrint('[FvpEngine] setOrientation 失败: $e');
+    }
   }
 
   // ============================================================

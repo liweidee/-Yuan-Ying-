@@ -61,7 +61,7 @@ class _PyKeepAliveDialogState extends State<_PyKeepAliveDialog> {
             Row(
               children: [
                 Icon(
-                  _enabled ? Icons.favorite : Icons.favorite_border,
+                  _enabled ? Icons.gpp_good : Icons.gpp_bad,
                   size: 20,
                   color: _enabled ? colorScheme.primary : colorScheme.outline,
                 ),

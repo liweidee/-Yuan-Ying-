@@ -75,13 +75,13 @@ class _LxRecentPageState extends State<LxRecentPage> {
     final colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
-      backgroundColor: colorScheme.surface,
+      // backgroundColor: colorScheme.surface,
       appBar: AppBar(
         title: Text('最近播放 (${_recent.length})',
             style: const TextStyle(fontSize: 18)),
         centerTitle: false,
-        backgroundColor: colorScheme.surface,
-        foregroundColor: colorScheme.onSurface,
+        // backgroundColor: colorScheme.surface,
+        // foregroundColor: colorScheme.onSurface,
         elevation: 0,
         actions: [
           if (_recent.isNotEmpty) ...[

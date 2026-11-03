@@ -23,7 +23,7 @@ class EmbyHistoryPage extends StatelessWidget {
     final theme = Theme.of(context);
 
     return Scaffold(
-      backgroundColor: theme.colorScheme.surface,
+      // backgroundColor: theme.colorScheme.surface,
       body: Obx(() {
         // 首次加载
         if (ctrl.isLoading.value && ctrl.items.isEmpty) {

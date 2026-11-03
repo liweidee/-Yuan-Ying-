@@ -52,15 +52,16 @@ class _WebDavSettingPageState extends State<WebDavSettingPage> {
     final showAppBar = widget.showAppBar;
     final padding = MediaQuery.viewPaddingOf(context);
     final colorScheme = Theme.of(context).colorScheme;
+    final bgColor = SettingPref.bgActive ? Colors.transparent : colorScheme.surface;
 
     return Scaffold(
-      backgroundColor: colorScheme.surface,
+      backgroundColor: bgColor,
       appBar: showAppBar
           ? AppBar(
               title: const Text('WebDAV 设置'),
               centerTitle: false,
               elevation: 0,
-              backgroundColor: colorScheme.surface,
+              backgroundColor: bgColor,
               foregroundColor: colorScheme.onSurface,
             )
           : null,

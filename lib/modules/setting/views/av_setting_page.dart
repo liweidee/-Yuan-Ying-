@@ -7,6 +7,7 @@ import 'package:yuanying/core/theme/style.dart';
 import 'package:yuanying/plugin/pl_player/models/hwdec_type.dart';
 import 'package:yuanying/plugin/pl_player/player_pref.dart';
 import 'package:yuanying/common/widgets/dialog/ordered_multi_select_dialog.dart';
+import 'package:yuanying/modules/setting/models/setting_pref.dart';
 
 /// 音视频设置页
 ///
@@ -34,14 +35,15 @@ class _AvSettingPageState extends State<AvSettingPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final bgColor = SettingPref.bgActive ? Colors.transparent : colorScheme.surface;
 
     return Scaffold(
-      backgroundColor: colorScheme.surface,
+      backgroundColor: bgColor,
       appBar: AppBar(
         title: const Text('音视频设置'),
         centerTitle: false,
         elevation: 0,
-        backgroundColor: colorScheme.surface,
+        backgroundColor: bgColor,
         foregroundColor: colorScheme.onSurface,
       ),
       body: ListView(

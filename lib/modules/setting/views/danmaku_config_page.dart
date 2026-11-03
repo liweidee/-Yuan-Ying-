@@ -5,6 +5,7 @@ import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:yuanying/core/theme/style.dart';
 import 'package:yuanying/models/danmaku/danmaku_api.dart';
 import 'package:yuanying/modules/setting/controllers/danmaku_config_controller.dart';
+import 'package:yuanying/modules/setting/models/setting_pref.dart';
 
 class DanmakuConfigPage extends StatelessWidget {
   const DanmakuConfigPage({super.key});
@@ -13,14 +14,16 @@ class DanmakuConfigPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final controller = Get.put(DanmakuConfigController());
     final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final bgColor = SettingPref.bgActive ? Colors.transparent : colorScheme.surface;
 
     return Scaffold(
-      backgroundColor: theme.colorScheme.surface,
+      backgroundColor: bgColor,
       appBar: AppBar(
         title: const Text('弹幕API配置', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
         centerTitle: false,
         elevation: 0,
-        backgroundColor: theme.colorScheme.surface,
+        backgroundColor: bgColor,
         foregroundColor: theme.colorScheme.onSurface,
         actions: [
           IconButton(

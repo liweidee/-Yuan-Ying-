@@ -47,8 +47,8 @@ class JellyfinMainShell extends StatelessWidget {
           tooltip: '返回服务器列表',
         ),
         title: Text(server.name),
-        backgroundColor: colorScheme.surface,
-        foregroundColor: colorScheme.onSurface,
+        // backgroundColor: colorScheme.surface,
+        // foregroundColor: colorScheme.onSurface,
         elevation: 0,
         // 动态 actions：仅在"历史"Tab（index=2）显示清空按钮
         actions: [

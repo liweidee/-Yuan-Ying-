@@ -4,6 +4,7 @@ import 'package:yuanying/core/theme/style.dart';
 import 'package:yuanying/models/common/theme/theme_color_type.dart';
 import 'package:yuanying/common/widgets/color_palette.dart';
 import 'package:yuanying/utils/theme_utils.dart';
+import 'package:yuanying/modules/setting/models/setting_pref.dart';
 
 class ColorSelectPage extends StatefulWidget {
   const ColorSelectPage({super.key});
@@ -24,15 +25,17 @@ class _ColorSelectPageState extends State<ColorSelectPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final bgColor = SettingPref.bgActive ? Colors.transparent : colorScheme.surface;
 
     return Scaffold(
-      backgroundColor: theme.colorScheme.surface,
+      backgroundColor: bgColor,
       appBar: AppBar(
         title: const Text('选择应用主题'),
         centerTitle: false,
         elevation: 0,
-        backgroundColor: theme.colorScheme.surface,
-        foregroundColor: theme.colorScheme.onSurface,
+        backgroundColor: bgColor,
+        foregroundColor: colorScheme.onSurface,
         actions: [
           TextButton(
             onPressed: () {
@@ -43,7 +46,7 @@ class _ColorSelectPageState extends State<ColorSelectPage> {
               style: TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.w500,
-                color: theme.colorScheme.primary,
+                color: colorScheme.primary,
               ),
             ),
           ),
@@ -81,8 +84,8 @@ class _ColorSelectPageState extends State<ColorSelectPage> {
                     style: TextStyle(
                       fontSize: 12,
                       color: isSelected
-                          ? theme.colorScheme.primary
-                          : theme.colorScheme.outline,
+                          ? colorScheme.primary
+                          : colorScheme.outline,
                       fontWeight: isSelected ? FontWeight.w500 : FontWeight.normal,
                     ),
                   ),

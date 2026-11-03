@@ -23,7 +23,7 @@ class EmbyFavoritePage extends StatelessWidget {
     final theme = Theme.of(context);
 
     return Scaffold(
-      backgroundColor: theme.colorScheme.surface,
+      // backgroundColor: theme.colorScheme.surface,
       body: Obx(() {
         // 首次加载
         if (ctrl.isLoading.value && ctrl.items.isEmpty) {
@@ -127,7 +127,7 @@ class EmbyFavoritePage extends StatelessWidget {
               );
               final videoItem = EmbyConverter.toVideoItem(item, imageUrl);
 
-              // ★ Stack 包裹：卡片本体 + 右上角取消收藏按钮
+              // Stack 包裹：卡片本体 + 右上角取消收藏按钮
               return Stack(
                 children: [
                   VideoCardV(
