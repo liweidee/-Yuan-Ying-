@@ -934,7 +934,8 @@ class _WebTabPageState extends State<WebTabPage>
         final bottomAvoid = _getBottomAvoidHeight(context);
 
         return Scaffold(
-          backgroundColor: Colors.transparent,
+          // backgroundColor: Colors.transparent,
+          backgroundColor: Theme.of(context).colorScheme.surface,
           resizeToAvoidBottomInset: false,
           body: Stack(
             children: [
@@ -1173,6 +1174,7 @@ class _WebTabPageState extends State<WebTabPage>
   Widget _buildEmptyState() {
     final cs = Theme.of(context).colorScheme;
     return Scaffold(
+      backgroundColor: Theme.of(context).colorScheme.surface,
       body: SafeArea(
         child: Center(
           child: Padding(
@@ -1211,6 +1213,7 @@ class _WebTabPageState extends State<WebTabPage>
 
   Widget _buildLinuxFallback() {
     return Scaffold(
+      backgroundColor: Theme.of(context).colorScheme.surface,
       appBar: AppBar(title: const Text('Web')),
       body: const Center(
         child: Text('Linux 不支持内嵌 WebView，请使用其他平台'),
