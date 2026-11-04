@@ -51,6 +51,7 @@ class _LocalFilePageState extends State<LocalFilePage>
     final crossAxisCount = isWide ? 6 : 2;
 
     return Scaffold(
+      backgroundColor: Colors.transparent,
       appBar: _buildAppBar(context, colorScheme),
       body: Obx(() {
         // 初始化完成前只显示 loading，不显示空状态

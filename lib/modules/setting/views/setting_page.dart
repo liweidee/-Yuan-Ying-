@@ -22,10 +22,11 @@ class SettingPage extends StatelessWidget {
     final theme = Theme.of(context);
 
     return Scaffold(
-      // appBar: AppBar(
-      //   title: const SizedBox.shrink(),
-      //   toolbarHeight: 0,
-      // ),
+      backgroundColor: Colors.transparent, 
+      appBar: AppBar(
+        title: const SizedBox.shrink(),
+        toolbarHeight: 0,
+      ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(Style.safeSpace, Style.safeSpace, Style.safeSpace, 100),
         children: [

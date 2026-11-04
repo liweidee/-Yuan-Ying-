@@ -873,8 +873,8 @@ class _WebTabPageState extends State<WebTabPage>
         final bottomAvoid = _getBottomAvoidHeight(context);
 
         return Scaffold(
+          backgroundColor: Colors.transparent,
           resizeToAvoidBottomInset: false,
-          backgroundColor: Theme.of(context).colorScheme.surface,
           body: Stack(
             children: [
               Column(

@@ -104,6 +104,7 @@ class _CacheManagerPageState extends State<CacheManagerPage> {
           }
         },
         child: Scaffold(
+          backgroundColor: Colors.transparent,
           appBar: _buildAppBar(downloading, completed),
           body: CustomScrollView(
             slivers: [

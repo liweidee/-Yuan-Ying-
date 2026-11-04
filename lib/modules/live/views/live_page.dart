@@ -90,6 +90,7 @@ class _LivePageState extends State<LivePage> {
 
       if (isLoading) {
         return Scaffold(
+          backgroundColor: Colors.transparent,
           appBar: null,
           body: Center(
             child: SizedBox(
@@ -115,6 +116,7 @@ class _LivePageState extends State<LivePage> {
   Widget _buildErrorPage(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     return Scaffold(
+      backgroundColor: Colors.transparent,
       appBar: null,
       body: Center(
         child: Padding(
@@ -183,7 +185,8 @@ class _LivePageState extends State<LivePage> {
     if (isNoConfig) {
       // ===== 空状态：未添加任何配置 =====
       return Scaffold(
-        // appBar: null,
+        backgroundColor: Colors.transparent,
+        appBar: null,
         body: Center(
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 32),
