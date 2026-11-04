@@ -209,13 +209,8 @@ class _LxPlaylistPageState extends State<LxPlaylistPage> {
     final colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
-      // backgroundColor: colorScheme.surface,
       appBar: AppBar(
         title: const Text('我的歌单', style: TextStyle(fontSize: 18)),
-        centerTitle: false,
-        // backgroundColor: colorScheme.surface,
-        // foregroundColor: colorScheme.onSurface,
-        elevation: 0,
         actions: [
           IconButton(
             tooltip: '导入歌单',

@@ -79,13 +79,8 @@ class _LxSonglistDetailPageState extends State<LxSonglistDetailPage> {
     final colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
-      // backgroundColor: colorScheme.surface,
       appBar: AppBar(
         title: Text(_title, style: const TextStyle(fontSize: 16)),
-        centerTitle: false,
-        // backgroundColor: colorScheme.surface,
-        // foregroundColor: colorScheme.onSurface,
-        elevation: 0,
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())

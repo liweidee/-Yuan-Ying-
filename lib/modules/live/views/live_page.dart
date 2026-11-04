@@ -183,6 +183,7 @@ class _LivePageState extends State<LivePage> {
     if (isNoConfig) {
       // ===== 空状态：未添加任何配置 =====
       return Scaffold(
+        backgroundColor: Colors.transparent,
         appBar: null,
         body: Center(
           child: Padding(
@@ -259,6 +260,7 @@ class _LivePageState extends State<LivePage> {
     final double topPadding = removeSafeArea ? 0.0 : viewPadding.top;
 
     return Scaffold(
+      backgroundColor: Colors.transparent,
       appBar: null,
       resizeToAvoidBottomInset: false,
       body: LayoutBuilder(

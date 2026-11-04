@@ -73,7 +73,6 @@ class _LxMusicPageState extends State<LxMusicPage> {
       final bgColor = bgActive ? Colors.transparent : colorScheme.surface;
 
       return Scaffold(
-        backgroundColor: bgColor,
         appBar: AppBar(
           leading: IconButton(
             icon: const Icon(Icons.arrow_back_ios_new),
@@ -84,10 +83,6 @@ class _LxMusicPageState extends State<LxMusicPage> {
                 _navItems[selectedIndex.value].label,
                 style: const TextStyle(fontSize: 18),
               )),
-          centerTitle: false,
-          backgroundColor: bgColor,
-          foregroundColor: colorScheme.onSurface,
-          elevation: 0,
           actions: [
             IconButton(
               tooltip: '我的歌单',

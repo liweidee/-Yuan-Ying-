@@ -16,6 +16,7 @@ class LabPage extends StatelessWidget {
     final bottomInset = MediaQuery.of(context).padding.bottom;
 
     return Scaffold(
+      backgroundColor: Colors.transparent,
       // 去掉 appBar，让内容从顶部开始
       body: ListView(
         padding: EdgeInsets.fromLTRB(

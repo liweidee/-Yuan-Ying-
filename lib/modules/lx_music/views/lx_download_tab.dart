@@ -40,7 +40,6 @@ class _LxDownloadTabState extends State<LxDownloadTab>
     return Column(
       children: [
         Container(
-          // color: colorScheme.surface,
           child: TabBar(
             controller: _tabController,
             tabs: [

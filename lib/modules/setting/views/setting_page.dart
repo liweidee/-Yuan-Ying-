@@ -24,11 +24,7 @@ class SettingPage extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         title: const SizedBox.shrink(),
-        centerTitle: false,
-        elevation: 0,
         toolbarHeight: 0,
-        backgroundColor: theme.colorScheme.surface,
-        foregroundColor: theme.colorScheme.onSurface,
       ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(Style.safeSpace, Style.safeSpace, Style.safeSpace, 100),
