@@ -48,6 +48,7 @@ class EmbyMainShell extends StatelessWidget {
       final bgActive = SettingPref.bgActive;
 
       return Scaffold(
+        extendBody: true,
         appBar: AppBar(
           leading: IconButton(
             icon: const Icon(Icons.arrow_back_ios_new),

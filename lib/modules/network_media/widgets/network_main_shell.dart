@@ -42,10 +42,10 @@ class _NetworkMainShellState extends State<NetworkMainShell> {
         final _ = Get.find<BgConfigController>().version.value;
       }
       final bgActive = SettingPref.bgActive;
-      final bgColor = bgActive ? Colors.transparent : cs.surface;
 
       return Scaffold(
-        backgroundColor: bgColor,
+        extendBody: true,
+        resizeToAvoidBottomInset: false,
         appBar: AppBar(
           leading: IconButton(
             icon: const Icon(Icons.arrow_back_ios_new),
@@ -53,9 +53,6 @@ class _NetworkMainShellState extends State<NetworkMainShell> {
             tooltip: '返回',
           ),
           title: Text(widget.title),
-          backgroundColor: bgColor,
-          foregroundColor: cs.onSurface,
-          elevation: 0,
         ),
         body: Obx(() => IndexedStack(
               index: _selectedIndex.value,

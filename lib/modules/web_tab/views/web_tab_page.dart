@@ -57,6 +57,10 @@ class _WebTabPageState extends State<WebTabPage>
 
   ManualSourceController get _mgr => Get.find<ManualSourceController>();
 
+  // 双向同步 Worker：本地 _isFullscreen ↔ MainController.isWebFullscreen
+  Worker? _localToGlobalWorker;
+  Worker? _globalToLocalWorker;
+
   @override
   bool get wantKeepAlive => true;
 
@@ -64,6 +68,8 @@ class _WebTabPageState extends State<WebTabPage>
   void initState() {
     super.initState();
     _currentId = StorageManager.getSetting<String>(_currentIdKey);
+
+    _setupFullscreenSync();
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
@@ -73,6 +79,57 @@ class _WebTabPageState extends State<WebTabPage>
       if (!mounted) return;
       _scheduleEntryResolve();
     });
+  }
+
+  // ================== 全屏状态与系统 UI 同步 ==================
+  /// 建立本地 _isFullscreen 与 MainController.isWebFullscreen 的双向同步：
+  ///  - 本地变化（点全屏按钮 / FAB / _setCurrent / ds.fullscreen）→ 写入全局 + 应用系统 UI
+  ///  - 全局变化（switchPage 退出 / 系统返回键）→ 写回本地
+  ///
+  /// 幂等性由 MainController.setWebFullscreen 与本地值判断共同保证，循环会在一次 tick 内收敛。
+  void _setupFullscreenSync() {
+    _localToGlobalWorker = ever(_isFullscreen, (full) {
+      _applySystemUI(full);
+      if (Get.isRegistered<MainController>()) {
+        Get.find<MainController>().setWebFullscreen(full);
+      }
+    });
+
+    if (Get.isRegistered<MainController>()) {
+      _globalToLocalWorker =
+          ever(Get.find<MainController>().isWebFullscreen, (full) {
+        if (_isFullscreen.value != full) {
+          _isFullscreen.value = full;
+        }
+      });
+    }
+  }
+
+  /// 移动端系统栏沉浸式切换。桌面端不做处理。
+  void _applySystemUI(bool full) {
+    if (!(Platform.isAndroid || Platform.isIOS)) return;
+    SystemChrome.setEnabledSystemUIMode(
+      full ? SystemUiMode.immersiveSticky : SystemUiMode.edgeToEdge,
+    );
+  }
+
+  @override
+  void dispose() {
+    // 先释放 Worker，避免后续同步回调访问已销毁 State
+    _localToGlobalWorker?.dispose();
+    _globalToLocalWorker?.dispose();
+    _localToGlobalWorker = null;
+    _globalToLocalWorker = null;
+
+    // 兜底：若仍处于全屏，主动恢复系统 UI 与全局状态
+    if (_isFullscreen.value) {
+      _applySystemUI(false);
+      if (Get.isRegistered<MainController>()) {
+        Get.find<MainController>().setWebFullscreen(false);
+      }
+    }
+
+    super.dispose();
   }
 
   void _setCurrent(String id) {
@@ -814,6 +871,10 @@ class _WebTabPageState extends State<WebTabPage>
 
   // ================== 底栏避让 ==================
   double _getBottomAvoidHeight(BuildContext context) {
+    // 全屏时只避让系统手势区，不再按业务底栏高度抬升
+    if (_isFullscreen.value) {
+      return MediaQuery.viewPaddingOf(context).bottom;
+    }
     if (Get.isRegistered<MainController>()) {
       final mc = Get.find<MainController>();
       if (!mc.hideBottomBar.value && mc.bottomBarHeight.value > 0) {

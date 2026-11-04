@@ -65,140 +65,185 @@ class _MainPageState extends State<MainPage> {
     final colorScheme = theme.colorScheme;
     final padding = MediaQuery.viewPaddingOf(context);
 
-    return PopScope(
-      canPop: _controller.directExitOnBack && _controller.selectedIndex.value == 0,
-      onPopInvoked: (didPop) {
-        if (!didPop && _controller.directExitOnBack) {
-          if (_controller.selectedIndex.value != 0) {
+    // PopScope 移入 Obx 内部：让 canPop / onPopInvoked 能随
+    //   selectedIndex 与 isWebFullscreen 变化实时刷新。
+    return Obx(() {
+      final _ = _controller.navStyleVersion.value;
+
+      if (Get.isRegistered<BgConfigController>()) {
+        final _ = Get.find<BgConfigController>().version.value;
+      }
+      final bgActive = SettingPref.bgActive;
+
+      final useBottomNav = _controller.useBottomNav.value;
+      final selectedIndex = _controller.selectedIndex.value;
+      final navigationBars = _controller.navigationBars;
+      final isWebFullscreen = _controller.isWebFullscreen.value; // ★
+
+      return PopScope(
+        // 全屏时禁止直接 pop，先由 onPopInvoked 退出全屏
+        canPop: !isWebFullscreen &&
+            _controller.directExitOnBack &&
+            selectedIndex == 0,
+        onPopInvoked: (didPop) {
+          if (didPop) return;
+
+          // 全屏时：系统返回键先退出全屏，不退出 App
+          if (isWebFullscreen) {
+            _controller.setWebFullscreen(false);
+            return;
+          }
+
+          // 原有逻辑（回首页）
+          if (_controller.directExitOnBack && selectedIndex != 0) {
             _controller.switchPage(0);
           }
-        }
-      },
-      child: Obx(() {
-        final _ = _controller.navStyleVersion.value;
-
-        if (Get.isRegistered<BgConfigController>()) {
-          final _ = Get.find<BgConfigController>().version.value;
-        }
-        final bgActive = SettingPref.bgActive;
-
-        final useBottomNav = _controller.useBottomNav.value;
-        final selectedIndex = _controller.selectedIndex.value;
-        final navigationBars = _controller.navigationBars;
-
-        if (useBottomNav) {
-          return Scaffold(
-            extendBody: true,
-            resizeToAvoidBottomInset: false,
-            // backgroundColor: bgActive ? Colors.transparent : colorScheme.surface,
-            appBar: AppBar(
-              toolbarHeight: 0,
-              backgroundColor: Colors.transparent,
-              elevation: 0,
-              systemOverlayStyle: SystemUiOverlayStyle(
-                statusBarColor: Colors.transparent,
-                statusBarIconBrightness: theme.brightness == Brightness.light
-                    ? Brightness.dark
-                    : Brightness.light,
+        },
+        child: useBottomNav
+            ? Scaffold(
+                extendBody: true,
+                resizeToAvoidBottomInset: false,
+                // backgroundColor: bgActive ? Colors.transparent : colorScheme.surface,
+                appBar: AppBar(
+                  toolbarHeight: 0,
+                  backgroundColor: Colors.transparent,
+                  elevation: 0,
+                  systemOverlayStyle: SystemUiOverlayStyle(
+                    statusBarColor: Colors.transparent,
+                    statusBarIconBrightness:
+                        theme.brightness == Brightness.light
+                            ? Brightness.dark
+                            : Brightness.light,
+                  ),
+                ),
+                body: navigationBars[selectedIndex].page,
+                // 全屏时隐藏移动端底部导航栏
+                bottomNavigationBar: isWebFullscreen
+                    ? null
+                    : _buildMobileBottomBar(
+                        colorScheme: colorScheme,
+                        selectedIndex: selectedIndex,
+                        navigationBars: navigationBars,
+                      ),
+              )
+            // ================= 桌面端 =================
+            : _buildDesktopBody(
+                theme: theme,
+                colorScheme: colorScheme,
+                bgActive: bgActive,
+                padding: padding,
+                selectedIndex: selectedIndex,
+                navigationBars: navigationBars,
+                isWebFullscreen: isWebFullscreen,
               ),
-            ),
-            body: navigationBars[selectedIndex].page,
-            bottomNavigationBar: _buildMobileBottomBar(
-              colorScheme: colorScheme,
-              selectedIndex: selectedIndex,
-              navigationBars: navigationBars,
-            ),
-          );
-        } else {
-          // ================= 桌面端 =================
-          final isDark = theme.brightness == Brightness.dark;
-          
-          return Scaffold(
-            resizeToAvoidBottomInset: false,
-            backgroundColor: bgActive ? Colors.transparent : colorScheme.surface,
-            appBar: AppBar(
-              toolbarHeight: 0,
-              backgroundColor: Colors.transparent,
-              elevation: 0,
-              systemOverlayStyle: SystemUiOverlayStyle(
-                statusBarColor: Colors.transparent,
-                statusBarIconBrightness: theme.brightness == Brightness.light
-                    ? Brightness.dark
-                    : Brightness.light,
-              ),
-            ),
-            body: Row(
-              children: [
-                // 桌面端左侧导航栏：必须有 ClipRect 限制范围！
-                RepaintBoundary(
-                  child: ClipRect(
-                    child: BackdropFilter(
-                      filter: bgActive
-                          ? ui.ImageFilter.blur(sigmaX: 15, sigmaY: 15)
-                          : ui.ImageFilter.blur(sigmaX: 0, sigmaY: 0),
-                      child: Container(
-                        width: 80,
-                        padding: EdgeInsets.only(
-                          top: padding.top + 15,
-                          bottom: padding.bottom + 15,
-                        ),
-                        decoration: BoxDecoration(
+      );
+    });
+  }
+
+  // ================= 桌面端布局 =================
+  // 抽成独立方法，便于"全屏时隐藏左侧导航栏"的 if 包裹与 key 保护。
+  //   结构、颜色、动画逻辑与原内联版本完全一致。
+  Widget _buildDesktopBody({
+    required ThemeData theme,
+    required ColorScheme colorScheme,
+    required bool bgActive,
+    required EdgeInsets padding,
+    required int selectedIndex,
+    required List<NavigationBarType> navigationBars,
+    required bool isWebFullscreen,
+  }) {
+    final isDark = theme.brightness == Brightness.dark;
+
+    return Scaffold(
+      resizeToAvoidBottomInset: false,
+      backgroundColor: bgActive ? Colors.transparent : colorScheme.surface,
+      appBar: AppBar(
+        toolbarHeight: 0,
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        systemOverlayStyle: SystemUiOverlayStyle(
+          statusBarColor: Colors.transparent,
+          statusBarIconBrightness: theme.brightness == Brightness.light
+              ? Brightness.dark
+              : Brightness.light,
+        ),
+      ),
+      body: Row(
+        children: [
+          // 桌面端左侧导航栏：必须有 ClipRect 限制范围！
+          // 全屏时隐藏；固定 key 保证 Element 复用
+          if (!isWebFullscreen)
+            RepaintBoundary(
+              key: const ValueKey('desktop_nav'),
+              child: ClipRect(
+                child: BackdropFilter(
+                  filter: bgActive
+                      ? ui.ImageFilter.blur(sigmaX: 15, sigmaY: 15)
+                      : ui.ImageFilter.blur(sigmaX: 0, sigmaY: 0),
+                  child: Container(
+                    width: 80,
+                    padding: EdgeInsets.only(
+                      top: padding.top + 15,
+                      bottom: padding.bottom + 15,
+                    ),
+                    decoration: BoxDecoration(
+                      color: bgActive
+                          ? colorScheme.surface
+                              .withValues(alpha: isDark ? 0.65 : 0.55)
+                          : colorScheme.surface,
+                      border: Border(
+                        right: BorderSide(
+                          // 开启壁纸时，边框更透一点，不破坏通透感；未开启时使用标准的 outline
                           color: bgActive
-                              ? colorScheme.surface.withValues(alpha: isDark ? 0.65 : 0.55)
-                              : colorScheme.surface,
-                          border: Border(
-                            right: BorderSide(
-                              // 开启壁纸时，边框更透一点，不破坏通透感；未开启时使用标准的 outline
-                              color: bgActive 
-                                  ? colorScheme.outline.withValues(alpha: 0.1)
-                                  : colorScheme.outline.withValues(alpha: 0.15),
-                              width: 1,
-                            ),
-                          ),
-                          // 如果你之前觉得有阴影，也可以加上这层极弱的阴影（二选一即可，建议只留边框）
-                          // boxShadow: [
-                          //   BoxShadow(
-                          //     color: Colors.black.withValues(alpha: 0.05),
-                          //     blurRadius: 4,
-                          //     offset: const Offset(1, 0),
-                          //   ),
-                          // ],
-                        ),
-                        child: Column(
-                          children: [
-                            _buildAppLogo(),
-                            const SizedBox(height: 16),
-                            Expanded(
-                              child: ListView.separated(
-                                padding: const EdgeInsets.symmetric(horizontal: 12),
-                                itemCount: navigationBars.length,
-                                separatorBuilder: (_, __) => const SizedBox(height: 6),
-                                itemBuilder: (context, index) {
-                                  final item = navigationBars[index];
-                                  final isSelected = index == selectedIndex;
-                                  return _NavItem(
-                                    key: ValueKey('nav_$index'),
-                                    item: item,
-                                    isSelected: isSelected,
-                                    onTap: () => _controller.switchPage(index),
-                                  );
-                                },
-                              ),
-                            ),
-                          ],
+                              ? colorScheme.outline.withValues(alpha: 0.1)
+                              : colorScheme.outline.withValues(alpha: 0.15),
+                          width: 1,
                         ),
                       ),
+                      // 如果你之前觉得有阴影，也可以加上这层极弱的阴影（二选一即可，建议只留边框）
+                      // boxShadow: [
+                      //   BoxShadow(
+                      //     color: Colors.black.withValues(alpha: 0.05),
+                      //     blurRadius: 4,
+                      //     offset: const Offset(1, 0),
+                      //   ),
+                      // ],
+                    ),
+                    child: Column(
+                      children: [
+                        _buildAppLogo(),
+                        const SizedBox(height: 16),
+                        Expanded(
+                          child: ListView.separated(
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                            itemCount: navigationBars.length,
+                            separatorBuilder: (_, __) =>
+                                const SizedBox(height: 6),
+                            itemBuilder: (context, index) {
+                              final item = navigationBars[index];
+                              final isSelected = index == selectedIndex;
+                              return _NavItem(
+                                key: ValueKey('nav_$index'),
+                                item: item,
+                                isSelected: isSelected,
+                                onTap: () => _controller.switchPage(index),
+                              );
+                            },
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
-                Expanded(
-                  child: navigationBars[selectedIndex].page,
-                ),
-              ],
+              ),
             ),
-          );
-        }
-      }),
+          // 固定 key：防止全屏切换时 page 的 Element 被重建导致 WebView 重载
+          Expanded(
+            key: const ValueKey('desktop_content'),
+            child: navigationBars[selectedIndex].page,
+          ),
+        ],
+      ),
     );
   }
 
@@ -323,7 +368,7 @@ class _MainPageState extends State<MainPage> {
     final double actualHeight = _getBottomBarHeight(style);
     _controller.bottomBarHeight.value = actualHeight;
 
-    // 统一处理底栏的毛玻璃效果（必须有 ClipRect 包裹！）
+    // 统一处理底栏的毛玻璃效果（必须有 ClipRect 包裹）
     Widget finalBottomBar = bottomBar;
     if (SettingPref.bgActive) {
       final isDark = Theme.of(context).brightness == Brightness.dark;

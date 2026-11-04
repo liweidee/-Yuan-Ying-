@@ -44,6 +44,17 @@ class MainController extends GetxController {
   bool get needsCorrection => hideTopBar.value;
 
   // ============================================================
+  // Web Tab 全屏状态（供 MainPage 隐藏/恢复导航栏）
+  // ============================================================
+  final RxBool isWebFullscreen = false.obs;
+
+  /// 幂等设置；只有真正发生变化时才写入，避免 Worker 循环触发。
+  void setWebFullscreen(bool value) {
+    if (isWebFullscreen.value == value) return;
+    isWebFullscreen.value = value;
+  }
+
+  // ============================================================
   // 获取直播 Tab 的索引
   // ============================================================
 
@@ -175,6 +186,10 @@ class MainController extends GetxController {
     }
 
     selectedIndex.value = index;
+
+    // 切换 Tab 时退出 Web 全屏
+    //   放在 selectedIndex 之后，避免 WebTabPage 可见时顶栏闪烁。
+    setWebFullscreen(false);
 
     // 如果切到直播 Tab → 恢复直播（仅当用户没有手动暂停时）
     if (liveIdx != -1 && index == liveIdx) {

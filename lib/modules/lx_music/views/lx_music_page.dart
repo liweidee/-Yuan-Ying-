@@ -70,9 +70,10 @@ class _LxMusicPageState extends State<LxMusicPage> {
         final _ = Get.find<BgConfigController>().version.value;
       }
       final bgActive = SettingPref.bgActive;
-      final bgColor = bgActive ? Colors.transparent : colorScheme.surface;
 
       return Scaffold(
+        extendBody: true,
+        resizeToAvoidBottomInset: false,
         appBar: AppBar(
           leading: IconButton(
             icon: const Icon(Icons.arrow_back_ios_new),

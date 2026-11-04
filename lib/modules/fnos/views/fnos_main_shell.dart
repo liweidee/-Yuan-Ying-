@@ -68,6 +68,8 @@ class FnosMainShell extends StatelessWidget {
       final bgActive = SettingPref.bgActive;
 
       return Scaffold(
+        extendBody: true,
+        resizeToAvoidBottomInset: false,
         appBar: AppBar(
           leading: IconButton(
             icon: const Icon(Icons.arrow_back_ios_new),
