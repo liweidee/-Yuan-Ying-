@@ -183,8 +183,7 @@ class _LivePageState extends State<LivePage> {
     if (isNoConfig) {
       // ===== 空状态：未添加任何配置 =====
       return Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: null,
+        // appBar: null,
         body: Center(
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 32),

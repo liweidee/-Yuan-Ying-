@@ -142,9 +142,28 @@ class _MainPageState extends State<MainPage> {
                           top: padding.top + 15,
                           bottom: padding.bottom + 15,
                         ),
-                        color: bgActive
-                            ? colorScheme.surface.withValues(alpha: isDark ? 0.75 : 0.65)
-                            : colorScheme.surface,
+                        decoration: BoxDecoration(
+                          color: bgActive
+                              ? colorScheme.surface.withValues(alpha: isDark ? 0.65 : 0.55)
+                              : colorScheme.surface,
+                          border: Border(
+                            right: BorderSide(
+                              // 开启壁纸时，边框更透一点，不破坏通透感；未开启时使用标准的 outline
+                              color: bgActive 
+                                  ? colorScheme.outline.withValues(alpha: 0.1)
+                                  : colorScheme.outline.withValues(alpha: 0.15),
+                              width: 1,
+                            ),
+                          ),
+                          // 如果你之前觉得有阴影，也可以加上这层极弱的阴影（二选一即可，建议只留边框）
+                          // boxShadow: [
+                          //   BoxShadow(
+                          //     color: Colors.black.withValues(alpha: 0.05),
+                          //     blurRadius: 4,
+                          //     offset: const Offset(1, 0),
+                          //   ),
+                          // ],
+                        ),
                         child: Column(
                           children: [
                             _buildAppLogo(),
