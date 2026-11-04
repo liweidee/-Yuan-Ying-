@@ -26,12 +26,8 @@ class _FavoritePageState extends State<FavoritePage> {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
     final screenWidth = MediaQuery.of(context).size.width;
-    
-    // 动态背景色
-    final bgColor = SettingPref.bgActive ? Colors.transparent : colorScheme.surface;
 
     return Scaffold(
-      backgroundColor: bgColor,
       appBar: AppBar(
         leading: IconButton(
           icon: Icon(Icons.arrow_back_ios, color: colorScheme.onSurface, size: 20),
@@ -39,8 +35,6 @@ class _FavoritePageState extends State<FavoritePage> {
           splashRadius: 20,
         ),
         title: Text('我的收藏', style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
-        backgroundColor: bgColor,
-        elevation: 0,
         actions: [
           if (controller.videoList.isNotEmpty)
             IconButton(

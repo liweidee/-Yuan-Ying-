@@ -3,7 +3,6 @@ import 'package:get/get.dart';
 import 'package:yuanying/modules/history/controllers/history_controller.dart';
 import 'package:yuanying/common/widgets/media_card.dart';
 import 'package:yuanying/t4/models/video_item.dart';
-import 'package:yuanying/modules/setting/models/setting_pref.dart';
 
 class HistoryPage extends StatefulWidget {
   const HistoryPage({super.key});
@@ -26,12 +25,8 @@ class _HistoryPageState extends State<HistoryPage> {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
     final screenWidth = MediaQuery.of(context).size.width;
-    
-    // 动态背景色
-    final bgColor = SettingPref.bgActive ? Colors.transparent : colorScheme.surface;
 
     return Scaffold(
-      backgroundColor: bgColor,
       appBar: AppBar(
         leading: IconButton(
           icon: Icon(Icons.arrow_back_ios, color: colorScheme.onSurface, size: 20),
@@ -39,8 +34,6 @@ class _HistoryPageState extends State<HistoryPage> {
           splashRadius: 20,
         ),
         title: Text('播放历史', style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
-        backgroundColor: bgColor,
-        elevation: 0,
         actions: [
           if (controller.videoList.isNotEmpty)
             IconButton(
