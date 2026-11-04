@@ -11,6 +11,7 @@ import 'package:yuanying/modules/live/widgets/live_channel_info_bar.dart';
 import 'package:yuanying/modules/live/widgets/live_epg_timeline.dart';
 import 'package:yuanying/modules/music/controllers/music_player_controller.dart';
 import 'package:yuanying/services/silence_keeper.dart';
+import 'package:yuanying/modules/setting/models/setting_pref.dart'; // ← 新增
 
 class LivePage extends StatefulWidget {
   const LivePage({super.key});
@@ -53,19 +54,19 @@ class _LivePageState extends State<LivePage> {
 
   /// 直播播放前停止音乐，让直播抢占音频会话
   Future<void> _stopMusicForLive() async {
-      // 1. 停止音乐播放器
-      if (Get.isRegistered<MusicPlayerController>()) {
-          try {
-              final musicController = Get.find<MusicPlayerController>();
-              if (musicController.isPlaying) {
-                  await musicController.pause();
-              }
-          } catch (_) {}
-      }
-      // 2. 停止静音保活引擎
+    // 1. 停止音乐播放器
+    if (Get.isRegistered<MusicPlayerController>()) {
       try {
-          await SilenceKeeper.stop();
+        final musicController = Get.find<MusicPlayerController>();
+        if (musicController.isPlaying) {
+          await musicController.pause();
+        }
       } catch (_) {}
+    }
+    // 2. 停止静音保活引擎
+    try {
+      await SilenceKeeper.stop();
+    } catch (_) {}
   }
 
   @override
@@ -159,7 +160,8 @@ class _LivePageState extends State<LivePage> {
                 style: FilledButton.styleFrom(
                   backgroundColor: colorScheme.primary,
                   foregroundColor: colorScheme.onPrimary,
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(8),
                   ),
@@ -283,8 +285,21 @@ class _LivePageState extends State<LivePage> {
     );
   }
 
+  // ========================================================================
+  // 移动端布局：频道区做成"开壁纸时圆角 10 半透明面板 / 关壁纸时无形"
+  // ========================================================================
   Widget _buildMobileLayout(Widget playerWidget, double topPadding) {
     final ColorScheme colorScheme = Theme.of(context).colorScheme;
+    final bool isDark = Theme.of(context).brightness == Brightness.dark;
+    final bool bgActive = SettingPref.bgActive;
+
+    // 下方整块底色：
+    //  - 开壁纸 → surface 半透明（浅 0.62 / 深 0.72）
+    //  - 关壁纸 → surface（与 Scaffold 同色，视觉隐形，和改造前完全一致）
+    final Color bottomBg = bgActive
+        ? colorScheme.surface.withValues(alpha: isDark ? 0.72 : 0.62)
+        : colorScheme.surface;
+
     return Column(
       children: [
         if (topPadding > 0) SizedBox(height: topPadding),
@@ -292,25 +307,25 @@ class _LivePageState extends State<LivePage> {
           aspectRatio: 16 / 9,
           child: playerWidget,
         ),
-        const LiveChannelInfoBar(),
-        const SizedBox(height: 6),
+        // 视频下方整块区域：信息栏 + 频道区共用一层底
         Expanded(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8.0),
-            child: Row(
+          child: ColoredBox(
+            color: bottomBg,
+            child: Column(
               children: [
-                LiveGroupList(width: 110, isDesktop: false),
-                const SizedBox(width: 4),
+                const LiveChannelInfoBar(),
+                // 1px 极淡分割线（不再用 6px 间隙）
+                Divider(
+                  height: 1,
+                  thickness: 1,
+                  color: colorScheme.outline.withValues(alpha: 0.08),
+                ),
                 Expanded(
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: colorScheme.surface,
-                      borderRadius: const BorderRadius.only(
-                        topRight: Radius.circular(10),
-                        bottomRight: Radius.circular(10),
-                      ),
-                    ),
-                    child: const LiveChannelList(),
+                  child: Row(
+                    children: const [
+                      LiveGroupList(width: 110, isDesktop: false),
+                      Expanded(child: LiveChannelList()),
+                    ],
                   ),
                 ),
               ],
@@ -321,71 +336,59 @@ class _LivePageState extends State<LivePage> {
     );
   }
 
+  // ========================================================================
+  // 桌面端布局：侧栏贴边 + 视频/EPG 各自独立
+  //
+  //  - 左侧 320 侧栏贴边，无圆角无阴影，右侧 1px 分割线（与 MainPage 侧栏语言一致）
+  //  - 右侧视频区是黑底矩形，不带外框圆角
+  //  - EPG 独立一条信息带，不再被外层圆角裁剪
+  // ========================================================================
   Widget _buildDesktopLayout(Widget playerWidget) {
     final ColorScheme colorScheme = Theme.of(context).colorScheme;
-    final Color shadowColor = Theme.of(context).shadowColor;
-    return Padding(
-      padding: const EdgeInsets.all(16.0),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // ===== 左侧面板保持不变 =====
-          Container(
-            width: 320,
-            decoration: BoxDecoration(
-              color: colorScheme.surface,
-              borderRadius: BorderRadius.circular(12),
-              boxShadow: [
-                BoxShadow(
-                  color: shadowColor.withOpacity(0.06),
-                  blurRadius: 12,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: Row(
-                children: [
-                  LiveGroupList(width: 120, isDesktop: true),
-                  Expanded(
-                    child: Container(
-                      color: colorScheme.surface,
-                      child: const LiveChannelList(),
-                    ),
-                  ),
-                ],
+    final bool isDark = Theme.of(context).brightness == Brightness.dark;
+    final bool bgActive = SettingPref.bgActive;
+
+    final Color sideBarBg = bgActive
+        ? colorScheme.surface.withValues(alpha: isDark ? 0.72 : 0.62)
+        : colorScheme.surface;
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // ===== 左侧贴边侧栏 =====
+        Container(
+          width: 320,
+          decoration: BoxDecoration(
+            color: sideBarBg,
+            border: Border(
+              right: BorderSide(
+                color: colorScheme.outline.withValues(alpha: 0.08),
               ),
             ),
           ),
-          const SizedBox(width: 16),
-          // ===== 右侧：视频 + 底部时间轴 =====
-          Expanded(
-            child: Container(
-              decoration: BoxDecoration(
-                color: Colors.black,
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(
-                    color: shadowColor.withOpacity(0.08),
-                    blurRadius: 16,
-                    offset: const Offset(0, 6),
-                  ),
-                ],
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: Column(
-                  children: [
-                    Expanded(child: playerWidget),
-                    const LiveEpgTimeline(),
-                  ],
+          child: const Row(
+            children: [
+              LiveGroupList(width: 120, isDesktop: true),
+              Expanded(child: LiveChannelList()),
+            ],
+          ),
+        ),
+        // ===== 右侧：视频 + EPG 分层融合 =====
+        Expanded(
+          child: Column(
+            children: [
+              Expanded(
+                child: ColoredBox(
+                  // 兜底：视频未出帧时不留壁纸缝隙
+                  color: Colors.black,
+                  child: playerWidget,
                 ),
               ),
-            ),
+              const LiveEpgTimeline(),
+            ],
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }

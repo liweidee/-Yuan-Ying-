@@ -119,7 +119,6 @@ class _SystemLogPageState extends State<SystemLogPage> {
             tooltip: '清除日志',
             onPressed: _clearLogs,
           ),
-          // ★ 无诊断按钮
         ],
       ),
       body: Container(
@@ -226,7 +225,7 @@ class _SystemLogPageState extends State<SystemLogPage> {
                 ],
               ),
             ),
-            // ★ 底部按钮（文案改为"复制系统日志"）
+            // 底部按钮
             Container(
               width: double.infinity,
               padding: EdgeInsets.fromLTRB(

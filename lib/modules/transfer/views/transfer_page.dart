@@ -81,13 +81,10 @@ class _TransferPageState extends State<TransferPage> {
   Widget build(BuildContext context) {
     final running = _server.running;
     final colorScheme = Theme.of(context).colorScheme;
-    final bgColor = SettingPref.bgActive ? Colors.transparent : colorScheme.surface;
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('WiFi 互传'),
-        backgroundColor: bgColor,
-        foregroundColor: colorScheme.onSurface,
       ),
       body: ListView(
         padding: const EdgeInsets.all(20),

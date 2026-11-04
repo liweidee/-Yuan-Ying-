@@ -300,7 +300,6 @@ class _DebugLogPageState extends State<DebugLogPage>
     return Scaffold(
       appBar: AppBar(
         title: const Text('调试日志'),
-        centerTitle: false,
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(50),
           child: Obx(() {

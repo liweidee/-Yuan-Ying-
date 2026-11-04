@@ -28,38 +28,72 @@ class LiveEpgSheet extends StatelessWidget {
       builder: (context, scrollController) {
         return Column(
           children: [
+            // ============================================================
+            // 头部（本次唯一改动区域）
+            // ============================================================
             const SizedBox(height: 8),
+            // 拖拽把手：略微加宽加高，圆角更柔和
             Container(
-              width: 40,
-              height: 4,
+              width: 44,
+              height: 5,
               decoration: BoxDecoration(
-                color: colorScheme.outline.withOpacity(0.3),
-                borderRadius: BorderRadius.circular(2),
+                color: colorScheme.outline.withOpacity(0.35),
+                borderRadius: BorderRadius.circular(3),
               ),
             ),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              padding: const EdgeInsets.fromLTRB(16, 10, 12, 10),
               child: Row(
                 children: [
                   Expanded(
-                    child: Text(
-                      channelName,
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: colorScheme.onSurface,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          channelName,
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: colorScheme.onSurface,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '节目单',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: colorScheme.outline,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                  IconButton(
-                    onPressed: () => Navigator.pop(context),
-                    icon: const Icon(Icons.close, size: 20),
+                  // 圆形半透明关闭按钮（比裸 IconButton 精致）
+                  Material(
+                    color: colorScheme.surfaceContainerHighest.withOpacity(0.6),
+                    shape: const CircleBorder(),
+                    clipBehavior: Clip.antiAlias,
+                    child: InkWell(
+                      onTap: () => Navigator.pop(context),
+                      child: Padding(
+                        padding: const EdgeInsets.all(6),
+                        child: Icon(
+                          Icons.close_rounded,
+                          size: 18,
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
                   ),
                 ],
               ),
             ),
+            // ============================================================
+            // 以下与原始版本完全一致
+            // ============================================================
             Divider(height: 1, color: colorScheme.outline.withOpacity(0.1)),
             Expanded(
               child: ListView.builder(
@@ -86,6 +120,9 @@ class LiveEpgSheet extends StatelessWidget {
   }
 }
 
+// ============================================================
+// 节目项：与原始版本完全一致，未做任何改动
+// ============================================================
 class _ProgrammeItem extends StatelessWidget {
   final EpgProgramme programme;
   final bool isCurrent;

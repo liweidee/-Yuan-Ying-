@@ -1171,7 +1171,6 @@ class _TmdbDetailPageState extends State<TmdbDetailPage> {
     final colorScheme = theme.colorScheme;
 
     return Scaffold(
-      backgroundColor: colorScheme.surface,
       extendBodyBehindAppBar: true,
       body: _isLoading
           ? Center(child: CircularProgressIndicator(color: colorScheme.primary))

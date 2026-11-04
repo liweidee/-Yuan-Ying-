@@ -11,7 +11,6 @@ import 'package:yuanying/modules/py_source/widgets/batch_settings_dialog.dart';
 import 'package:yuanying/modules/py_source/widgets/edit_source_dialog.dart';
 import 'package:yuanying/modules/py_source/widgets/reset_meta_dialog.dart';
 import 'package:yuanying/t4/services/source_manager.dart';
-import 'package:yuanying/modules/setting/models/setting_pref.dart';
 
 class PySourcePage extends StatefulWidget {
   const PySourcePage({super.key});
@@ -33,12 +32,10 @@ class _PySourcePageState extends State<PySourcePage> {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final bgColor = SettingPref.bgActive ? Colors.transparent : colorScheme.surface;
 
     return Obx(() {
       final sel = _ctrl.selectionMode.value;
       return Scaffold(
-        backgroundColor: bgColor,
         appBar: sel ? _buildSelectionAppBar(colorScheme) : _buildAppBar(colorScheme),
         body: Column(
           children: [

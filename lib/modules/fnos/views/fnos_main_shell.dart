@@ -66,10 +66,8 @@ class FnosMainShell extends StatelessWidget {
         final _ = Get.find<BgConfigController>().version.value;
       }
       final bgActive = SettingPref.bgActive;
-      final bgColor = bgActive ? Colors.transparent : colorScheme.surface;
 
       return Scaffold(
-        backgroundColor: bgColor,
         appBar: AppBar(
           leading: IconButton(
             icon: const Icon(Icons.arrow_back_ios_new),
@@ -77,9 +75,6 @@ class FnosMainShell extends StatelessWidget {
             tooltip: '返回服务器列表',
           ),
           title: Text(server.name),
-          backgroundColor: bgColor,
-          foregroundColor: colorScheme.onSurface, // 确保文字颜色随明暗主题变化
-          elevation: 0,
         ),
         body: Obx(() => IndexedStack(
               index: selectedIndex.value,
@@ -97,7 +92,7 @@ class FnosMainShell extends StatelessWidget {
             backgroundColor: bgActive ? Colors.transparent : null,
             surfaceTintColor: bgActive ? Colors.transparent : null,
             height: 56,
-            elevation: 0,
+            elevation: bgActive ? 0 : null,
             selectedIndex: selectedIndex.value,
             onDestinationSelected: (i) => selectedIndex.value = i,
             indicatorColor: Colors.transparent,
@@ -137,7 +132,7 @@ class FnosMainShell extends StatelessWidget {
           );
 
           final compactBottomBar = BottomNavigationBar(
-            elevation: 0, // 去除默认阴影白边
+            elevation: bgActive ? 0 : null,
             backgroundColor: bgActive ? Colors.transparent : null,
             currentIndex: selectedIndex.value,
             onTap: (i) => selectedIndex.value = i,
@@ -159,7 +154,7 @@ class FnosMainShell extends StatelessWidget {
             backgroundColor: bgActive ? Colors.transparent : null,
             surfaceTintColor: bgActive ? Colors.transparent : null,
             height: 70,
-            elevation: 0,
+            elevation: bgActive ? 0 : null,
             selectedIndex: selectedIndex.value,
             onDestinationSelected: (i) => selectedIndex.value = i,
             labelTextStyle: WidgetStateProperty.resolveWith((states) {

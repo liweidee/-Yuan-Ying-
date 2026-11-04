@@ -18,7 +18,6 @@ import 'package:yuanying/modules/plugin_center/widgets/import_package_dialog.dar
 import 'package:yuanying/modules/plugin_center/widgets/market_manage_dialog.dart';
 import 'package:yuanying/modules/plugin_center/widgets/port_clean_dialog.dart';
 import 'package:yuanying/modules/plugin_center/widgets/storage_permission_button.dart';
-import 'package:yuanying/modules/setting/models/setting_pref.dart';
 
 class PluginCenterPage extends StatefulWidget {
   const PluginCenterPage({super.key});
@@ -169,20 +168,12 @@ class _PluginCenterPageState extends State<PluginCenterPage>
     final colorScheme = Theme.of(context).colorScheme;
     final currentIndex = _tabController.index;
 
-    // 动态背景色
-    final bgColor = SettingPref.bgActive ? Colors.transparent : colorScheme.surface;
-
     return Scaffold(
-      backgroundColor: bgColor,
       appBar: AppBar(
         title: const Text(
           '插件中心',
           style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
         ),
-        centerTitle: false,
-        elevation: 0,
-        backgroundColor: bgColor,
-        foregroundColor: colorScheme.onSurface,
         actions: _buildActions(currentIndex),
         bottom: TabBar(
           controller: _tabController,

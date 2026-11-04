@@ -3,7 +3,6 @@ import 'package:get/get.dart';
 import 'package:yuanying/common/widgets/source_filter_sheet.dart';
 import 'package:yuanying/modules/search_result/controllers/search_result_controller.dart';
 import 'package:yuanying/t4/models/video_item.dart';
-import 'package:yuanying/modules/setting/models/setting_pref.dart';
 
 class SearchResultPage extends StatefulWidget {
   const SearchResultPage({super.key});
@@ -27,11 +26,7 @@ class _SearchResultPageState extends State<SearchResultPage> {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
 
-    // 动态背景色
-    final bgColor = SettingPref.bgActive ? Colors.transparent : colorScheme.surface;
-
     return Scaffold(
-      backgroundColor: bgColor,
       body: SafeArea(
         child: Row(
           children: [

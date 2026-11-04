@@ -302,10 +302,6 @@ class _TmdbPersonPageState extends State<TmdbPersonPage> {
           _name ?? '演员详情',
           style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: colorScheme.onSurface),
         ),
-        centerTitle: false,
-        elevation: 0,
-        backgroundColor: colorScheme.surface,
-        foregroundColor: colorScheme.onSurface,
         leading: IconButton(
           icon: Icon(Icons.arrow_back_ios_new, color: colorScheme.onSurface),
           onPressed: () => Get.back(),

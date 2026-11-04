@@ -150,7 +150,7 @@ class _LxMusicPageState extends State<LxMusicPage> {
             backgroundColor: bgActive ? Colors.transparent : null,
             surfaceTintColor: bgActive ? Colors.transparent : null,
             height: 56,
-            elevation: 0,
+            elevation: bgActive ? 0 : null,
             selectedIndex: idx,
             onDestinationSelected: (i) => selectedIndex.value = i,
             indicatorColor: Colors.transparent,
@@ -190,7 +190,7 @@ class _LxMusicPageState extends State<LxMusicPage> {
           );
 
           final compactBottomBar = BottomNavigationBar(
-            elevation: 0, // 去除默认阴影白边
+            elevation: bgActive ? 0 : null,
             backgroundColor: bgActive ? Colors.transparent : null,
             currentIndex: idx,
             onTap: (i) => selectedIndex.value = i,
@@ -212,7 +212,7 @@ class _LxMusicPageState extends State<LxMusicPage> {
             backgroundColor: bgActive ? Colors.transparent : null,
             surfaceTintColor: bgActive ? Colors.transparent : null,
             height: 70,
-            elevation: 0,
+            elevation: bgActive ? 0 : null,
             selectedIndex: idx,
             onDestinationSelected: (i) => selectedIndex.value = i,
             labelTextStyle: WidgetStateProperty.resolveWith((states) {

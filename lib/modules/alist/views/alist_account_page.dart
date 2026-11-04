@@ -15,12 +15,8 @@ class AlistAccountPage extends StatelessWidget {
     final theme = Theme.of(context);
 
     return Scaffold(
-      backgroundColor: theme.colorScheme.surface,
       appBar: AppBar(
         title: const Text('账户管理'),
-        backgroundColor: theme.colorScheme.surface,
-        foregroundColor: theme.colorScheme.onSurface,
-        elevation: 0,
         actions: [
           TextButton(
             onPressed: () => Get.toNamed(AppPages.alistServerConfig),

@@ -71,7 +71,7 @@ class _GroupItem extends StatelessWidget {
           borderRadius: BorderRadius.circular(6),
           onTap: () => controller.selectedGroup.value = group,
           child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12), // 只改这里：8→12
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
             decoration: BoxDecoration(
               color: isSelected
                   ? colorScheme.primaryContainer.withOpacity(0.35)
@@ -79,24 +79,31 @@ class _GroupItem extends StatelessWidget {
               borderRadius: BorderRadius.circular(6),
             ),
             child: Row(
-              mainAxisSize: MainAxisSize.min,
               children: [
-                if (isSelected)
-                  Icon(
+                // 图标始终占位：选中时 opacity 1，未选中 0
+                //   位置和尺寸从不改变 → 文本零位移
+                Opacity(
+                  opacity: isSelected ? 1.0 : 0.0,
+                  child: Icon(
                     Icons.play_circle_filled,
                     color: colorScheme.primary,
                     size: 16,
                   ),
-                if (isSelected) const SizedBox(width: 6),
+                ),
+                const SizedBox(width: 6),
                 Expanded(
                   child: Text(
                     group,
                     style: TextStyle(
                       fontSize: isDesktop ? 13 : 12,
-                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                      color: isSelected ? colorScheme.primary : colorScheme.onSurface,
+                      fontWeight:
+                          isSelected ? FontWeight.w600 : FontWeight.w400,
+                      color: isSelected
+                          ? colorScheme.primary
+                          : colorScheme.onSurface,
                     ),
-                    textAlign: TextAlign.center,
+                    // 左对齐：与右侧频道列表一致
+                    textAlign: TextAlign.left,
                     overflow: TextOverflow.ellipsis,
                     maxLines: 1,
                   ),

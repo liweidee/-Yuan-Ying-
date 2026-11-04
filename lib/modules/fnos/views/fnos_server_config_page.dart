@@ -16,19 +16,13 @@ class FnosServerConfigPage extends StatelessWidget {
     }
     final controller = Get.find<FnosServerController>();
     final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
 
     return Scaffold(
-      // backgroundColor: colorScheme.surface,
       appBar: AppBar(
         title: const Text(
           '飞牛影视服务器',
           style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
         ),
-        centerTitle: false,
-        elevation: 0,
-        // backgroundColor: colorScheme.surface,
-        // foregroundColor: colorScheme.onSurface,
         actions: [
           IconButton(
             onPressed: () => _showAddDialog(context, controller),

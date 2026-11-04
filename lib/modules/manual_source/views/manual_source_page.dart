@@ -12,7 +12,6 @@ import 'package:yuanying/modules/manual_source/models/manual_source_item.dart';
 import 'package:yuanying/modules/manual_source/services/manual_source_scanner.dart';
 import 'package:yuanying/modules/manual_source/widgets/manual_source_edit_dialog.dart';
 import 'package:yuanying/t4/services/source_manager.dart';
-import 'package:yuanying/modules/setting/models/setting_pref.dart';
 
 class ManualSourcePage extends StatefulWidget {
   const ManualSourcePage({super.key});
@@ -37,11 +36,9 @@ class _ManualSourcePageState extends State<ManualSourcePage> {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final bgColor = SettingPref.bgActive ? Colors.transparent : colorScheme.surface;
     return Obx(() {
       final sel = _ctrl.selectionMode.value;
       return Scaffold(
-        backgroundColor: bgColor,
         appBar: sel
             ? _buildSelectionAppBar(colorScheme)
             : _buildAppBar(colorScheme),
@@ -63,8 +60,6 @@ class _ManualSourcePageState extends State<ManualSourcePage> {
     return AppBar(
       title: const Text('手动源管理',
           style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
-      centerTitle: false,
-      elevation: 0,
       actions: [
         Obx(() => _ctrl.loading.value
             ? const Padding(
@@ -102,8 +97,6 @@ class _ManualSourcePageState extends State<ManualSourcePage> {
       ),
       title: Text('已选 $n 项',
           style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
-      centerTitle: false,
-      elevation: 0,
       actions: [
         TextButton(
           onPressed: _ctrl.selectAll,

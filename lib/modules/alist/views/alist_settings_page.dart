@@ -15,12 +15,8 @@ class AlistSettingsPage extends StatelessWidget {
     final server = serverCtrl.currentServer;
 
     return Scaffold(
-      // backgroundColor: cs.surface,
       appBar: AppBar(
         title: const Text('设置'),
-        // backgroundColor: cs.surface,
-        // foregroundColor: cs.onSurface,
-        elevation: 0,
       ),
       body: ListView(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),

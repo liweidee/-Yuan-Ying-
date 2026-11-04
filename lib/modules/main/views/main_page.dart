@@ -90,7 +90,7 @@ class _MainPageState extends State<MainPage> {
           return Scaffold(
             extendBody: true,
             resizeToAvoidBottomInset: false,
-            backgroundColor: bgActive ? Colors.transparent : colorScheme.surface,
+            // backgroundColor: bgActive ? Colors.transparent : colorScheme.surface,
             appBar: AppBar(
               toolbarHeight: 0,
               backgroundColor: Colors.transparent,
@@ -213,7 +213,7 @@ class _MainPageState extends State<MainPage> {
       backgroundColor: SettingPref.bgActive ? Colors.transparent : null,
       surfaceTintColor: SettingPref.bgActive ? Colors.transparent : null,
       height: 56,
-      elevation: 0,
+      elevation: SettingPref.bgActive ? 0 : null,
       selectedIndex: selectedIndex,
       onDestinationSelected: _controller.switchPage,
       indicatorColor: Colors.transparent,
@@ -234,7 +234,7 @@ class _MainPageState extends State<MainPage> {
     );
 
     Widget compactBottomBar = BottomNavigationBar(
-      elevation: 0,
+      elevation: SettingPref.bgActive ? 0 : null,
       backgroundColor: SettingPref.bgActive ? Colors.transparent : null,
       currentIndex: selectedIndex,
       onTap: _controller.switchPage,
@@ -253,7 +253,7 @@ class _MainPageState extends State<MainPage> {
       backgroundColor: SettingPref.bgActive ? Colors.transparent : null,
       surfaceTintColor: SettingPref.bgActive ? Colors.transparent : null,
       height: 70,
-      elevation: 0,
+      elevation: SettingPref.bgActive ? 0 : null,
       selectedIndex: selectedIndex,
       onDestinationSelected: _controller.switchPage,
       labelTextStyle: WidgetStateProperty.resolveWith((states) {
@@ -275,7 +275,7 @@ class _MainPageState extends State<MainPage> {
       backgroundColor: SettingPref.bgActive ? Colors.transparent : null,
       surfaceTintColor: SettingPref.bgActive ? Colors.transparent : null,
       height: 48,
-      elevation: 0,
+      elevation: SettingPref.bgActive ? 0 : null,
       selectedIndex: selectedIndex,
       onDestinationSelected: _controller.switchPage,
       indicatorColor: colorScheme.primaryContainer.withValues(alpha: 0.5),

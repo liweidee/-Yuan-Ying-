@@ -71,7 +71,7 @@ class _NetworkMainShellState extends State<NetworkMainShell> {
                 backgroundColor: SettingPref.bgActive ? Colors.transparent : null,
                 surfaceTintColor: SettingPref.bgActive ? Colors.transparent : null,
                 height: 56,
-                elevation: 0,
+                elevation: SettingPref.bgActive ? 0 : null,
                 selectedIndex: _selectedIndex.value,
                 onDestinationSelected: (i) => _selectedIndex.value = i,
                 indicatorColor: Colors.transparent,
@@ -94,7 +94,7 @@ class _NetworkMainShellState extends State<NetworkMainShell> {
 
             case NavigationBarStyle.defaultCompact:
               bottomBar = BottomNavigationBar(
-                elevation: 0,
+                elevation: SettingPref.bgActive ? 0 : null,
                 backgroundColor: SettingPref.bgActive ? Colors.transparent : null,
                 currentIndex: _selectedIndex.value,
                 onTap: (i) => _selectedIndex.value = i,
@@ -130,7 +130,7 @@ class _NetworkMainShellState extends State<NetworkMainShell> {
                 backgroundColor: SettingPref.bgActive ? Colors.transparent : null,
                 surfaceTintColor: SettingPref.bgActive ? Colors.transparent : null,
                 height: 70,
-                elevation: 0,
+                elevation: SettingPref.bgActive ? 0 : null,
                 selectedIndex: _selectedIndex.value,
                 onDestinationSelected: (i) => _selectedIndex.value = i,
                 labelTextStyle: WidgetStateProperty.resolveWith((states) {

@@ -23,7 +23,6 @@ class JellyfinFavoritePage extends StatelessWidget {
     final theme = Theme.of(context);
 
     return Scaffold(
-      // backgroundColor: theme.colorScheme.surface,
       body: Obx(() {
         // 首次加载
         if (ctrl.isLoading.value && ctrl.items.isEmpty) {
@@ -127,7 +126,7 @@ class JellyfinFavoritePage extends StatelessWidget {
               );
               final videoItem = JellyfinConverter.toVideoItem(item, imageUrl);
 
-              // ★ Stack 包裹：卡片本体 + 右上角取消收藏按钮
+              // Stack 包裹：卡片本体 + 右上角取消收藏按钮
               return Stack(
                 children: [
                   VideoCardV(

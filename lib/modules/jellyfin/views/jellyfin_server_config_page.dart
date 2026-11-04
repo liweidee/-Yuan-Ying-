@@ -19,16 +19,10 @@ class JellyfinServerConfigPage extends StatelessWidget {
     final controller = Get.find<JellyfinServerController>();
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    final bgColor = SettingPref.bgActive ? Colors.transparent : colorScheme.surface;
 
     return Scaffold(
-      backgroundColor: bgColor,
       appBar: AppBar(
         title: const Text('Jellyfin 服务器', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
-        centerTitle: false,
-        elevation: 0,
-        backgroundColor: bgColor,
-        foregroundColor: theme.colorScheme.onSurface,
         actions: [
           IconButton(
             onPressed: () => _showAddDialog(context, controller),

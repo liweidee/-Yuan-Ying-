@@ -24,7 +24,6 @@ import 'package:yuanying/modules/sandbox/widgets/rootfs_install_dialog.dart';
 import 'package:yuanying/modules/sandbox/models/sandbox_pref.dart';
 import 'package:yuanying/modules/sandbox/widgets/rootfs_mirror_picker_dialog.dart';
 import 'package:yuanying/modules/sandbox/widgets/software_source_dialog.dart';
-import 'package:yuanying/modules/setting/models/setting_pref.dart';
 
 class SandboxPage extends StatefulWidget {
   const SandboxPage({super.key});
@@ -400,11 +399,7 @@ class _SandboxPageState extends State<SandboxPage> {
     final colorScheme = theme.colorScheme;
     final topInset = MediaQuery.of(context).padding.top;
 
-    // 动态背景色
-    final bgColor = SettingPref.bgActive ? Colors.transparent : colorScheme.surface;
-
     return Scaffold(
-      backgroundColor: bgColor,
       body: ListView(
         padding: EdgeInsets.fromLTRB(
           Style.safeSpace,

@@ -23,9 +23,6 @@ class SmbServerConfigPage extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         title: const Text('SMB / NAS'),
-        // backgroundColor: cs.surface,
-        // foregroundColor: cs.onSurface,
-        elevation: 0,
         actions: [
           IconButton(
             icon: const Icon(Icons.add),

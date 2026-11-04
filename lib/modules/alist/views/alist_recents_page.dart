@@ -220,12 +220,8 @@ class _AlistRecentsPageState extends State<AlistRecentsPage>
     }
 
     return Scaffold(
-      // backgroundColor: theme.colorScheme.surface,
       appBar: AppBar(
         title: const Text('最近浏览'),
-        // backgroundColor: theme.colorScheme.surface,
-        // foregroundColor: theme.colorScheme.onSurface,
-        elevation: 0,
         actions: [
           Obx(() {
             alistRecentsRefreshTick.value;

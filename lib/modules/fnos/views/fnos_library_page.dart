@@ -47,11 +47,7 @@ class FnosLibraryPage extends StatelessWidget {
     final colorScheme = theme.colorScheme;
 
     return Scaffold(
-      // backgroundColor: colorScheme.surface,
       appBar: AppBar(
-        // backgroundColor: colorScheme.surface,
-        // foregroundColor: colorScheme.onSurface,
-        elevation: 0,
         title: Obx(() => Text(
               ctrl.isFolderMode.value
                   ? ctrl.currentFolderName.value

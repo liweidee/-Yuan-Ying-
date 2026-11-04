@@ -36,73 +36,75 @@ class LiveChannelInfoBar extends StatelessWidget {
         subtitle = '${programme.title} · 剩余 $remainMin 分钟';
       }
 
-      return InkWell(
-        onTap: () => _showEpgSheet(context, ctrl),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          color: colorScheme.surface,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                children: [
-                  // 频道 Logo
-                  ChannelLogo(
-                    url: ctrl.currentLogoUrl,
-                    size: 44,
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          channel.name,
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                            color: colorScheme.onSurface,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          subtitle,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: colorScheme.outline,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
+      // Material 包裹以保留 InkWell 水波纹
+      return Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () => _showEpgSheet(context, ctrl),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    ChannelLogo(
+                      url: ctrl.currentLogoUrl,
+                      size: 44,
                     ),
-                  ),
-                  if (programme != null) ...[
-                    const SizedBox(width: 8),
-                    Icon(
-                      Icons.list_alt_rounded,
-                      size: 20,
-                      color: colorScheme.outline,
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            channel.name,
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: colorScheme.onSurface,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            subtitle,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: colorScheme.outline,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
                     ),
+                    if (programme != null) ...[
+                      const SizedBox(width: 8),
+                      Icon(
+                        Icons.list_alt_rounded,
+                        size: 20,
+                        color: colorScheme.outline,
+                      ),
+                    ],
                   ],
-                ],
-              ),
-              if (programme != null) ...[
-                const SizedBox(height: 6),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(2),
-                  child: LinearProgressIndicator(
-                    value: programme.progressAt(DateTime.now()),
-                    minHeight: 2,
-                    backgroundColor: colorScheme.outline.withOpacity(0.15),
-                    valueColor: AlwaysStoppedAnimation(colorScheme.primary),
-                  ),
                 ),
+                if (programme != null) ...[
+                  const SizedBox(height: 6),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(2),
+                    child: LinearProgressIndicator(
+                      value: programme.progressAt(DateTime.now()),
+                      minHeight: 2,
+                      backgroundColor: colorScheme.outline.withOpacity(0.15),
+                      valueColor: AlwaysStoppedAnimation(colorScheme.primary),
+                    ),
+                  ),
+                ],
               ],
-            ],
+            ),
           ),
         ),
       );
@@ -110,9 +112,8 @@ class LiveChannelInfoBar extends StatelessWidget {
   }
 
   Widget _buildEmpty(BuildContext context, ColorScheme colorScheme, String text) {
-    return Container(
+    return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 18),
-      color: colorScheme.surface,
       child: Text(
         text,
         style: TextStyle(fontSize: 13, color: colorScheme.outline),

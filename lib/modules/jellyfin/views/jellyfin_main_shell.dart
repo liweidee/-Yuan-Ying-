@@ -46,10 +46,8 @@ class JellyfinMainShell extends StatelessWidget {
         final _ = Get.find<BgConfigController>().version.value;
       }
       final bgActive = SettingPref.bgActive;
-      final bgColor = bgActive ? Colors.transparent : colorScheme.surface;
 
       return Scaffold(
-        backgroundColor: bgColor,
         appBar: AppBar(
           leading: IconButton(
             icon: const Icon(Icons.arrow_back_ios_new),
@@ -57,9 +55,6 @@ class JellyfinMainShell extends StatelessWidget {
             tooltip: '返回服务器列表',
           ),
           title: Text(server.name),
-          backgroundColor: bgColor,
-          foregroundColor: colorScheme.onSurface,
-          elevation: 0,
           actions: [
             Obx(() {
               if (selectedIndex.value == 2) {
@@ -98,7 +93,7 @@ class JellyfinMainShell extends StatelessWidget {
             backgroundColor: SettingPref.bgActive ? Colors.transparent : null,
             surfaceTintColor: SettingPref.bgActive ? Colors.transparent : null,
             height: 56,
-            elevation: 0,
+            elevation: SettingPref.bgActive ? 0 : null,
             selectedIndex: selectedIndex.value,
             onDestinationSelected: (index) => selectedIndex.value = index,
             indicatorColor: Colors.transparent,
@@ -119,7 +114,7 @@ class JellyfinMainShell extends StatelessWidget {
           );
 
           final compactBottomBar = BottomNavigationBar(
-            elevation: 0,
+            elevation: SettingPref.bgActive ? 0 : null,
             backgroundColor: SettingPref.bgActive ? Colors.transparent : null,
             currentIndex: selectedIndex.value,
             onTap: (index) => selectedIndex.value = index,
@@ -138,7 +133,7 @@ class JellyfinMainShell extends StatelessWidget {
             backgroundColor: SettingPref.bgActive ? Colors.transparent : null,
             surfaceTintColor: SettingPref.bgActive ? Colors.transparent : null,
             height: 70,
-            elevation: 0,
+            elevation: SettingPref.bgActive ? 0 : null,
             selectedIndex: selectedIndex.value,
             onDestinationSelected: (index) => selectedIndex.value = index,
             labelTextStyle: WidgetStateProperty.resolveWith((states) {
