@@ -1595,7 +1595,12 @@ class FvpEngine implements IPlayerEngine {
         for (final listener in _statusListeners) {
           listener(PlayerStatus.completed);
         }
-        if (autoExitFullscreen && isFullScreen.value) {
+        // 仅在 playRepeat == pause（播完暂停）时自动退出全屏。
+        // 理由同 MediaKitEngine：listOrder / listCycle / singleCycle
+        // 会继续播放，退出全屏会与业务层切集逻辑冲突。
+        if (autoExitFullscreen &&
+            isFullScreen.value &&
+            playRepeat == PlayRepeat.pause) {
           triggerFullScreen(status: false);
         }
       }

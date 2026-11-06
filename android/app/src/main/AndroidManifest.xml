@@ -34,6 +34,7 @@
         <package android:name="dev.aigw.app" />
         <package android:name="dev.raccoon2api" />
         <package android:name="dev.agentmore2api" />
+        <package android:name="com.dsplayer.vm" />
     </queries>
 
     <queries>

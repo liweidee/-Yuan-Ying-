@@ -1932,20 +1932,41 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
     );
 
     if (PlatformUtils.isDesktop) {
-      return Obx(
-        () {
-          final showControls = plPlayerController.showControls.value;
-          final fullScreen = plPlayerController.isFullScreen.value;
-          return MouseRegion(
-            cursor: !showControls && fullScreen
-                ? SystemMouseCursors.none
-                : MouseCursor.defer,
-            onEnter: (_) => plPlayerController.controls = true,
-            onHover: (_) => plPlayerController.controls = true,
-            onExit: (_) => plPlayerController.controls = false,
-            child: child,
-          );
+      // 包裹 Focus，拦截 Esc 键，避免全屏时按下 Esc 直接 pop 路由
+      return Focus(
+        autofocus: true,
+        onKeyEvent: (node, event) {
+          // 仅处理 Esc 键的按下事件
+          if (event is KeyDownEvent &&
+              event.logicalKey == LogicalKeyboardKey.escape) {
+            // 如果存在 SmartDialog 弹窗，不拦截，让弹窗优先处理 Esc（关闭弹窗）
+            if (SmartDialog.checkExist()) {
+              return KeyEventResult.ignored;
+            }
+            final isFullScreen = plPlayerController.isFullScreen.value;
+            if (isFullScreen) {
+              // 全屏时 Esc 退出全屏，并阻止事件冒泡（避免触发路由 pop）
+              plPlayerController.triggerFullScreen(status: false);
+              return KeyEventResult.handled;
+            }
+          }
+          return KeyEventResult.ignored;
         },
+        child: Obx(
+          () {
+            final showControls = plPlayerController.showControls.value;
+            final fullScreen = plPlayerController.isFullScreen.value;
+            return MouseRegion(
+              cursor: !showControls && fullScreen
+                  ? SystemMouseCursors.none
+                  : MouseCursor.defer,
+              onEnter: (_) => plPlayerController.controls = true,
+              onHover: (_) => plPlayerController.controls = true,
+              onExit: (_) => plPlayerController.controls = false,
+              child: child,
+            );
+          },
+        ),
       );
     }
     return child;

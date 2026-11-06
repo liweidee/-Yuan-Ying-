@@ -55,8 +55,12 @@ abstract final class PluginCenterBootstrap {
     });
   }
 
-  /// App 关闭时调用
-  static Future<void> shutdown() async {
-    await ServiceManager.instance.shutdown();
+  /// App 关闭时调用。
+  ///
+  /// [waitForExit] 透传给 ServiceManager.shutdown：
+  /// - true（默认）：等子进程退出后再返回
+  /// - false：发 sigterm 立即返回（主进程即将退出时用）
+  static Future<void> shutdown({bool waitForExit = true}) async {
+    await ServiceManager.instance.shutdown(waitForExit: waitForExit);
   }
 }

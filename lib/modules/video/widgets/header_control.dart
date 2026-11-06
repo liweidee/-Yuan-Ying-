@@ -497,51 +497,15 @@ class _HeaderControlState extends State<HeaderControl> {
   }
 
   void _switchEngine(PlayerEngineType newType) async {
-    final current = PlayerPref.playerEngine;
-    if (newType == current) {
-      SmartDialog.showToast('已是当前内核');
-      return;
-    }
-
-    SmartDialog.showLoading(msg: '切换内核中...');
-
-    try {
-      // 切换前抓取播放进度和播放状态
-      // 抓取时机：pause() 之前，此时 position 已稳定在用户看到的最后一帧
-      final savedPosition = playerController.position;
-      final wasPlaying = playerController.playerStatus.value.isPlaying;
-
-      if (wasPlaying) {
-        await playerController.pause();
-      }
-
-      // 重置数据状态，避免旧引擎的 loaded/error 残留影响新引擎
-      playerController.dataStatus.value = DataStatus.none;
-
-      // 只切换引擎，不恢复数据源
-      // 调用方（本方法）会在切换完成后通过 reloadCurrentEpisode 完整重载
-      await playerController.switchEngine(newType, restoreData: false);
-
-      // 引擎切换完成，关闭「切换内核中」loading，让后续重载的 loading 露出来
-      SmartDialog.dismiss();
-
-      // 传入切换前的进度和播放状态
-      await controller.reloadCurrentEpisode(
-        seekTo: savedPosition,
-        autoPlay: wasPlaying,
-      );
-
-      // 通知详情页 Obx 重新收集 isFullScreen 依赖
-      // （新引擎的 isFullScreen 默认值可能与旧引擎不同）
-      controller.engineSwitchNotifier.value++;
-
-      if (mounted) setState(() {});
-      SmartDialog.showToast(
-        '已切换到 ${newType == PlayerEngineType.fvp ? 'MDK' : 'MPV'} 内核',
-      );
-    } catch (e) {
-      SmartDialog.dismiss();
-      SmartDialog.showToast('切换失败: $e');
+    // 把切换内核的核心逻辑上提到 DetailController.switchPlayerEngine，
+    // 供顶部栏与失败视图（_buildManualPlayerUI）共用。
+    // loading、toast、position/播放状态保存、engineSwitchNotifier 递增
+    // 全部在 switchPlayerEngine 内部完成，这里只负责调用和 UI 刷新。
+    //
+    // autoPlayOverride 不传：沿用"切换前是否在播放"的行为（顶部栏语义）。
+    final success = await controller.switchPlayerEngine(newType);
+    if (success && mounted) {
+      setState(() {});
     }
   }
 }

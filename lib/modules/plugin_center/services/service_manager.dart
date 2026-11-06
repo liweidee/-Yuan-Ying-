@@ -870,6 +870,55 @@ class ServiceManager {
     await _releasePort(serviceId);
   }
 
+  /// 停止服务但不等子进程 exitCode（fire-and-forget）。
+  ///
+  /// 与 `stop()` 的差异：
+  /// - 只发 sigterm，不 await exitCode
+  /// - 100ms 后兜底 sigkill（fire-and-forget），避免进程不响应 sigterm 残留
+  /// - 立即释放状态、端口、PID 文件，不等进程真正退出
+  ///
+  /// 使用场景：桌面端关闭窗口、Android detached 生命周期钩子下，
+  /// 主进程即将退出，不能让 stop 阻塞关闭流程。
+  ///
+  /// 安全性：100ms 后如果 `_processes[serviceId]` 已有新进程（用户重启服务），
+  /// 跳过 sigkill 避免误杀新进程。
+  Future<void> _stopWithoutWaiting(String serviceId) async {
+    _stopHealthCheck(serviceId);
+    final process = _processes.remove(serviceId);
+    final config = find(serviceId);
+
+    if (process == null) {
+      _setStatus(serviceId, ServiceStatus.stopped, pid: null);
+      if (config != null) await _deletePidFile(config);
+      await _releasePort(serviceId);
+      return;
+    }
+
+    _setStatus(serviceId, ServiceStatus.stopped, pid: null);
+
+    // 发 sigterm，让进程有机会优雅退出
+    try {
+      process.kill(ProcessSignal.sigterm);
+    } catch (_) {}
+
+    // 100ms 后兜底 sigkill（fire-and-forget）。
+    // 100ms 给 node/php/python 等服务类进程足够时间响应 sigterm 优雅退出；
+    // 不响应的进程会被 sigkill 强杀，避免占用端口残留到下次启动。
+    // 极端情况（Dart isolate 在 100ms 内被销毁）定时器不执行：
+    //   Windows 有 PortCleaner 兜底，Android 下次启动时用户可手动清理。
+    Future.delayed(const Duration(milliseconds: 100), () {
+      // 用户已经重新启动该服务 → 新进程已占用 serviceId，不杀
+      if (_processes.containsKey(serviceId)) return;
+      try {
+        process.kill(ProcessSignal.sigkill);
+      } catch (_) {}
+    });
+
+    _appendLog(serviceId, '[proc] stop requested (no wait)');
+    if (config != null) await _deletePidFile(config);
+    await _releasePort(serviceId);
+  }
+
   // ============================================================
   // 自启动 & 关闭
   // ============================================================
@@ -930,9 +979,18 @@ class ServiceManager {
     }
   }
 
-  Future<void> shutdown() async {
+  /// 关闭所有非 keepForeground 服务。
+  ///
+  /// [waitForExit]：
+  /// - true（默认）：等每个子进程 exitCode 后再返回。适合"关闭前需要确认
+  ///   所有子进程已退出"的场景（如手动触发的清理、桌面端关闭前的完整清理）。
+  /// - false：只发 sigterm 立即返回，100ms 后兜底 sigkill（fire-and-forget）。
+  ///   适合"主进程即将退出，不能让关闭阻塞"的场景（Windows 窗口关闭、
+  ///   Android detached 生命周期钩子）。
+  Future<void> shutdown({bool waitForExit = true}) async {
     _isShuttingDown = true;
     final list = getAll();
+    final futures = <Future<void>>[];
     for (final config in list) {
       final runtimePlugin =
           InstallManager.instance.findInstalled(config.runtime);
@@ -940,12 +998,21 @@ class ServiceManager {
           config.runtime == 'custom' ||
               (runtimePlugin != null && runtimePlugin.enabled);
 
+      // keepForeground 且运行时插件仍活跃 → 用户刻意保留的常驻服务，跳过
       if (config.keepForeground && pluginActive) continue;
 
-      try {
-        await stop(config.id);
-      } catch (_) {}
+      final future = waitForExit
+          ? stop(config.id).catchError((e) {
+              debugPrint(
+                  '[ServiceManager] shutdown stop ${config.id} failed: $e');
+            })
+          : _stopWithoutWaiting(config.id).catchError((e) {
+              debugPrint(
+                  '[ServiceManager] shutdown stop ${config.id} failed: $e');
+            });
+      futures.add(future);
     }
+    await Future.wait(futures);
     // 防御性清空端口表（stop 已逐项释放，这里兜底）
     await _portLock.synchronized(() => _portOwners.clear());
   }

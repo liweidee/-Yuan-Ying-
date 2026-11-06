@@ -806,7 +806,15 @@ class MediaKitEngine implements IPlayerEngine {
           for (final element in _statusListeners) {
             element(PlayerStatus.completed);
           }
-          if (PlayerPref.autoExitFullscreen && isFullScreen.value) {
+          // 仅在 playRepeat == pause（播完暂停）时自动退出全屏。
+          // 原因：listOrder / listCycle / singleCycle 都会在 completed 后
+          // 继续播放（切下一集或单集循环），此时引擎层退出全屏会与
+          // 业务层 _handlePlayCompleted 的自动切集逻辑冲突，导致用户
+          // 全屏状态下播完一集被强制退出全屏。
+          // pause 模式下播完就是真"结束"，退出全屏符合 autoExitFullscreen 预期。
+          if (PlayerPref.autoExitFullscreen &&
+              isFullScreen.value &&
+              playRepeat == PlayRepeat.pause) {
             triggerFullScreen(status: false);
           }
         }

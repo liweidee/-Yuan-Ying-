@@ -25,7 +25,7 @@ class VideoCardH extends StatelessWidget {
       onTap: onTap,  // 使用外部回调
       behavior: HitTestBehavior.opaque,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        padding: const EdgeInsets.symmetric(vertical: 6),
         child: Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(

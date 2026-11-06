@@ -1800,40 +1800,46 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     if (_isHandlingCompletion) return;
     _isHandlingCompletion = true;
     try {
-      final repeat = playerController.playRepeat;  // 不是 Rx，直接取值
+      final repeat = playerController.playRepeat;
       switch (repeat) {
         case PlayRepeat.singleCycle:
-          // 单集循环：从头开始重播
           await playerController.seekTo(Duration.zero);
           await playerController.play();
           break;
         case PlayRepeat.listOrder:
-          // 顺序播放：尝试下一集，若无则暂停并提示
           final success = await playNext();
           if (!success) {
             await playerController.pause();
             SmartDialog.showToast('已经是最后一集');
+            // 确实无法继续播放时，按 autoExitFullscreen 退出全屏
+            // （引擎层已经在 playRepeat == pause 时自动退出，这里补上
+            //  listOrder 最后一集的边界场景）
+            if (PlayerPref.autoExitFullscreen &&
+                playerController.isFullScreen.value) {
+              await playerController.triggerFullScreen(status: false);
+            }
           }
           break;
         case PlayRepeat.listCycle:
-          // 列表循环：尝试下一集，若无则回到第一集
           final success = await playNext();
           if (!success) {
             final episodes = introController.displayEpisodes;
             if (episodes.isNotEmpty) {
-              // 关键：必须 await，让 _handlePlayCompleted 的锁覆盖整个切集流程。
-              // 否则 switchEpisode 内部异步执行时会提前释放锁，
-              // 残留的 completed 事件会再次进入本方法，导致跳到第二集。
               await switchEpisode(0);
             } else {
               await playerController.pause();
+              // 列表为空时（极端场景），按 autoExitFullscreen 退出全屏
+              if (PlayerPref.autoExitFullscreen &&
+                  playerController.isFullScreen.value) {
+                await playerController.triggerFullScreen(status: false);
+              }
             }
           }
           break;
         case PlayRepeat.pause:
-          // 播完暂停：不进行任何自动切换，仅暂停（但已经是完成状态，暂停即可）
           await playerController.pause();
           SmartDialog.showToast('播放已结束');
+          // 退出全屏由引擎层处理（playRepeat == pause 分支）
           break;
         default:
           break;
@@ -2820,6 +2826,86 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
   //     index: index,
   //   );
   // }
+
+  // ===== 内核切换 =====
+  /// 切换内核防重入标志
+  bool _isSwitchingEngine = false;
+
+  /// 切换播放器内核（含 loading、进度/播放状态保留、reload 当前剧集）
+  ///
+  /// 供顶部栏 [HeaderControl] 与失败视图 [DetailPage._buildManualPlayerUI] 共用。
+  ///
+  /// [autoPlayOverride] 可选：控制切换后是否自动播放。
+  /// - `null`（默认）：沿用切换前的播放状态（顶部栏行为）
+  /// - `true`：强制自动播放（失败视图行为——用户点切换即期望能播放）
+  /// - `false`：强制不播放
+  ///
+  /// 返回 `true` 表示切换流程完成（不代表新内核播放一定成功，
+  /// 播放结果由 reloadCurrentEpisode 内部的失败处理决定）。
+  Future<bool> switchPlayerEngine(
+    PlayerEngineType newType, {
+    bool? autoPlayOverride,
+  }) async {
+    // 防重入：避免用户快速连续点击或其它途径重复触发
+    if (_isSwitchingEngine) return false;
+
+    final current = PlayerPref.playerEngine;
+    if (newType == current) {
+      SmartDialog.showToast('已是当前内核');
+      return false;
+    }
+
+    _isSwitchingEngine = true;
+    SmartDialog.showLoading(msg: '切换内核中...');
+
+    try {
+      // 切换前抓取播放进度
+      // 抓取时机：pause() 之前，此时 position 已稳定在用户看到的最后一帧
+      final savedPosition = playerController.position;
+
+      // 决定切换后是否自动播放：
+      // - 未传 autoPlayOverride 时沿用当前播放状态（顶部栏切换语义）
+      // - 传入时强制覆盖（失败视图传 true，让新内核尝试自动播放）
+      final shouldAutoPlay =
+          autoPlayOverride ?? playerController.playerStatus.value.isPlaying;
+
+      // 暂停当前播放器
+      if (playerController.playerStatus.value.isPlaying) {
+        await playerController.pause();
+      }
+
+      // 重置数据状态，避免旧引擎的 loaded/error 残留影响新引擎
+      playerController.dataStatus.value = DataStatus.none;
+
+      // 只切换引擎，不恢复数据源
+      // 切换完成后由下方 reloadCurrentEpisode 完整重载
+      await playerController.switchEngine(newType, restoreData: false);
+
+      // 关闭「切换内核中」loading，让后续重载的 loading 露出来
+      SmartDialog.dismiss();
+
+      // 传入切换前的进度和是否自动播放
+      await reloadCurrentEpisode(
+        seekTo: savedPosition,
+        autoPlay: shouldAutoPlay,
+      );
+
+      // 通知详情页 Obx 重新收集 isFullScreen 依赖
+      // （新引擎的 isFullScreen 默认值可能与旧引擎不同）
+      engineSwitchNotifier.value++;
+
+      SmartDialog.showToast(
+        '已切换到 ${newType == PlayerEngineType.fvp ? 'MDK' : 'MPV'} 内核',
+      );
+      return true;
+    } catch (e) {
+      SmartDialog.dismiss();
+      SmartDialog.showToast('切换失败: $e');
+      return false;
+    } finally {
+      _isSwitchingEngine = false;
+    }
+  }
 
   Future<void> switchDecodeFormat(String format) async {
     PlayerPref.hardwareDecoding = format;

@@ -31,7 +31,7 @@ class CategoryPage extends StatefulWidget {
 class _CategoryPageState extends State<CategoryPage>
     with AutomaticKeepAliveClientMixin {
   // 由 late final 改为 late：didUpdateWidget 里会重新赋值，
-  // late final 二次赋值会抛 LateInitializationError（原代码已有此隐患）
+  // late final 二次赋值会抛 LateInitializationError
   late CategoryController ctrl;
   final HomeController homeController = Get.find<HomeController>();
 

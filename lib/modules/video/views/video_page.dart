@@ -236,6 +236,50 @@ class _DetailPageState extends State<DetailPage>
               ],
             ),
             actions: [
+              // 内核切换按钮
+              // 失败视图会覆盖 HeaderControl（因为 autoPlay == false 时显示此视图），
+              // 用户无法通过顶部栏切内核。增加这个按钮让用户在失败视图直接
+              // 切换内核重试，无需退出详情页重新进入。
+              // - 显示当前内核（MDK / MPV），点击直接切到另一个
+              // - 传 autoPlayOverride: true：失败视图里用户点切换即期望能播放，
+              //   不像顶部栏那样沿用"切换前是否在播放"的状态
+              // - 复用 DetailController.switchPlayerEngine，行为与顶部栏完全一致
+              IconButton(
+                tooltip: '切换播放内核',
+                style: const ButtonStyle(
+                  padding: WidgetStatePropertyAll(EdgeInsets.zero),
+                ),
+                onPressed: () {
+                  final newType = PlayerPref.playerEngine == PlayerEngineType.fvp
+                      ? PlayerEngineType.mediaKit
+                      : PlayerEngineType.fvp;
+                  controller.switchPlayerEngine(
+                    newType,
+                    autoPlayOverride: true,
+                  );
+                },
+                icon: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.play_arrow, size: 14, color: Colors.white),
+                      const SizedBox(width: 2),
+                      Text(
+                        PlayerPref.playerEngine == PlayerEngineType.fvp
+                            ? 'MDK'
+                            : 'MPV',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
               PopupMenuButton(
                 tooltip: '更多功能',
                 icon: const Icon(Icons.more_vert, size: 22, color: Colors.white),
