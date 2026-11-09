@@ -12,6 +12,7 @@ import 'package:yuanying/core/theme/style.dart';
 import 'package:yuanying/modules/plugin_center/services/install_manager.dart';
 import 'package:yuanying/modules/sandbox/models/sandbox_service.dart';
 import 'package:yuanying/modules/sandbox/models/sandbox_service_state.dart';
+import 'package:yuanying/modules/sandbox/services/proot_launcher.dart';
 import 'package:yuanying/modules/sandbox/services/rootfs_manager.dart';
 import 'package:yuanying/modules/sandbox/services/sandbox_service_manager.dart';
 import 'package:yuanying/modules/sandbox/services/sandbox_service_store.dart';
@@ -197,8 +198,14 @@ class _SandboxPageState extends State<SandboxPage> {
   // ============================================================
   // 终端
   // ============================================================
+
+  /// 启动终端
+  ///
+  /// 流程：
+  ///   1. probe：验证 proot 能执行（区分「环境不可用」与「shell 启动后退出」）
+  ///   2. ShellSession.start
+  ///   3. onExit：正常退出清空 UI；异常退出保留终端内容便于诊断
   Future<void> _startTerminal() async {
-    // 启动期间用独立锁拦截双击
     if (_startingTerminal) return;
     if (_terminalActive && _session != null) return;
     final distroId = _installedDistro;
@@ -206,22 +213,54 @@ class _SandboxPageState extends State<SandboxPage> {
 
     _startingTerminal = true;
     try {
+      // ===== 前置 probe =====
+      final probe = await ProotLauncher.probe(distroId);
+      if (!probe.ok) {
+        final errText = probe.stderr.trim();
+        final firstLine =
+            errText.isEmpty ? '（无错误输出）' : errText.split('\n').first;
+        SmartDialog.showToast('沙盒环境不可用：$firstLine');
+        debugPrint('[SandboxPage] probe stdout: ${probe.stdout}');
+        debugPrint('[SandboxPage] probe stderr: ${probe.stderr}');
+        return;
+      }
+
+      // ===== 启动 shell =====
       final session = await ShellSession.start(
         distroId: distroId,
         onOutput: (chunk) {
           _terminalBuffer.write(chunk);
           _scrollToBottom();
         },
-        onExit: (code) {
+        onExit: (code, stderrTail) {
           if (!mounted) return;
-          setState(() {
-            _terminalActive = false;
-            _session = null;
-          });
-          _terminalBuffer.write('\n[会话已结束，退出码 $code]\n');
-          _scrollToBottom();
+          if (code != 0) {
+            // 异常退出：保留终端 UI 显示真实错误，同时释放 _session
+            // （避免 _sendCommand 往已关闭的 stdin 写入）
+            final detail =
+                stderrTail.isEmpty ? '' : '\n最近错误：\n${stderrTail.join('\n')}';
+            _terminalBuffer.write(
+              '\n[会话异常退出，code=$code]$detail\n'
+              '\n点「结束」可关闭终端，之后可重新启动。\n',
+            );
+            _scrollToBottom();
+            SmartDialog.showToast('终端异常退出（code=$code），详见终端内容');
+            setState(() {
+              _session = null;
+              // _terminalActive 保持 true，终端 UI 继续显示
+            });
+          } else {
+            // 正常退出：清空状态，UI 回到「未启动」
+            _terminalBuffer.write('\n[会话正常结束]\n');
+            _scrollToBottom();
+            setState(() {
+              _session = null;
+              _terminalActive = false;
+            });
+          }
         },
       );
+
       if (!mounted) {
         await session.dispose();
         return;
@@ -232,7 +271,10 @@ class _SandboxPageState extends State<SandboxPage> {
         _terminalBuffer.clear();
       });
     } catch (e) {
-      SmartDialog.showToast('启动失败：$e');
+      debugPrint('[SandboxPage] _startTerminal error: $e');
+      if (mounted) {
+        SmartDialog.showToast('启动失败：$e');
+      }
     } finally {
       _startingTerminal = false;
     }
@@ -240,15 +282,17 @@ class _SandboxPageState extends State<SandboxPage> {
 
   Future<void> _endTerminal() async {
     final s = _session;
-    if (s == null) return;
-    s.write('exit\n');
-    await Future.delayed(const Duration(milliseconds: 300));
-    s.kill();
-    await s.dispose();
+    if (s != null) {
+      s.write('exit\n');
+      await Future.delayed(const Duration(milliseconds: 300));
+      s.kill();
+      await s.dispose();
+    }
     if (!mounted) return;
     setState(() {
       _session = null;
       _terminalActive = false;
+      _terminalBuffer.clear();
     });
   }
 
@@ -822,7 +866,6 @@ class _SandboxPageState extends State<SandboxPage> {
                   icon: const Icon(Icons.add, size: 18),
                   label: const Text('自定义'),
                 ),
-                // 导入项目
                 OutlinedButton.icon(
                   onPressed: enabled ? _importProject : null,
                   icon: const Icon(Icons.folder_open, size: 18),

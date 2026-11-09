@@ -4,6 +4,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
+
 import 'package:yuanying/modules/plugin_center/services/install_manager.dart';
 import 'package:yuanying/modules/sandbox/services/sandbox_paths.dart';
 
@@ -25,6 +26,15 @@ class ProotEnv {
 }
 
 /// PRoot 启动器
+///
+/// 从 files/plugins/proot/bin/ 加载，依赖：
+///   - targetSdk <= 28（与 DsPlayer 一致），系统不强制执行 W^X 限制
+///   - 插件安装时 4 个 .so 已落到 files/plugins/proot/bin/
+///   - 首次启动前对 4 个 .so 做幂等 chmod 755
+///   - loader 通过 SONAME "libtalloc.so.2" 链接；若插件包只提供
+///     libtalloc.so 而没有 .so.2 副本，首次启动会报
+///     "CANNOT LINK EXECUTABLE ... library 'libtalloc.so.2' not found"，
+///     这里会幂等地补一份副本
 abstract final class ProotLauncher {
   /// 解析 PRoot 环境（要求 proot 插件已安装）
   ///
@@ -33,8 +43,10 @@ abstract final class ProotLauncher {
   ///  - .so 文件不存在（安装损坏）
   ///
   /// 副作用（Android）：
-  ///  - 幂等 chmod 755 四件套（exec / loader / talloc / shmem）
+  ///  - 幂等 chmod 755 四件套
   ///    插件安装时 archive 不保留可执行位，必须在这里补
+  ///  - 幂等补 libtalloc.so.2 副本
+  ///    插件包若只提供 libtalloc.so，loader 会因 SONAME 缺失而失败
   static Future<ProotEnv?> resolve(String distroId) async {
     final plugin = InstallManager.instance.findInstalled('proot');
     if (plugin == null || !plugin.enabled) return null;
@@ -78,6 +90,24 @@ abstract final class ProotLauncher {
           } catch (e) {
             debugPrint('[ProotLauncher] chmod $path failed: $e');
           }
+        }
+      }
+
+      // ===== 补全 libtalloc.so.2 依赖 =====
+      // proot 的 loader 通过 SONAME "libtalloc.so.2" 链接。
+      // 若插件包只提供 libtalloc.so（无 .so.2 副本），首次启动会报：
+      //   CANNOT LINK EXECUTABLE ".../libproot_exec.so":
+      //   library "libtalloc.so.2" not found
+      // 这里幂等地补一份 .so.2 副本（仅当 .so 存在且 .so.2 缺失时执行）。
+      final talloc = File(p.join(execDir, 'libtalloc.so'));
+      final talloc2 = File(p.join(execDir, 'libtalloc.so.2'));
+      if (talloc.existsSync() && !talloc2.existsSync()) {
+        try {
+          await talloc.copy(talloc2.path);
+          await Process.run('chmod', ['755', talloc2.path]);
+          debugPrint('[ProotLauncher] 已补 libtalloc.so.2 副本');
+        } catch (e) {
+          debugPrint('[ProotLauncher] 复制 libtalloc.so.2 失败: $e');
         }
       }
     }
@@ -140,8 +170,7 @@ abstract final class ProotLauncher {
       // /storage/emulated/0 对普通 App 在 Android 11+ 需要 MANAGE_EXTERNAL_STORAGE，
       // 但即使未授权 bind 也会成功（只是空目录），不会让 proot 崩，
       // 用户进入后 ls 发现是空的就知道要去授权。
-      if (Platform.isAndroid)
-        '--bind=/storage/emulated/0:/mnt/sdcard',
+      if (Platform.isAndroid) '--bind=/storage/emulated/0:/mnt/sdcard',
 
       ...innerCommand,
     ];
@@ -164,13 +193,45 @@ abstract final class ProotLauncher {
   }
 
   /// 探测：用最小命令验证 PRoot 能跑（首次启动前用）
+  ///
+  /// 相比 runOnce，本方法把「resolve 失败」与「proot 执行失败」区分开，
+  /// 给出更精确的错误信息。
   static Future<({bool ok, String stdout, String stderr})> probe(
     String distroId,
   ) async {
     try {
-      final r = await runOnce(
-        distroId: distroId,
-        command: ['/bin/sh', '-c', 'echo PROOT_OK && uname -m'],
+      final plugin = InstallManager.instance.findInstalled('proot');
+      if (plugin == null) {
+        return (
+          ok: false,
+          stdout: '',
+          stderr: 'proot 插件未安装。请到插件中心 → 市场 → 安装 Linux 沙盒运行时（PRoot）。',
+        );
+      }
+      if (!plugin.enabled) {
+        return (
+          ok: false,
+          stdout: '',
+          stderr: 'proot 插件已禁用。请到插件中心 → 插件 Tab → 启用 proot 插件。',
+        );
+      }
+
+      final env = await resolve(distroId);
+      if (env == null) {
+        return (
+          ok: false,
+          stdout: '',
+          stderr: 'proot 环境解析失败：找不到 libproot_exec.so 或 '
+              'libproot_loader.so。请卸载后从市场重装 proot 插件。',
+        );
+      }
+
+      final r = await Process.run(
+        env.prootExec,
+        buildArgs(env, ['/bin/sh', '-c', 'echo PROOT_OK && uname -m']),
+        environment: buildEnv(env),
+        stdoutEncoding: const Utf8Codec(allowMalformed: true),
+        stderrEncoding: const Utf8Codec(allowMalformed: true),
       );
       return (
         ok: r.exitCode == 0 && (r.stdout as String).contains('PROOT_OK'),

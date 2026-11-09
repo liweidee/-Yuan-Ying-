@@ -61,6 +61,7 @@ import 'package:yuanying/plugin/pl_player/player_pref.dart';
 import 'package:canvas_danmaku/canvas_danmaku.dart';
 import 'package:easy_debounce/easy_throttle.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:yuanying/utils/android_pip_helper.dart';
 
 /// 视频播放器主界面
 class PLVideoPlayer extends StatefulWidget {
@@ -74,6 +75,7 @@ class PLVideoPlayer extends StatefulWidget {
     this.danmuWidget,
     this.fill = Colors.black,
     this.alignment = Alignment.center,
+    this.interactive = true,
     super.key,
   });
 
@@ -81,14 +83,15 @@ class PLVideoPlayer extends StatefulWidget {
   final double maxHeight;
   final PlPlayerController plPlayerController;
   final Widget headerControl;
-  final String controllerTag; // ===== 新增 =====
+  final String controllerTag;
   final Widget? bottomControl;
   final Widget? danmuWidget;
   final Color fill;
   final Alignment alignment;
+  final bool interactive;
 
   @override
-  State<PLVideoPlayer> createState() => _PLVideoPlayerState(); // ===== 修复：补回 createState =====
+  State<PLVideoPlayer> createState() => _PLVideoPlayerState();
 }
 
 /// 剧集导航按钮类型
@@ -326,6 +329,14 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
       ),
       trackpadScrollCausesScale: false,
     );
+
+    if (Platform.isAndroid) {
+      AndroidPipHelper.isPipActive.addListener(_onPipStateChanged);
+    }
+  }
+
+  void _onPipStateChanged() {
+    if (mounted) setState(() {});
   }
 
   @override
@@ -373,6 +384,11 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
   @override
   void dispose() {
     print('🔴 PLVideoPlayer dispose');
+
+    if (Platform.isAndroid) {
+      AndroidPipHelper.isPipActive.removeListener(_onPipStateChanged);
+    }
+
     removeObserverMobile(this);
     _danmakuListener?.cancel();
     _removeDmAction();
@@ -1186,6 +1202,16 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
   @override
   Widget build(BuildContext context) {
     debugPrint('[PLVideoPlayer] build called, engine=${PlayerPref.playerEngine}');
+
+    // PiP 模式下只渲染视频画面，隐藏所有 UI 层（控制栏、弹幕、字幕、
+    // 手势层、进度条、加载动画等）。非 PiP 状态直接走下方原有完整逻辑。
+    if (Platform.isAndroid && AndroidPipHelper.isPipActive.value) {
+      return ColoredBox(
+        color: widget.fill,
+        child: _buildPipVideoOnly(),
+      );
+    }
+
     maxWidth = widget.maxWidth;
     maxHeight = widget.maxHeight;
     final isFullScreen = this.isFullScreen;
@@ -1205,7 +1231,9 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
       key: _playerKey,
       children: <Widget>[
         // ----- 视频层 -----
-        _videoWidget,
+        widget.interactive
+            ? _videoWidget
+            : IgnorePointer(child: _videoWidget),
 
         // ----- 弹幕层 -----
         if (widget.danmuWidget case final danmaku?)
@@ -2013,6 +2041,17 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
         ),
       ),
     );
+  }
+
+  Widget _buildPipVideoOnly() {
+    return Obx(() {
+      final fit = plPlayerController.videoFit.value;
+      return plPlayerController.buildVideoWidget(
+        fit: fit.boxFit,
+        flipX: plPlayerController.flipX.value,
+        flipY: plPlayerController.flipY.value,
+      );
+    });
   }
 }
 

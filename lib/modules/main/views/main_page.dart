@@ -78,7 +78,7 @@ class _MainPageState extends State<MainPage> {
       final useBottomNav = _controller.useBottomNav.value;
       final selectedIndex = _controller.selectedIndex.value;
       final navigationBars = _controller.navigationBars;
-      final isWebFullscreen = _controller.isWebFullscreen.value; // ★
+      final isWebFullscreen = _controller.isWebFullscreen.value;
 
       return PopScope(
         // 全屏时禁止直接 pop，先由 onPopInvoked 退出全屏

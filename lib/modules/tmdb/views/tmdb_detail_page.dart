@@ -938,11 +938,18 @@ class _TmdbDetailPageState extends State<TmdbDetailPage> {
   }
 
   /// 从相似推荐卡片跳转到新的 TMDB 详情页
-  void _navigateToTmdbDetail(Map<String, dynamic> item) {
+  ///
+  /// [explicitMediaType] 用于调用方明确知道类型时（如：similar 接口不返回
+  /// media_type，必须由当前详情页的类型继承），优先级最高。
+  void _navigateToTmdbDetail(
+    Map<String, dynamic> item, {
+    String? explicitMediaType,
+  }) {
     final title = item['title'] as String? ?? item['name'] as String? ?? '';
     final tmdbId = item['id'] as int?;
     final posterPath = item['poster_path'] as String?;
-    final mediaType = item['media_type'] as String? ?? 'movie';
+    final mediaType =
+        explicitMediaType ?? item['media_type'] as String? ?? 'movie';
 
     if (tmdbId == null) {
       SmartDialog.showToast('无法获取影片信息');
@@ -970,6 +977,10 @@ class _TmdbDetailPageState extends State<TmdbDetailPage> {
         tmdbId: tmdbId,
         mediaType: mediaType,
       ),
+      // 允许从 TmdbDetailPage 跳转到另一个 TmdbDetailPage。
+      // GetX 默认 preventDuplicates=true，会静默取消相同路由的 push，
+      // 导致从详情页点击"相似推荐"时无任何反应（不抛异常、日志正常）
+      preventDuplicates: false,
     );
   }
 
@@ -1171,6 +1182,7 @@ class _TmdbDetailPageState extends State<TmdbDetailPage> {
     final colorScheme = theme.colorScheme;
 
     return Scaffold(
+      backgroundColor: colorScheme.surface,
       extendBodyBehindAppBar: true,
       body: _isLoading
           ? Center(child: CircularProgressIndicator(color: colorScheme.primary))
@@ -1814,17 +1826,26 @@ class _TmdbDetailPageState extends State<TmdbDetailPage> {
                       separatorBuilder: (_, __) => const SizedBox(width: 10),
                       itemBuilder: (context, index) {
                         final item = _similar![index];
-                        final title = item['title'] as String? ?? item['name'] as String? ?? '';
+                        final title = item['title'] as String? ??
+                            item['name'] as String? ??
+                            '';
                         final poster = item['poster_path'] as String?;
-                        final releaseDate = item['release_date'] as String? ?? item['first_air_date'] as String?;
+                        final releaseDate = item['release_date'] as String? ??
+                            item['first_air_date'] as String?;
 
                         return GestureDetector(
+                          behavior: HitTestBehavior.opaque,
                           onTap: () {
-                            if (item.isNotEmpty) {
-                              _navigateToTmdbDetail(item);
-                            } else {
-                              SmartDialog.showToast('无法获取影片信息');
-                            }
+                            debugPrint(
+                                '[TMDB-Detail] similar card tapped, index=$index');
+                            // 去掉了原版 if (item.isNotEmpty) 的判断——
+                            // 日志已确认 item 是正常 Map，非空判断是多余的，
+                            // 反而在 item 意外为空时只弹 Toast 不进入方法，
+                            // 掩盖了真正的错误路径。
+                            _navigateToTmdbDetail(
+                              item,
+                              explicitMediaType: _mediaType,
+                            );
                           },
                           child: SizedBox(
                             width: 120,
@@ -1836,10 +1857,13 @@ class _TmdbDetailPageState extends State<TmdbDetailPage> {
                                   child: Container(
                                     width: 120,
                                     height: 160,
-                                    color: colorScheme.surfaceContainerHighest,
-                                    child: poster != null && poster.isNotEmpty
+                                    color:
+                                        colorScheme.surfaceContainerHighest,
+                                    child: poster != null &&
+                                            poster.isNotEmpty
                                         ? Image.network(
-                                            _getImageUrl(poster, size: 'w185'),
+                                            _getImageUrl(poster,
+                                                size: 'w185'),
                                             fit: BoxFit.cover,
                                             errorBuilder: (_, __, ___) => Icon(
                                               Icons.movie,
@@ -1847,7 +1871,9 @@ class _TmdbDetailPageState extends State<TmdbDetailPage> {
                                               color: colorScheme.outline,
                                             ),
                                           )
-                                        : Icon(Icons.movie, size: 30, color: colorScheme.outline),
+                                        : Icon(Icons.movie,
+                                            size: 30,
+                                            color: colorScheme.outline),
                                   ),
                                 ),
                                 const SizedBox(height: 4),
@@ -1861,7 +1887,8 @@ class _TmdbDetailPageState extends State<TmdbDetailPage> {
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),
-                                if (releaseDate != null && releaseDate.isNotEmpty)
+                                if (releaseDate != null &&
+                                    releaseDate.isNotEmpty)
                                   Text(
                                     releaseDate.split('-').first,
                                     style: TextStyle(

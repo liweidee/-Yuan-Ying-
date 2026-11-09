@@ -3,6 +3,7 @@ import 'package:hive_ce/hive.dart';
 import 'package:yuanying/core/constants/storage_keys.dart';
 import 'package:yuanying/utils/storage.dart';
 import 'package:yuanying/plugin/pl_player/models/external_player_type.dart';
+import 'package:yuanying/modules/danmaku/models/danmaku_color_palette.dart';
 
 /// 播放器内核类型
 ///
@@ -293,6 +294,44 @@ class PlayerPref {
   // 弹幕颜色模式：0=默认（使用原始颜色），1=随机彩色，2=渐变彩色
   static int get danmakuColorMode => _box.get('danmakuColorMode', defaultValue: 0);
   static set danmakuColorMode(int value) => _box.put('danmakuColorMode', value);
+
+  // ===== 弹幕颜色色盘 =====
+  /// 随机彩色色盘：每个元素是单色 `#RRGGBB`
+  ///
+  /// 三态语义：
+  /// - null（从未写过）→ 懒初始化为默认预设并落盘
+  /// - []（用户主动清空）→ 运行时回退完全随机
+  /// - 非空 List（用户自定义）→ 直接用
+  static List<String> get danmakuRandomColors {
+    final raw = _box.get('danmakuRandomColors');
+    if (raw == null) {
+      final defaults =
+          List<String>.from(DanmakuColorPalette.defaultRandomColors);
+      _box.put('danmakuRandomColors', defaults);
+      return defaults;
+    }
+    return (raw as List).map((e) => e.toString()).toList();
+  }
+
+  static set danmakuRandomColors(List<String> value) =>
+      _box.put('danmakuRandomColors', value);
+
+  /// 渐变基色色盘：每个元素是 `#RRGGBB|#RRGGBB`（起始|结束）
+  ///
+  /// 旧数据若为单色 `#RRGGBB`，`DanmakuColorPalette.parsePair` 会自动视为 start=end
+  static List<String> get danmakuGradientColors {
+    final raw = _box.get('danmakuGradientColors');
+    if (raw == null) {
+      final defaults =
+          List<String>.from(DanmakuColorPalette.defaultGradientColors);
+      _box.put('danmakuGradientColors', defaults);
+      return defaults;
+    }
+    return (raw as List).map((e) => e.toString()).toList();
+  }
+
+  static set danmakuGradientColors(List<String> value) =>
+      _box.put('danmakuGradientColors', value);
 
   // ===== MDK 内核缓冲配置 =====
   /// 最小缓冲时长（毫秒），默认 1000

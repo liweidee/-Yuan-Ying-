@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:yuanying/common/widgets/custom_icon.dart';
@@ -488,7 +489,7 @@ class _DetailPageState extends State<DetailPage>
     // Sliver 头部总高度 = 视频高度 + 顶部安全区域（非全屏时）
     final double headerHeight = isFullScreen ? size.height : videoHeight + topPadding;
 
-    return ExtendedNestedScrollView(
+    final Widget layout = ExtendedNestedScrollView(
       key: _scrollKey,
       physics: isFullScreen ? const NeverScrollableScrollPhysics() : null,
       onlyOneScrollInBody: true,
@@ -505,13 +506,42 @@ class _DetailPageState extends State<DetailPage>
                     height: headerHeight,
                     child: videoPlayer(width: size.width, height: headerHeight,),
                   )
-                : Padding(
-                    // 关键：顶部留出状态栏高度
-                    padding: EdgeInsets.only(top: topPadding),
-                    child: SizedBox(
-                      width: size.width,
-                      height: videoHeight,
-                      child: videoPlayer(width: size.width, height: videoHeight),
+                // 用 Stack + 黑色背景，保证「状态栏区域」和「视频区」
+                // 在非全屏下始终是黑色，不受明暗主题切换影响（对齐 PiliPlus）。
+                //
+                // 原实现：Padding(top: topPadding) + SizedBox(height: videoHeight)
+                //   → 状态栏区域的背景色来自 Scaffold.backgroundColor，跟随主题，
+                //     浅色主题下这块是浅色，与视频区的黑色形成割裂感。
+                //
+                // 新实现：SizedBox(height: headerHeight) + Stack
+                //   → 用 Positioned.fill(ColoredBox(Colors.black)) 铺满整个
+                //     headerHeight（含状态栏区域），视频从状态栏下方开始。
+                //   → 总高度与原来一致（headerHeight = videoHeight + topPadding），
+                //     不影响 SliverPinnedDynamicHeader 的收缩逻辑。
+                : SizedBox(
+                    width: size.width,
+                    height: headerHeight,
+                    child: Stack(
+                      children: [
+                        // 覆盖整个头部区域的黑色背景（包含状态栏区域）
+                        const Positioned.fill(
+                          child: ColoredBox(color: Colors.black),
+                        ),
+                        // 视频从状态栏下方开始
+                        Positioned(
+                          top: topPadding,
+                          left: 0,
+                          right: 0,
+                          child: SizedBox(
+                            width: size.width,
+                            height: videoHeight,
+                            child: videoPlayer(
+                              width: size.width,
+                              height: videoHeight,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
           ),
@@ -530,6 +560,25 @@ class _DetailPageState extends State<DetailPage>
         ),
       ),
     );
+
+    // 非全屏下，状态栏背景固定为黑色，需要把状态栏图标改成浅色，
+    // 否则浅色主题下系统默认图标是深色，压在黑色背景上会看不清。
+    // 全屏时状态栏是隐藏的（initState 里的 hideSystemBar），无需设置。
+    if (!isFullScreen) {
+      return AnnotatedRegion<SystemUiOverlayStyle>(
+        value: const SystemUiOverlayStyle(
+          // 状态栏保持透明，让下方 ColoredBox 的黑色显示出来
+          statusBarColor: Colors.transparent,
+          // Android：白色图标（压在黑色背景上）
+          statusBarIconBrightness: Brightness.light,
+          // iOS：白色图标（Brightness.dark 在 iOS 上语义是"状态栏文字为浅色"）
+          statusBarBrightness: Brightness.dark,
+        ),
+        child: layout,
+      );
+    }
+
+    return layout;
   }
 
   // ---- 宽屏布局 ----

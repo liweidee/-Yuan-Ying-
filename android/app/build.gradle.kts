@@ -19,7 +19,8 @@ android {
     defaultConfig {
         applicationId = "com.example.yuanying"
         minSdk = flutter.minSdkVersion
-        targetSdk = flutter.targetSdkVersion
+         // 绕过 Android 10+ 的 W^X 限制，允许从 files/ 执行 proot 二进制
+        targetSdk = 28
         versionCode = flutter.versionCode
         versionName = flutter.versionName
 

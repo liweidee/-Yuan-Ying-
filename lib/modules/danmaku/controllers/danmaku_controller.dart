@@ -1,4 +1,5 @@
 import 'package:get/get.dart';
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:yuanying/modules/danmaku/models/danmaku_model.dart';
 import 'package:yuanying/plugin/pl_player/player_pref.dart';
 
@@ -47,7 +48,7 @@ class DanmakuController extends GetxController {
     // 每次加载新弹幕时同步一次规则（防止用户在其他页面改了规则）
     reloadFilter();
 
-    print('DanmakuController.loadDanmaku: 接收 ${items.length} 条弹幕');
+    debugPrint('DanmakuController.loadDanmaku: 接收 ${items.length} 条弹幕');
     _danmakuMap.clear();
     for (final item in items) {
       final key = item.progress;
@@ -57,7 +58,7 @@ class DanmakuController extends GetxController {
       _danmakuMap[key]!.add(item);
     }
     totalCount.value = items.length;
-    print('DanmakuController: 加载完成，共 ${totalCount.value} 条');
+    debugPrint('DanmakuController: 加载完成，共 ${totalCount.value} 条');
   }
 
   List<DanmakuItem>? getAt(int progress) {

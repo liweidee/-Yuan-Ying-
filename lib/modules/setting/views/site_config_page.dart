@@ -1058,10 +1058,10 @@ class SiteConfigPage extends StatelessWidget {
                         value: 'catvod',
                         child: Text('CatVod (猫影视)', style: TextStyle(fontSize: 14)),
                       ),
-                      DropdownMenuItem(
-                        value: 'manual',
-                        child: Text('手动源配置', style: TextStyle(fontSize: 14)),
-                      ),
+                      // DropdownMenuItem(
+                      //   value: 'manual',
+                      //   child: Text('手动源配置', style: TextStyle(fontSize: 14)),
+                      // ),
                     ],
                     onChanged: (value) {
                       setState(() {

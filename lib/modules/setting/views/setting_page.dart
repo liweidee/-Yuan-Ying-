@@ -119,6 +119,14 @@ class SettingPage extends StatelessWidget {
           const SizedBox(height: 8),
           _buildSettingItem(
             context: context,
+            icon: Icons.color_lens_outlined,
+            title: '弹幕颜色设置',
+            subtitle: '管理随机彩色 / 渐变基色的取色盘',
+            onTap: () => Get.toNamed(AppPages.danmakuColor),
+          ),
+          const SizedBox(height: 8),
+          _buildSettingItem(
+            context: context,
             icon: Icons.movie_creation_outlined,
             title: 'TMDB 配置',
             subtitle: '配置 TMDB API 访问与代理',

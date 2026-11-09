@@ -9,6 +9,7 @@ import 'package:yuanying/modules/download/models/cache_entry.dart';
 import 'package:yuanying/modules/download/services/cache_service.dart';
 import 'package:yuanying/modules/download/widgets/cache_item.dart';
 import 'package:yuanying/t4/models/video_detail.dart';
+import 'package:yuanying/modules/setting/models/setting_pref.dart';
 
 class CacheManagerPage extends StatefulWidget {
   const CacheManagerPage({super.key});
@@ -104,7 +105,7 @@ class _CacheManagerPageState extends State<CacheManagerPage> {
           }
         },
         child: Scaffold(
-          backgroundColor: Colors.transparent,
+          backgroundColor: SettingPref.bgActive ? Colors.transparent : theme.colorScheme.surface,
           appBar: _buildAppBar(downloading, completed),
           body: CustomScrollView(
             slivers: [

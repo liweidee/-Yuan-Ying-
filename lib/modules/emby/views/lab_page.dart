@@ -66,6 +66,16 @@ class LabPage extends StatelessWidget {
             subtitle: '访问网页并嗅探视频资源，一键播放',
             route: AppPages.webSniffer,
           ),
+          // ===== TMDB 探索 =====
+          const SizedBox(height: 12),
+          _buildEntry(
+            context,
+            theme,
+            icon: Icons.movie_filter_outlined,
+            title: 'TMDB 探索',
+            subtitle: '搜索电影、剧集、演员，浏览热门趋势',
+            route: AppPages.tmdbExplore,
+          ),
           // ===== AI 助手 =====
           const SizedBox(height: 12),
           _buildEntry(

@@ -1,5 +1,6 @@
 // lib/modules/live/views/live_page.dart
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:yuanying/core/routes/app_pages.dart';
 import 'package:yuanying/modules/live/controllers/live_controller.dart';
@@ -11,7 +12,7 @@ import 'package:yuanying/modules/live/widgets/live_channel_info_bar.dart';
 import 'package:yuanying/modules/live/widgets/live_epg_timeline.dart';
 import 'package:yuanying/modules/music/controllers/music_player_controller.dart';
 import 'package:yuanying/services/silence_keeper.dart';
-import 'package:yuanying/modules/setting/models/setting_pref.dart'; // ← 新增
+import 'package:yuanying/modules/setting/models/setting_pref.dart';
 
 class LivePage extends StatefulWidget {
   const LivePage({super.key});
@@ -260,7 +261,8 @@ class _LivePageState extends State<LivePage> {
 
   Widget _buildNormalContent(BuildContext context) {
     final viewPadding = MediaQuery.viewPaddingOf(context);
-    final removeSafeArea = PlayerPref.removeSafeArea;
+    // SettingPref 是设置系统的标准入口，removeSafeArea 作为全局页面配置应统一用它
+    final removeSafeArea = SettingPref.removeSafeArea;
     final double topPadding = removeSafeArea ? 0.0 : viewPadding.top;
 
     return Scaffold(
@@ -300,12 +302,32 @@ class _LivePageState extends State<LivePage> {
         ? colorScheme.surface.withValues(alpha: isDark ? 0.72 : 0.62)
         : colorScheme.surface;
 
-    return Column(
+    final Widget layout = Column(
       children: [
-        if (topPadding > 0) SizedBox(height: topPadding),
-        AspectRatio(
-          aspectRatio: 16 / 9,
-          child: playerWidget,
+        // 用 ColoredBox(Colors.black) 包裹「状态栏区域 + 视频区」，
+        // 保证两者在明暗主题下都是连续的纯黑色（对齐 video_page.dart / PiliPlus）。
+        //
+        // 原实现：[if (topPadding > 0) SizedBox(height: topPadding)] + [AspectRatio]
+        //   状态栏区域只是一个空白 SizedBox，背景色来自 Scaffold(Colors.transparent)
+        //   背后的主题背景（AppBackgroundLayer / theme.scaffoldBackgroundColor），
+        //   浅色主题下就会变成浅色，和视频区黑色割裂。
+        //
+        // 新实现：ColoredBox(Colors.black) + Column(mainAxisSize: min)
+        //   整块铺黑，无论视频区是否有留白、透明、黑边，视觉上都是连续的黑色。
+        //   Column.mainAxisSize.min 保证高度收缩到 topPadding + videoHeight，
+        //   不影响下方 Expanded 的布局分配。
+        ColoredBox(
+          color: Colors.black,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (topPadding > 0) SizedBox(height: topPadding),
+              AspectRatio(
+                aspectRatio: 16 / 9,
+                child: playerWidget,
+              ),
+            ],
+          ),
         ),
         // 视频下方整块区域：信息栏 + 频道区共用一层底
         Expanded(
@@ -333,6 +355,22 @@ class _LivePageState extends State<LivePage> {
           ),
         ),
       ],
+    );
+
+    // 非全屏下，状态栏背景固定黑色 → 图标改成浅色，
+    // 否则浅色主题下默认是深色图标，压在黑色上看不清。
+    // 全屏时（外层 build 里 isFullScreen 分支直接返回空 Scaffold，
+    // 不会走到这里），无需处理。
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: const SystemUiOverlayStyle(
+        // 状态栏透明，让下方 ColoredBox 的黑色显示出来
+        statusBarColor: Colors.transparent,
+        // Android：白色图标
+        statusBarIconBrightness: Brightness.light,
+        // iOS：白色图标（Brightness.dark 在 iOS 表示状态栏文字浅色）
+        statusBarBrightness: Brightness.dark,
+      ),
+      child: layout,
     );
   }
 

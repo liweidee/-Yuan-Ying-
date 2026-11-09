@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:io' show Platform;
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:get/get.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
@@ -14,6 +15,7 @@ import 'package:yuanying/plugin/pl_player/models/data_status.dart';
 import 'package:yuanying/plugin/pl_player/models/external_player_type.dart';
 import 'package:yuanying/services/external_player_service.dart';
 import 'package:yuanying/modules/video/widgets/danmaku_settings.dart';
+import 'package:yuanying/utils/android_pip_helper.dart';
 
 class HeaderControl extends StatefulWidget {
   final String controllerTag;
@@ -208,31 +210,52 @@ class _HeaderControlState extends State<HeaderControl> {
                     ),
                   ),
                 ),
-                // 画中画（桌面且非FVP）
-                if (PlatformUtils.isDesktop && PlayerPref.playerEngine != PlayerEngineType.fvp)
+                // 画中画：桌面端保持原有行为；Android 端新增系统 PiP 入口
+                // 位置、尺寸、图标风格不变，仅点击行为按平台分流。
+                if ((PlatformUtils.isDesktop || Platform.isAndroid) &&
+                    PlayerPref.playerEngine != PlayerEngineType.fvp)
                   SizedBox(
                     width: 40,
                     height: 34,
-                    child: Obx(() {
-                      return IconButton(
-                        tooltip: playerController.isDesktopPip ? '退出画中画' : '画中画',
-                        style: const ButtonStyle(padding: WidgetStatePropertyAll(EdgeInsets.zero)),
-                        onPressed: () {
-                          if (playerController.isDesktopPip) {
-                            playerController.exitDesktopPip();
-                          } else {
-                            playerController.enterDesktopPip();
-                          }
-                        },
-                        icon: Icon(
-                          playerController.isDesktopPip
-                              ? Icons.picture_in_picture_alt
-                              : Icons.picture_in_picture_outlined,
-                          size: 19,
-                          color: Colors.white,
-                        ),
-                      );
-                    }),
+                    child: ValueListenableBuilder<bool>(
+                      // 桌面端 isDesktopPip 是 RxBool，原本用 Obx 感知；
+                      // 这里统一用 ValueListenableBuilder 是因为 Android 的 PiP 状态
+                      // 是 ValueNotifier（非 Rx），Obx 无法监听。
+                      valueListenable: AndroidPipHelper.isPipActive,
+                      builder: (context, androidPip, _) {
+                        final isPip = Platform.isAndroid
+                            ? androidPip
+                            : playerController.isDesktopPip;
+
+                        return IconButton(
+                          tooltip: isPip ? '退出画中画' : '画中画',
+                          style: const ButtonStyle(
+                            padding: WidgetStatePropertyAll(EdgeInsets.zero),
+                          ),
+                          onPressed: () async {
+                            if (Platform.isAndroid) {
+                              final ok = await AndroidPipHelper.enter();
+                              if (!ok) {
+                                SmartDialog.showToast('当前设备不支持画中画');
+                              }
+                            } else {
+                              if (playerController.isDesktopPip) {
+                                playerController.exitDesktopPip();
+                              } else {
+                                playerController.enterDesktopPip();
+                              }
+                            }
+                          },
+                          icon: Icon(
+                            isPip
+                                ? Icons.picture_in_picture_alt
+                                : Icons.picture_in_picture_outlined,
+                            size: 19,
+                            color: Colors.white,
+                          ),
+                        );
+                      },
+                    ),
                   ),
                 // 投屏
                 SizedBox(

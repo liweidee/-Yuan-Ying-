@@ -22,10 +22,16 @@ import 'package:yuanying/modules/sandbox/services/proot_launcher.dart';
 class ShellSession {
   final Process _process;
   final void Function(String chunk) onOutput;
-  final void Function(int exitCode) onExit;
 
-  late final StreamSubscription<String> _outSub;
-  late final StreamSubscription<String> _errSub;
+  /// 退出回调：退出码 + 最近 N 行 stderr（用于诊断闪退原因）
+  final void Function(int exitCode, List<String> stderrTail) onExit;
+
+  StreamSubscription<String>? _outSub;
+  StreamSubscription<String>? _errSub;
+
+  final List<String> _stderrTail = [];
+  static const int _maxStderrLines = 20;
+
   bool _closed = false;
 
   ShellSession._(this._process, this.onOutput, this.onExit) {
@@ -36,22 +42,31 @@ class ShellSession {
     });
 
     _errSub = _process.stderr.transform(decoder).listen((s) {
-      if (!_closed && s.isNotEmpty) onOutput(s);
+      if (_closed || s.isEmpty) return;
+      onOutput(s);
+      for (final line in s.split('\n')) {
+        if (line.isNotEmpty) _stderrTail.add(line);
+      }
+      while (_stderrTail.length > _maxStderrLines) {
+        _stderrTail.removeAt(0);
+      }
     });
 
     _process.exitCode.then((code) {
       if (_closed) return;
+      _outSub?.cancel();
+      _errSub?.cancel();
+      _outSub = null;
+      _errSub = null;
       debugPrint('[ShellSession] exit code=$code');
-      onExit(code);
-      _outSub.cancel();
-      _errSub.cancel();
+      onExit(code, List<String>.unmodifiable(_stderrTail));
     });
   }
 
   static Future<ShellSession> start({
     required String distroId,
     required void Function(String chunk) onOutput,
-    required void Function(int exitCode) onExit,
+    required void Function(int exitCode, List<String> stderrTail) onExit,
   }) async {
     final env = await ProotLauncher.resolve(distroId);
     if (env == null) {
@@ -69,8 +84,8 @@ class ShellSession {
 
   int get pid => _process.pid;
 
-  /// 向 shell 写入原始字符（调用方负责补 \n）
   void write(String data) {
+    if (_closed) return;
     try {
       _process.stdin.add(utf8.encode(data));
       _process.stdin.flush().catchError((_) {});
@@ -79,7 +94,6 @@ class ShellSession {
     }
   }
 
-  /// 优雅关闭：SIGTERM → 2 秒超时 SIGKILL
   void kill() {
     if (_closed) return;
     try {
@@ -99,7 +113,9 @@ class ShellSession {
       await _process.stdin.close();
     } catch (_) {}
     kill();
-    await _outSub.cancel();
-    await _errSub.cancel();
+    await _outSub?.cancel();
+    await _errSub?.cancel();
+    _outSub = null;
+    _errSub = null;
   }
 }

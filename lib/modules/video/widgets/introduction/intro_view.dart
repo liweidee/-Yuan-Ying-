@@ -9,6 +9,8 @@ import 'package:yuanying/t4/services/source_manager.dart';
 import 'package:yuanying/common/widgets/scroll_behavior.dart';
 import 'package:yuanying/common/widgets/image_viewer/gallery_viewer.dart';
 import 'package:yuanying/common/widgets/image_viewer/hero.dart';
+import 'package:yuanying/plugin/pl_player/models/data_status.dart';
+import 'package:yuanying/modules/video/views/short_drama_player_page.dart';
 
 /// 简介区域
 class IntroView extends StatelessWidget {
@@ -72,6 +74,40 @@ class IntroView extends StatelessWidget {
         ),
       );
     });
+  }
+
+  /// 标题/备注/分类/标签里是否带 [短] / [短剧] / 【短】/【短剧】 标记
+  bool _hasShortDramaMarker(VideoDetail detail) {
+    final markers = RegExp(r'[\[【]\s*短(?:剧)?\s*[\]】]');
+
+    if (markers.hasMatch(detail.vodName)) return true;
+    final remarks = detail.vodRemarks ?? '';
+    if (markers.hasMatch(remarks)) return true;
+    final typeName = detail.typeName ?? '';
+    if (typeName.contains('短剧')) return true;
+    final tag = detail.vodTag ?? '';
+    if (markers.hasMatch(tag) || tag.contains('短剧')) return true;
+
+    return false;
+  }
+
+  /// 短剧按钮是否显示：竖屏视频 OR 短剧标记
+  bool _shortDramaEligible(DetailController dc, VideoDetail detail) {
+    final pc = dc.playerController;
+    if (pc.dataStatus.value != DataStatus.loaded) return false;
+
+    final w = pc.videoWidth.value;
+    final h = pc.videoHeight.value;
+    if (w > 0 && h > 0 && h > w) return true;
+
+    return _hasShortDramaMarker(detail);
+  }
+
+  void _enterShortDramaMode(DetailController dc) {
+    Get.to(() => ShortDramaPlayerPage(
+          detailController: dc,
+          controllerTag: controllerTag,
+        ));
   }
 
   // ========== 封面 + 内容区 ==========
@@ -155,19 +191,72 @@ class IntroView extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
+                  // ===== 短剧模式按钮 =====
+                  Obx(() {
+                    if (!_shortDramaEligible(detailController, detail)) {
+                      return const SizedBox.shrink();
+                    }
+                    return Padding(
+                      padding: const EdgeInsets.only(left: 8),
+                      child: GestureDetector(
+                        onTap: () => _enterShortDramaMode(detailController),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: colorScheme.primary.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: colorScheme.primary,
+                              width: 1.2,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.switch_video_rounded,
+                                size: 14,
+                                color: colorScheme.primary,
+                              ),
+                              const SizedBox(width: 3),
+                              Text(
+                                '短剧',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: colorScheme.primary,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  }),
+                  const SizedBox(width: 8),
+                  // ===== 收藏按钮 =====
                   Obx(() {
                     final isFav = introController.isFavorite.value;
                     return GestureDetector(
                       onTap: () => introController.toggleFavorite(),
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 4,
+                        ),
                         decoration: BoxDecoration(
                           color: isFav
                               ? colorScheme.primary.withOpacity(0.15)
                               : colorScheme.surfaceContainerHighest,
                           borderRadius: BorderRadius.circular(14),
                           border: isFav
-                              ? Border.all(color: colorScheme.primary, width: 1.2)
+                              ? Border.all(
+                                  color: colorScheme.primary,
+                                  width: 1.2,
+                                )
                               : null,
                         ),
                         child: Row(
@@ -176,14 +265,18 @@ class IntroView extends StatelessWidget {
                             Icon(
                               isFav ? Icons.star : Icons.star_border,
                               size: 14,
-                              color: isFav ? colorScheme.primary : colorScheme.outline,
+                              color: isFav
+                                  ? colorScheme.primary
+                                  : colorScheme.outline,
                             ),
                             const SizedBox(width: 3),
                             Text(
                               isFav ? '已收藏' : '收藏',
                               style: TextStyle(
                                 fontSize: 11,
-                                color: isFav ? colorScheme.primary : colorScheme.outline,
+                                color: isFav
+                                    ? colorScheme.primary
+                                    : colorScheme.outline,
                                 fontWeight: FontWeight.w500,
                               ),
                             ),

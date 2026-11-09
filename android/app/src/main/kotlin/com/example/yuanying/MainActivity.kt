@@ -24,6 +24,7 @@ class MainActivity : AudioServiceActivity(), MethodCallHandler {
     private var eventSink: EventChannel.EventSink? = null
     private lateinit var nodeJSManager: NodeJSManager
     private var pyBridge: PythonPluginBridge? = null
+    private var pipChannel: MethodChannel? = null
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
@@ -317,6 +318,44 @@ class MainActivity : AudioServiceActivity(), MethodCallHandler {
                 else -> result.notImplemented()
             }
         }
+
+        // ===== 6) Android 画中画 (PiP) =====
+        // 保存到字段 pipChannel，供 onPictureInPictureModeChanged 回传状态时复用。
+        pipChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "com.example.yuanying/pip"
+        )
+        pipChannel?.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "isAvailable" -> {
+                    // PiP 需要 Android 8.0 (API 26) 及以上
+                    val available = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                            packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE)
+                    result.success(available)
+                }
+                "enter" -> {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        try {
+                            // 从 Flutter 接收宽高比，默认 16:9
+                            val width = call.argument<Int>("width") ?: 16
+                            val height = call.argument<Int>("height") ?: 9
+                            val aspectRatio = android.util.Rational(width, height)
+                            val params = android.app.PictureInPictureParams.Builder()
+                                .setAspectRatio(aspectRatio)
+                                .build()
+                            enterPictureInPictureMode(params)
+                            result.success(true)
+                        } catch (e: Exception) {
+                            android.util.Log.w("MainActivity", "enter PiP failed: $e")
+                            result.success(false)
+                        }
+                    } else {
+                        result.success(false)
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
     }
 
     override fun onDestroy() {
@@ -344,6 +383,13 @@ class MainActivity : AudioServiceActivity(), MethodCallHandler {
     ) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         AndroidHelper.isPipMode = isInPictureInPictureMode
+
+        // 通知 Flutter 层 PiP 状态发生变化
+        try {
+            pipChannel?.invokeMethod("onPipModeChanged", isInPictureInPictureMode)
+        } catch (e: Exception) {
+            android.util.Log.w("MainActivity", "notify PiP state failed: $e")
+        }
     }
 
     // ===== MethodCallHandler =====
