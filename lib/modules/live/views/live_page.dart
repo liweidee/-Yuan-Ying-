@@ -1,6 +1,5 @@
 // lib/modules/live/views/live_page.dart
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:yuanying/core/routes/app_pages.dart';
 import 'package:yuanying/modules/live/controllers/live_controller.dart';
@@ -12,7 +11,7 @@ import 'package:yuanying/modules/live/widgets/live_channel_info_bar.dart';
 import 'package:yuanying/modules/live/widgets/live_epg_timeline.dart';
 import 'package:yuanying/modules/music/controllers/music_player_controller.dart';
 import 'package:yuanying/services/silence_keeper.dart';
-import 'package:yuanying/modules/setting/models/setting_pref.dart';
+import 'package:yuanying/modules/setting/models/setting_pref.dart'; 
 
 class LivePage extends StatefulWidget {
   const LivePage({super.key});
@@ -260,6 +259,10 @@ class _LivePageState extends State<LivePage> {
   }
 
   Widget _buildNormalContent(BuildContext context) {
+    final viewPadding = MediaQuery.viewPaddingOf(context);
+    final removeSafeArea = PlayerPref.removeSafeArea;
+    final double topPadding = removeSafeArea ? 0.0 : viewPadding.top;
+
     return Scaffold(
       backgroundColor: Colors.transparent,
       appBar: null,
@@ -275,7 +278,7 @@ class _LivePageState extends State<LivePage> {
           if (isDesktop) {
             return _buildDesktopLayout(playerWidget);
           } else {
-            return _buildMobileLayout(playerWidget, 0);
+            return _buildMobileLayout(playerWidget, topPadding);
           }
         },
       ),
@@ -290,42 +293,28 @@ class _LivePageState extends State<LivePage> {
     final bool isDark = Theme.of(context).brightness == Brightness.dark;
     final bool bgActive = SettingPref.bgActive;
 
+    // 下方整块底色：
+    //  - 开壁纸 → surface 半透明（浅 0.62 / 深 0.72）
+    //  - 关壁纸 → surface（与 Scaffold 同色，视觉隐形，和改造前完全一致）
     final Color bottomBg = bgActive
         ? colorScheme.surface.withValues(alpha: isDark ? 0.72 : 0.62)
         : colorScheme.surface;
 
-    // 1. 移除 SizedBox(height: topPadding) —— 状态栏区域已由 MainPage.AppBar
-    //    用黑色填充，LivePage 的 body 起点已经在状态栏下方，无需再留白。
-    //    原实现会在状态栏下方额外空出 topPadding 的高度，导致视频位置偏低。
-    //
-    // 2. 移除外层的 ColoredBox(Colors.black) —— 视频区本身的黑色由 LivePlayerView
-    //    内部保证，MainPage 也已经处理了状态栏区域，不需要再包一层黑色。
-    //    如果 LivePlayerView 在某些时刻露出透明，仍然需要黑色兜底，
-    //    可以保留一个薄的 ColoredBox，但不需要包含 SizedBox。
-    //
-    // 3. 移除 AnnotatedRegion —— 状态栏图标颜色已由 MainPage.AppBar 的
-    //    systemOverlayStyle 控制，LivePage 内部再设置也无法影响状态栏区域
-    //    （LivePage 的坐标原点在状态栏下方，AnnotatedRegion 覆盖不到状态栏）。
-    //
-    // 4. 保留 ColoredBox(Colors.black) 兜底视频区，但去掉 SizedBox(height: topPadding)。
-    //    这样视频紧贴状态栏下方，视觉上和状态栏的黑色连续。
     return Column(
       children: [
-        // 视频区（黑色兜底，防止 LivePlayerView 未出帧时露底）
-        ColoredBox(
-          color: Colors.black,
-          child: AspectRatio(
-            aspectRatio: 16 / 9,
-            child: playerWidget,
-          ),
+        if (topPadding > 0) SizedBox(height: topPadding),
+        AspectRatio(
+          aspectRatio: 16 / 9,
+          child: playerWidget,
         ),
-        // 视频下方整块区域
+        // 视频下方整块区域：信息栏 + 频道区共用一层底
         Expanded(
           child: ColoredBox(
             color: bottomBg,
             child: Column(
               children: [
                 const LiveChannelInfoBar(),
+                // 1px 极淡分割线（不再用 6px 间隙）
                 Divider(
                   height: 1,
                   thickness: 1,
