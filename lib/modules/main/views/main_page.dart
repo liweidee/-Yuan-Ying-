@@ -106,7 +106,7 @@ class _MainPageState extends State<MainPage> {
                 // backgroundColor: bgActive ? Colors.transparent : colorScheme.surface,
                 appBar: AppBar(
                   toolbarHeight: 0,
-                  // LivePage tab 时状态栏区域用黑色填充，其他 tab 保持透明
+                  // 仅在LivePage tab 时状态栏区域用黑色填充，其他 tab 保持透明
                   backgroundColor:
                       navigationBars[selectedIndex] == NavigationBarType.live
                           ? Colors.black
