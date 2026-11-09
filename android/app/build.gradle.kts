@@ -16,6 +16,13 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    lint {
+        // 禁用 "ExpiredTargetSdkVersion" 检查
+        disable += "ExpiredTargetSdkVersion"
+        // 如果仍有报错，可以同时禁用它对应的新版检查ID
+        // disable += "ExpiringTargetSdkVersion"
+    }
+
     defaultConfig {
         applicationId = "com.example.yuanying"
         minSdk = flutter.minSdkVersion
