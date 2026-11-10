@@ -15,7 +15,6 @@ import 'package:yuanying/modules/plugin_center/models/market_entry.dart';
 import 'package:yuanying/modules/plugin_center/models/service_config.dart';
 import 'package:yuanying/modules/plugin_center/services/install_manager.dart';
 import 'package:yuanying/modules/plugin_center/services/service_manager.dart';
-import 'package:yuanying/modules/plugin_center/widgets/media_proxy_actions.dart';
 import 'package:yuanying/modules/plugin_center/widgets/plugin_icon.dart';
 import 'package:yuanying/modules/plugin_center/widgets/python_deps_sheet.dart';
 import 'package:yuanying/modules/plugin_center/widgets/qjs_concurrency_dialog.dart';
@@ -905,48 +904,14 @@ class _InstalledPluginCard extends StatelessWidget {
         ));
         break;
 
-      case 'mediaProxy':
-      case 'mediaProxy-win':
-        actions.add(_ActionBtn(
-          icon: Icons.settings_outlined,
-          label: '编辑配置',
-          onTap: () => showMediaProxyConfigDialog(context, plugin),
-        ));
-        actions.add(_ActionBtn(
-          icon: Icons.open_in_new_outlined,
-          label: '打开 Web',
-          onTap: () => openMediaProxyWeb(context, plugin),
-        ));
-        actions.add(
-          Obx(() {
-            ServiceManager.instance.revision.value;
-            final status = ServiceManager.instance
-                .getStatus('svc-mkt-${plugin.id}');
-            if (status == ServiceStatus.running) {
-              return _ActionBtn(
-                icon: Icons.stop_circle_outlined,
-                label: '停止服务',
-                onTap: () async {
-                  await ServiceManager.instance
-                      .stop('svc-mkt-${plugin.id}');
-                },
-              );
-            }
-            return _ActionBtn(
-              icon: Icons.play_arrow_outlined,
-              label: '启动服务',
-              onTap: () => startMediaProxyService(context, plugin),
-            );
-          }),
-        );
-        break;
-
       case 'frp':
       case 'OpenList':
       case 'filebrowser':
       case 'go-music-dl':
       case 'clash-meta':
       case 'captcha-bypass':
+      case 'mediaProxy':
+      case 'mediaProxy-win':
         {
           final preset = getBinaryPreset(plugin.id);
           if (preset != null) {

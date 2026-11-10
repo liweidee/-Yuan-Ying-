@@ -116,10 +116,6 @@ class RootfsManager {
   RootfsManager._();
   static final RootfsManager instance = RootfsManager._();
 
-  /// 安装 rootfs
-  ///
-  /// [mirrorLabel] null 表示 auto（全部镜像依序 fallback），
-  ///               非 null 表示只用指定镜像 label（如 '华为云'）
   Future<void> install(
     DistroInfo distro, {
     required void Function(RootfsProgress) onProgress,
@@ -137,9 +133,6 @@ class RootfsManager {
       ));
     }
 
-    // ============================================================
-    // 1. 检查缓存
-    // ============================================================
     emit(RootfsStage.checking);
     final cache = await SandboxPaths.cache();
     final tgz = File(p.join(cache.path, '${distro.id}.tar.gz'));
@@ -147,9 +140,6 @@ class RootfsManager {
     final cachedOk = tgz.existsSync() &&
         await tgz.length() >= (distro.sizeBytes * 0.8).round();
 
-    // ============================================================
-    // 2. 下载（按用户选择的镜像）
-    // ============================================================
     if (!cachedOk) {
       if (tgz.existsSync()) {
         try {
@@ -157,10 +147,9 @@ class RootfsManager {
         } catch (_) {}
       }
 
-      // 根据 mirrorLabel 决定候选镜像
       List<({String label, String url})> targets;
       if (mirrorLabel == null || mirrorLabel.isEmpty) {
-        targets = distro.mirrors; // auto：全部尝试
+        targets = distro.mirrors;
       } else {
         final matched = distro.mirrors
             .where((m) => m.label == mirrorLabel)
@@ -227,9 +216,6 @@ class RootfsManager {
       }
     }
 
-    // ============================================================
-    // 3. 清空旧 rootfs + 解压
-    // ============================================================
     emit(RootfsStage.extracting);
     await Future.delayed(const Duration(milliseconds: 80));
 
@@ -257,31 +243,12 @@ class RootfsManager {
       throw Exception('解压失败：$e');
     }
 
-    // ============================================================
-    // 3.5 实体化符号链接（PRoot 无法跟随 rootfs 内符号链接）
-    //
-    // Alpine 的 /bin/sh -> /bin/busybox、Ubuntu 的 /bin/sh -> /bin/dash
-    // 都是符号链接。PRoot 在 Android 上无法解析这些链接，导致
-    // "'/bin/sh' not found" 错误。必须把指向 busybox/dash 的链接
-    // 替换为实体文件副本。
-    // ============================================================
-    await _resolveBusyboxSymlinks(rootfsDir);
-
-    // ============================================================
-    // 4. 修复权限
-    // ============================================================
     emit(RootfsStage.fixingPerms);
     await _fixPermissions(rootfsDir);
 
-    // ============================================================
-    // 5. 配置网络（DNS + 软件源）
-    // ============================================================
     emit(RootfsStage.configuring);
     await _setupNetwork(distro, rootfsDir);
 
-    // ============================================================
-    // 6. 写 marker
-    // ============================================================
     await marker.writeAsString(
       jsonEncode({
         'id': distro.id,
@@ -298,9 +265,6 @@ class RootfsManager {
     emit(RootfsStage.done);
   }
 
-  /// 应用软件源（用户运行中切换）
-  ///
-  /// 写配置文件；不刷新索引（让调用方决定是否跑 apk/apt update）
   Future<void> applySoftwareSource(String distroId, String sourceId) async {
     final distro = kDistros.firstWhere(
       (d) => d.id == distroId,
@@ -374,9 +338,6 @@ class RootfsManager {
     return latestId;
   }
 
-  // ============================================================
-  // 下载
-  // ============================================================
   Future<void> _download(
     String url,
     File target,
@@ -428,9 +389,6 @@ class RootfsManager {
     }
   }
 
-  // ============================================================
-  // 网络配置
-  // ============================================================
   Future<void> _setupNetwork(DistroInfo distro, Directory rootfs) async {
     final resolv = File(p.join(rootfs.path, 'etc/resolv.conf'));
     await resolv.parent.create(recursive: true);
@@ -469,10 +427,6 @@ class RootfsManager {
       );
     }
   }
-
-  // ============================================================
-  // 软件源映射表
-  // ============================================================
 
   String? _alpineMirrorBase(String sourceId, String minor) {
     switch (sourceId) {
@@ -577,9 +531,6 @@ Trusted: yes
     return version;
   }
 
-  // ============================================================
-  // 解压 & 权限
-  // ============================================================
   Future<void> _extractTarGz(File tgz, Directory target) async {
     final bytes = await tgz.readAsBytes();
     final gz = GZipDecoder().decodeBytes(bytes);
@@ -627,70 +578,6 @@ Trusted: yes
       }
 
       await Directory(outPath).create(recursive: true);
-    }
-  }
-
-  /// 实体化符号链接
-  ///
-  /// PRoot 在 Android 上无法跟随 rootfs 内部的符号链接。
-  /// Alpine 的 /bin/sh -> /bin/busybox、Ubuntu 的 /bin/sh -> /bin/dash
-  /// 都是符号链接，PRoot 解析失败时报 "'/bin/sh' not found"。
-  ///
-  /// 这里遍历 bin/sbin/usr/bin/usr/sbin，把任何指向 busybox/dash
-  /// 的符号链接替换为实体文件副本。
-  Future<void> _resolveBusyboxSymlinks(Directory rootfs) async {
-    const targetDirs = ['bin', 'sbin', 'usr/bin', 'usr/sbin'];
-    int resolvedCount = 0;
-
-    for (final dirName in targetDirs) {
-      final dir = Directory(p.join(rootfs.path, dirName));
-      if (!dir.existsSync()) continue;
-
-      final entities = dir.listSync(followLinks: false);
-      for (final entity in entities) {
-        if (entity is! Link) continue;
-
-        String target;
-        try {
-          target = await entity.target();
-        } catch (_) {
-          continue;
-        }
-
-        // 只处理指向 busybox 或 dash 的链接（Alpine / Ubuntu 的 /bin/sh）
-        final lowerTarget = target.toLowerCase();
-        if (!lowerTarget.contains('busybox') && !lowerTarget.contains('dash')) {
-          continue;
-        }
-
-        try {
-          // 用 resolveSymbolicLinksSync 跟随多跳链接，找到真实文件
-          final realPath = entity.resolveSymbolicLinksSync();
-          final realFile = File(realPath);
-          if (!realFile.existsSync()) {
-            debugPrint(
-              '[RootfsManager] symlink target missing: ${entity.path} -> $target',
-            );
-            continue;
-          }
-
-          final linkPath = entity.path;
-          await entity.delete();
-          await realFile.copy(linkPath);
-          await Process.run('chmod', ['755', linkPath]);
-          resolvedCount++;
-        } catch (e) {
-          debugPrint(
-            '[RootfsManager] resolve symlink failed: ${entity.path}: $e',
-          );
-        }
-      }
-    }
-
-    if (resolvedCount > 0) {
-      debugPrint(
-        '[RootfsManager] 已实体化 $resolvedCount 个 busybox/dash 符号链接',
-      );
     }
   }
 

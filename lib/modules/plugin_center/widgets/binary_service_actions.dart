@@ -17,25 +17,15 @@ import 'package:yuanying/modules/plugin_center/services/service_manager.dart';
 import 'package:yuanying/modules/plugin_center/widgets/service_log_sheet.dart';
 import 'package:yuanying/modules/webview/views/webview_page.dart';
 
-// ============================================================
-// 路径常量
-// ============================================================
-
-/// Android 标准外部存储挂载点（所有 App 通用，不是 DsPlayer 专用）
+/// Android 标准外部存储挂载点（所有 App 通用）
 const String _externalRoot = '/storage/emulated/0';
 
 /// 本应用的公开数据根目录
 ///
-/// ⚠️ 不能照抄 DsPlayer 的 `/storage/emulated/0/dsplayer`，
-/// 那是 DsPlayer 的专属目录名。源影用自己的 `yuanying`。
-///
-/// 想改目录名？只改这一行即可。
+/// 修改此值即可全局替换该插件群的 sdcard 路径前缀。
 const String _publicDataDir = '$_externalRoot/yuanying';
 
-// ============================================================
-// Go 二进制插件（runtime=binary）的服务预设
-// ============================================================
-
+/// Go 二进制插件（runtime=binary）的服务预设
 class BinaryServicePreset {
   final String pluginId;
   final String displayName;
@@ -49,9 +39,13 @@ class BinaryServicePreset {
   /// 为 null 表示不需要访问 sdcard
   final String? publicSubDir;
 
-  /// 若设置，此 env 键的值在保存时自动同步为端口值
-  /// （用于 PORT 这类必须与监听端口一致的变量）
+  /// 该 env 键的值在保存时自动同步为端口值
+  /// 用于必须与监听端口一致的环境变量（如 PORT）
   final String? syncPortEnvKey;
+
+  /// 启动参数中此开关后紧跟的值会自动替换为端口值（如 `-port X` 中的 X）
+  /// 与 syncPortEnvKey 的区别：一个同步启动参数，一个同步环境变量
+  final String? portArg;
 
   const BinaryServicePreset({
     required this.pluginId,
@@ -63,27 +57,15 @@ class BinaryServicePreset {
     this.defaultEnv = const {},
     this.publicSubDir,
     this.syncPortEnvKey,
+    this.portArg,
   });
 
   String get serviceId => 'svc-binary-$pluginId';
   String get defaultCwd => '__filesDir__/services/$serviceId';
 }
 
-/// ============================================================
-/// 插件预设参数
-///
-/// 对照基准：市场包内的 plugin.json（逐字）
-/// 改动范围：仅 dsplayer → yuanying，其他参数原样保留
-/// ============================================================
+/// 各插件的默认参数预设
 const Map<String, BinaryServicePreset> _presets = {
-  // ------------------------------------------------------------
-  // 1. frp v0.71.0
-  // ------------------------------------------------------------
-  // plugin.json 原值：
-  //   params: "-c /storage/emulated/0/dsplayer/server/frpc/frpc.toml"
-  //   env: {}
-  //   binaries.android: "frpc-android"
-  //   healthCheck: { type: http, path: /healthz, port: 7400 }
   'frp': BinaryServicePreset(
     pluginId: 'frp',
     displayName: 'frp 内网穿透客户端',
@@ -98,19 +80,6 @@ const Map<String, BinaryServicePreset> _presets = {
     defaultEnv: const {},
   ),
 
-  // ------------------------------------------------------------
-  // 2. OpenList v1.3.0
-  // ------------------------------------------------------------
-  // plugin.json 原值：
-  //   params: "server --data /storage/emulated/0/dsplayer/server/openlist"
-  //   env:
-  //     CNB2API_DNS             "223.5.5.5,119.29.29.29,114.114.114.114,1.1.1.1,8.8.8.8"
-  //     GODEBUG                 "netdns=go+1"
-  //     OPENLIST_ADMIN_PASSWORD "123456"
-  //     OPENLIST_SCHEME_ADDRESS "0.0.0.0"
-  //     OPENLIST_SCHEME_HTTP_PORT "5244"
-  //   binaries.android: "openlist-arm64"
-  //   healthCheck: { type: http, path: /, port: 5244 }
   'OpenList': BinaryServicePreset(
     pluginId: 'OpenList',
     displayName: 'OpenList 网盘服务',
@@ -124,26 +93,16 @@ const Map<String, BinaryServicePreset> _presets = {
       '$_publicDataDir/server/openlist',
     ],
     defaultEnv: {
-      // 5 项完整保留（1.1.1.1 与 8.8.8.8 是 plugin.json 原有的，不能删）
       'CNB2API_DNS': '223.5.5.5,119.29.29.29,114.114.114.114,1.1.1.1,8.8.8.8',
-      // ⚠️ 带 +1，与 go-music-dl 的 netdns=go 不同
+      // 带 +1：强制走 Go 原生 DNS 解析器
       'GODEBUG': 'netdns=go+1',
       'OPENLIST_ADMIN_PASSWORD': '123456',
       'OPENLIST_SCHEME_ADDRESS': '0.0.0.0',
       'OPENLIST_SCHEME_HTTP_PORT': '5244',
     },
+    syncPortEnvKey: 'OPENLIST_SCHEME_HTTP_PORT',
   ),
 
-  // ------------------------------------------------------------
-  // 3. filebrowser v2.63.25
-  // ------------------------------------------------------------
-  // plugin.json 原值：
-  //   params: "-a 0.0.0.0 -p 8080 -r /storage/emulated/0 -d filebrowser.db
-  //            --username admin
-  //            --password $2a$10$4n8wTVqWLxykd4b5ic5R0OjTv0vT3VzUDpKY58n1JXkY7mQrIpelq"
-  //   env: { "HOME": "/storage/emulated/0/dsplayer/server/filebrowser" }
-  //   binaries.android: "filebrowser-android"
-  //   healthCheck: { type: http, path: /health, port: 8080 }
   'filebrowser': BinaryServicePreset(
     pluginId: 'filebrowser',
     displayName: 'FileBrowser 文件管理器',
@@ -154,66 +113,42 @@ const Map<String, BinaryServicePreset> _presets = {
     defaultArgs: [
       '-a', '0.0.0.0',
       '-p', '8080',
-      '-r', '$_externalRoot',       // /storage/emulated/0（真实 sdcard 根，通用）
-      '-d', 'filebrowser.db',        // 相对路径，落 cwd（私有目录，避 FUSE mmap）
+      '-r', '$_externalRoot', // 真实 sdcard 根目录
+      '-d', 'filebrowser.db',  // 相对路径，落 cwd（私有目录，避 FUSE mmap）
       '--username', 'admin',
-      // ⚠️ bcrypt 哈希含 $，必须 raw string
+      // bcrypt 哈希，明文为 admin；含 $ 必须用 raw string
       '--password',
       r'$2a$10$4n8wTVqWLxykd4b5ic5R0OjTv0vT3VzUDpKY58n1JXkY7mQrIpelq',
     ],
     defaultEnv: {
-      // HOME 影响 filebrowser 查找 .filebrowser.toml 的位置（可选高级配置）
       'HOME': '$_publicDataDir/server/filebrowser',
     },
+    portArg: '-p',
   ),
 
-  // ------------------------------------------------------------
-  // 4. go-music-dl v1.1.1
-  // ------------------------------------------------------------
-  // plugin.json 原值：
-  //   params: "web --port 37777 --no-browser"
-  //   env:
-  //     GODEBUG       "netdns=go"
-  //     CNB2API_DNS   "223.5.5.5,119.29.29.29,114.114.114.114,1.1.1.1,8.8.8.8"
-  //   binaries.android: "music-dl-android"
-  //   healthCheck: { type: http, path: /music/healthz, port: 37777 }
   'go-music-dl': BinaryServicePreset(
     pluginId: 'go-music-dl',
     displayName: 'Go Music DL 音乐下载',
     defaultPort: 37777,
     healthType: 'http',
     healthPath: '/music/healthz',
-    // 无 sdcard 依赖
     defaultArgs: [
       'web',
       '--port', '37777',
       '--no-browser',
     ],
     defaultEnv: {
-      // ⚠️ 注意不带 +1，与 OpenList 的 netdns=go+1 不同，别抄错
+      // 注意不带 +1，与 OpenList 不同
       'GODEBUG': 'netdns=go',
       'CNB2API_DNS': '223.5.5.5,119.29.29.29,114.114.114.114,1.1.1.1,8.8.8.8',
     },
+    portArg: '--port',
   ),
 
-  // ------------------------------------------------------------
-  // 5. clash-meta v1.19.32
-  // ------------------------------------------------------------
-  // plugin.json 原值：
-  //   params: "-f /storage/emulated/0/dsplayer/server/clash-meta/config.yaml
-  //            -ext-ctl 127.0.0.1:9090 -ext-ui ui"
-  //   env: {}
-  //   binaries.android: "clash-meta-android"
-  //   healthCheck: { type: http, path: /version, port: 9090 }
-  //
-  // 路径分离设计（保持市场包原样）：
-  //   - config.yaml → sdcard（用户可编辑，改完面板重载生效）
-  //   - ui/ 面板    → cwd（应用私有目录，补丁自动解压）
-  //   - 9090        → 控制端口，也是健康检查端口
   'clash-meta': BinaryServicePreset(
     pluginId: 'clash-meta',
     displayName: 'Clash Meta 代理内核',
-    defaultPort: 9090, // 控制面板端口（兼作健康检查）
+    defaultPort: 9090,
     healthType: 'http',
     healthPath: '/version',
     publicSubDir: 'server/clash-meta',
@@ -221,34 +156,44 @@ const Map<String, BinaryServicePreset> _presets = {
       '-f',
       '$_publicDataDir/server/clash-meta/config.yaml',
       '-ext-ctl', '127.0.0.1:9090',
-      '-ext-ui', 'ui', // 相对 cwd（应用私有目录）
+      '-ext-ui', 'ui', // 相对 cwd，由启动补丁解压到私有目录
     ],
     defaultEnv: const {},
   ),
 
-  // ------------------------------------------------------------
-  // 6. captcha-bypass v1.0.0
-  // ------------------------------------------------------------
-  // plugin.json 原值：
-  //   params: "server"
-  //   env: { "PORT": "7788" }
-  //   binaries.android: "captcha-bypass-android-arm64"
-  //   healthCheck: { type: http, path: /, port: 7788 }
-  //
-  // ⚠️ PORT 环境变量必须与端口一致（服务监听 7788）。
-  //    用户改端口时 syncPortEnvKey 会自动同步 PORT，避免踩坑。
   'captcha-bypass': BinaryServicePreset(
     pluginId: 'captcha-bypass',
     displayName: '验证码识别服务',
     defaultPort: 7788,
     healthType: 'http',
     healthPath: '/',
-    // 无 sdcard 依赖（纯服务，无配置文件）
     defaultArgs: ['server'],
     defaultEnv: {
       'PORT': '7788',
     },
     syncPortEnvKey: 'PORT',
+  ),
+
+  'mediaProxy': BinaryServicePreset(
+    pluginId: 'mediaProxy',
+    displayName: '媒体代理服务',
+    defaultPort: 5575,
+    healthType: 'http',
+    healthPath: '/',
+    defaultArgs: ['-port', '5575'],
+    defaultEnv: const {},
+    portArg: '-port',
+  ),
+
+  'mediaProxy-win': BinaryServicePreset(
+    pluginId: 'mediaProxy-win',
+    displayName: '媒体代理服务（Windows）',
+    defaultPort: 5575,
+    healthType: 'http',
+    healthPath: '/',
+    defaultArgs: ['-port', '5575'],
+    defaultEnv: const {},
+    portArg: '-port',
   ),
 };
 
@@ -257,7 +202,7 @@ BinaryServicePreset? getBinaryPreset(String pluginId) => _presets[pluginId];
 bool isBinaryPlugin(String pluginId) => _presets.containsKey(pluginId);
 
 // ============================================================
-// 读最新 extras（端口/参数/env 可被用户在配置对话框改过）
+// 读最新 extras（用户在配置对话框改过的值优先）
 // ============================================================
 
 int _getPort(InstalledPlugin plugin, BinaryServicePreset preset) {
@@ -287,12 +232,27 @@ Map<String, String> _getEnv(
   return Map<String, String>.from(preset.defaultEnv);
 }
 
-// ============================================================
-// sdcard 目录预创建
-// ============================================================
+/// 把 args 里 `portArg` 后紧跟的值替换为 port
+///
+/// - 找不到 portArg 时在开头插入 `portArg port`，
+///   避免参数为空导致服务起在默认端口、与 UI 显示不一致
+List<String> _applyPortArg(
+  List<String> args,
+  String? portArg,
+  int port,
+) {
+  if (portArg == null || portArg.isEmpty) return args;
+  final result = List<String>.from(args);
+  final idx = result.indexOf(portArg);
+  if (idx >= 0 && idx + 1 < result.length) {
+    result[idx + 1] = '$port';
+  } else {
+    result.insertAll(0, [portArg, '$port']);
+  }
+  return result;
+}
 
-/// 尝试在 _publicDataDir 下创建子目录
-/// 返回 false 表示权限不足或无法创建
+/// 尝试在 _publicDataDir 下创建子目录，返回 false 表示权限不足
 Future<bool> _ensurePublicDir(String subPath) async {
   try {
     final dir = Directory(p.join(_publicDataDir, subPath));
@@ -343,10 +303,7 @@ Future<void> openBinaryServiceWeb(
 // 查看运行日志
 // ============================================================
 
-/// 查看服务运行日志（复用 service_log_sheet.dart 的通用组件）
-///
-/// 需要 ServiceManager 里存在该服务的 ServiceConfig；
-/// 若用户从未启动过，则没有 config、也没有日志可看，给 Toast 提示。
+/// 复用 service_log_sheet 通用组件
 Future<void> showBinaryServiceLog(
   BuildContext context,
   InstalledPlugin plugin,
@@ -414,13 +371,12 @@ class _BinaryServiceConfigDialogState
         e.key: TextEditingController(text: e.value),
     };
 
-    // 端口变化时联动 syncPortEnvKey（如 captcha-bypass 的 PORT）
-    _portCtrl.addListener(_syncPortEnv);
+    _portCtrl.addListener(_onPortChanged);
   }
 
   @override
   void dispose() {
-    _portCtrl.removeListener(_syncPortEnv);
+    _portCtrl.removeListener(_onPortChanged);
     _portCtrl.dispose();
     _argsCtrl.dispose();
     for (final c in _envCtrls.values) {
@@ -429,7 +385,12 @@ class _BinaryServiceConfigDialogState
     super.dispose();
   }
 
-  /// 端口变化时，把 syncPortEnvKey 对应的 env 值同步为新端口
+  void _onPortChanged() {
+    _syncPortEnv();
+    _syncPortArg();
+  }
+
+  /// 端口变化时同步 syncPortEnvKey 对应的环境变量
   void _syncPortEnv() {
     final key = widget.preset.syncPortEnvKey;
     if (key == null) return;
@@ -439,6 +400,23 @@ class _BinaryServiceConfigDialogState
     if (ctrl.text != newPort) {
       ctrl.text = newPort;
     }
+  }
+
+  /// 端口变化时同步 args 里 portArg 后的值
+  void _syncPortArg() {
+    final arg = widget.preset.portArg;
+    if (arg == null || arg.isEmpty) return;
+    final newPort = _portCtrl.text.trim();
+    if (newPort.isEmpty) return;
+    final parts = _argsCtrl.text
+        .split(RegExp(r'\s+'))
+        .where((e) => e.isNotEmpty)
+        .toList();
+    final idx = parts.indexOf(arg);
+    if (idx < 0 || idx + 1 >= parts.length) return;
+    if (parts[idx + 1] == newPort) return;
+    parts[idx + 1] = newPort;
+    _argsCtrl.text = parts.join(' ');
   }
 
   @override
@@ -500,12 +478,13 @@ class _BinaryServiceConfigDialogState
                   ),
                 ),
               ],
-              if (preset.syncPortEnvKey != null) ...[
+              if (preset.syncPortEnvKey != null || preset.portArg != null) ...[
                 const SizedBox(height: 8),
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: colorScheme.tertiaryContainer.withValues(alpha: 0.25),
+                    color:
+                        colorScheme.tertiaryContainer.withValues(alpha: 0.25),
                     borderRadius: Style.mdRadius,
                   ),
                   child: Row(
@@ -516,7 +495,13 @@ class _BinaryServiceConfigDialogState
                       const SizedBox(width: 6),
                       Expanded(
                         child: Text(
-                          '环境变量 ${preset.syncPortEnvKey} 会随端口自动同步。',
+                          [
+                            if (preset.syncPortEnvKey != null)
+                              '环境变量 ${preset.syncPortEnvKey}',
+                            if (preset.portArg != null)
+                              '启动参数 ${preset.portArg}',
+                          ].join(' 与 ') +
+                              ' 会随端口自动同步。',
                           style: TextStyle(
                             fontSize: 11,
                             color: colorScheme.onSurfaceVariant,
@@ -529,8 +514,6 @@ class _BinaryServiceConfigDialogState
                 ),
               ],
               const SizedBox(height: 12),
-
-              // 端口
               TextField(
                 controller: _portCtrl,
                 keyboardType: TextInputType.number,
@@ -540,8 +523,6 @@ class _BinaryServiceConfigDialogState
                 ),
               ),
               const SizedBox(height: 12),
-
-              // 启动参数
               TextField(
                 controller: _argsCtrl,
                 minLines: 2,
@@ -553,8 +534,6 @@ class _BinaryServiceConfigDialogState
                 ),
               ),
               const SizedBox(height: 16),
-
-              // 环境变量
               Row(
                 children: [
                   Text(
@@ -651,14 +630,15 @@ class _BinaryServiceConfigDialogState
             flex: 3,
             child: TextField(
               controller: valueCtrl,
-              readOnly: isSynced, // 联动端口，禁止手改
+              readOnly: isSynced,
               decoration: InputDecoration(
                 isDense: true,
                 border: const OutlineInputBorder(),
                 contentPadding:
                     const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
                 helperText: isSynced ? '随端口自动同步' : null,
-                helperStyle: TextStyle(fontSize: 10, color: colorScheme.tertiary),
+                helperStyle:
+                    TextStyle(fontSize: 10, color: colorScheme.tertiary),
               ),
               style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
             ),
@@ -745,11 +725,12 @@ class _BinaryServiceConfigDialogState
       return;
     }
 
-    // 兜底同步 syncPortEnvKey（理论上 listener 已处理，防极端时序）
+    // 兜底同步（listener 已处理，此处防极端时序）
     if (widget.preset.syncPortEnvKey != null) {
       final key = widget.preset.syncPortEnvKey!;
       _envCtrls[key]?.text = '$port';
     }
+    final effectiveArgs = _applyPortArg(args, widget.preset.portArg, port);
 
     final env = <String, String>{};
     for (final e in _envCtrls.entries) {
@@ -763,7 +744,7 @@ class _BinaryServiceConfigDialogState
       latest?.extras ?? widget.plugin.extras,
     );
     extras['binaryServicePort'] = port;
-    extras['binaryServiceArgs'] = args;
+    extras['binaryServiceArgs'] = effectiveArgs;
     extras['binaryServiceEnv'] = env;
     await InstallManager.instance.updateExtras(widget.plugin.id, extras);
 
@@ -788,15 +769,10 @@ class _BinaryServiceConfigDialogState
 
 /// 启动服务
 ///
-/// 弹「服务启动中...」加载圈；弹窗不占 navigator 栈，不会与
-/// `plugin_center_page` 里 onEvent 弹的错误对话框抢栈。
-/// 加载期间返回键无效、点击遮罩不关闭，直到拿到启动结果。
-///
-/// 为什么不直接用原生 `showDialog(PopScope(canPop:false))`：
+/// 使用 SmartDialog 显示加载圈而非原生 dialog：
 /// `ServiceManager.start` 内部多处 `_emitEvent(failed)` 是同步触发的，
-/// `_onServiceEvent` 会立即 `showDialog` 弹错误框。若 loading 也占
-/// navigator 栈，finally 里的 `nav.pop()` 会关掉错误框而非 loading，
-/// 造成 loading 卡死。用 `SmartDialog` 走 overlay 层可彻底避免。
+/// onEvent 会立即弹错误对话框；若 loading 占 navigator 栈，
+/// finally 里的 pop 会误关错误框。overlay 层可彻底避免栈序冲突。
 Future<void> startBinaryService(
   BuildContext context,
   InstalledPlugin plugin,
@@ -804,9 +780,7 @@ Future<void> startBinaryService(
   final preset = getBinaryPreset(plugin.id);
   if (preset == null) return;
 
-  // ===== 前置检查（失败直接 toast，不弹 loading）=====
-
-  // 1. sdcard 目录
+  // 前置检查：失败直接 toast，不弹 loading
   if (preset.publicSubDir != null) {
     final ok = await _ensurePublicDir(preset.publicSubDir!);
     if (!ok) {
@@ -818,7 +792,6 @@ Future<void> startBinaryService(
     }
   }
 
-  // 2. 可执行文件
   final exePath = _findBinary(plugin);
   if (exePath == null) {
     SmartDialog.showToast('找不到可执行文件，请检查插件包完整性或从市场重装');
@@ -826,29 +799,25 @@ Future<void> startBinaryService(
   }
 
   final port = _getPort(plugin, preset);
-  final args = _getArgs(plugin, preset);
+  final rawArgs = _getArgs(plugin, preset);
+  final args = _applyPortArg(rawArgs, preset.portArg, port);
   final env = _getEnv(plugin, preset);
 
   final config = ServiceConfig(
     id: preset.serviceId,
     name: preset.displayName,
     port: port,
-    runtime: plugin.id, // 引用插件自身，ServiceManager 会检查已装+启用
+    runtime: plugin.id,
     args: args,
-    cwd: preset.defaultCwd, // 占位符，ServiceManager 启动时替换
+    cwd: preset.defaultCwd,
     autostart: false,
-    keepForeground: true, // 后台常驻；App 关闭时不杀、下次启动收养
+    keepForeground: true, // 后台常驻，App 关闭时不杀、下次启动收养
     env: env,
-    executable: exePath, // 显式传绝对路径，避免 plugin.json.binaries 解析歧义
+    executable: exePath,
     healthType: preset.healthType,
     healthPath: preset.healthPath,
   );
 
-  // ===== 不可关闭的加载弹窗 =====
-  // SmartDialog.showLoading 默认：
-  //   - backType: ignore   → 拦返回键
-  //   - clickMaskDismiss: false → 点遮罩不关闭
-  //   - overlay 层          → 不会与 onEvent 的错误对话框抢 navigator 栈
   SmartDialog.showLoading(msg: '服务启动中...');
 
   try {
@@ -857,7 +826,7 @@ Future<void> startBinaryService(
       Get.find<PluginCenterController>().reloadServices();
     }
 
-    // 已在运行则先停再起（端口/参数可能已变更）
+    // 已在运行则先停再起，确保端口/参数变更生效
     final currentStatus = ServiceManager.instance.getStatus(preset.serviceId);
     if (currentStatus == ServiceStatus.running ||
         currentStatus == ServiceStatus.starting) {
@@ -866,20 +835,17 @@ Future<void> startBinaryService(
 
     try {
       await ServiceManager.instance.start(preset.serviceId);
-      // 成功/失败提示由 ServiceManager.onEvent 统一处理
     } catch (_) {
-      // 异常由 ServiceManager.onEvent 的 failed 事件统一处理：
-      // 错误对话框会弹在 loading 之上，dismiss 后自然可见
+      // 错误提示由 onEvent 统一处理
     }
 
-    // 最短显示时长 300ms：避免前置条件快速失败时"一闪而过"
+    // 最短显示 300ms，避免快速失败时 loading 一闪而过
     await Future.delayed(const Duration(milliseconds: 300));
   } finally {
     SmartDialog.dismiss();
   }
 }
 
-/// 停止服务
 Future<void> stopBinaryService(
   BuildContext context,
   InstalledPlugin plugin,
@@ -889,23 +855,11 @@ Future<void> stopBinaryService(
   await ServiceManager.instance.stop(preset.serviceId);
 }
 
-// ============================================================
-// 内部：解析可执行文件
-// ============================================================
-//
-// 优先按 plugin.json.binaries.{android|win32} 解析（与 ServiceManager 同语义），
-// 找不到再按项目已知二进制名兜底。
-//
-// 已知二进制名（来自实际 plugin.json）：
-//   frp             → frpc-android
-//   filebrowser     → filebrowser-android
-//   OpenList        → openlist-arm64
-//   go-music-dl     → music-dl-android
-//   clash-meta      → clash-meta-android
-//   captcha-bypass  → captcha-bypass-android-arm64
-//
+/// 解析可执行文件
+///
+/// 优先读 plugin.json.binaries.{android|win32}（唯一权威来源）；
+/// 缺失或声明的文件不存在时，按 plugin.id 常见命名兜底。
 String? _findBinary(InstalledPlugin plugin) {
-  // 1. plugin.json.binaries.{android|win32}
   final pluginJson = File(p.join(plugin.installPath, 'plugin.json'));
   if (pluginJson.existsSync()) {
     try {
@@ -924,25 +878,18 @@ String? _findBinary(InstalledPlugin plugin) {
           if (File(c).existsSync()) return c;
         }
       }
-    } catch (_) {}
+    } catch (_) {
+      // plugin.json 解析失败，走兜底
+    }
   }
 
-  // 2. 兜底：按实际 plugin.json 中声明的二进制名
-  final knownNames = <String, String>{
-    'frp': 'frpc-android',
-    'filebrowser': 'filebrowser-android',
-    'OpenList': 'openlist-arm64',
-    'go-music-dl': 'music-dl-android',
-    'clash-meta': 'clash-meta-android',
-    'captcha-bypass': 'captcha-bypass-android-arm64',
-  }[plugin.id];
-
-  final names = <String>[
-    if (knownNames != null) knownNames,
+  final guesses = <String>[
+    '${plugin.id}.exe',
     plugin.id,
     '${plugin.id}-android',
+    '${plugin.id}-arm64',
   ];
-  for (final n in names) {
+  for (final n in guesses) {
     for (final sub in ['', 'bin/']) {
       final f = File(p.join(plugin.installPath, '$sub$n'));
       if (f.existsSync()) return f.path;

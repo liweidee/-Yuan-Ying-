@@ -8,7 +8,6 @@ import 'package:path/path.dart' as p;
 import 'package:yuanying/modules/plugin_center/services/install_manager.dart';
 import 'package:yuanying/modules/sandbox/services/sandbox_paths.dart';
 
-/// PRoot 运行环境（解析后的绝对路径集合）
 class ProotEnv {
   final String prootExec;
   final String prootLoader;
@@ -66,7 +65,6 @@ abstract final class ProotLauncher {
         }
       }
 
-      // 补全 libtalloc.so.2 依赖（针对 CANNOT LINK EXECUTABLE 错误）
       final talloc = File(p.join(execDir, 'libtalloc.so'));
       final talloc2 = File(p.join(execDir, 'libtalloc.so.2'));
       if (talloc.existsSync() && !talloc2.existsSync()) {
@@ -83,6 +81,10 @@ abstract final class ProotLauncher {
     final rootfs = await SandboxPaths.rootfs(distroId);
     final tmp = await SandboxPaths.prootTmp();
 
+    if (Platform.isAndroid) {
+      await _ensureBusyboxCommands(rootfs);
+    }
+
     return ProotEnv(
       prootExec: prootExec,
       prootLoader: prootLoader,
@@ -92,19 +94,52 @@ abstract final class ProotLauncher {
     );
   }
 
+  static Future<void> _ensureBusyboxCommands(Directory rootfs) async {
+    final busybox = File(p.join(rootfs.path, 'bin', 'busybox'));
+    if (!busybox.existsSync()) {
+      debugPrint('[ProotLauncher] /bin/busybox 不存在，无法补全命令');
+      return;
+    }
+
+    final busyboxBytes = await busybox.readAsBytes();
+    const dirs = ['bin', 'sbin', 'usr/bin', 'usr/sbin'];
+    const keyCommands = [
+      'sh', 'ash',
+      'cat', 'ls', 'mkdir', 'rm', 'cp', 'mv', 'ln', 'touch',
+      'chmod', 'chown',
+      'env', 'echo', 'printf', 'true', 'false',
+      'ps', 'kill',
+    ];
+    int fixed = 0;
+
+    for (final dirName in dirs) {
+      final dir = Directory(p.join(rootfs.path, dirName));
+      if (!dir.existsSync()) continue;
+
+      for (final cmd in keyCommands) {
+        final file = File(p.join(dir.path, cmd));
+        final link = Link(p.join(dir.path, cmd));
+
+        if (file.existsSync() && !link.existsSync()) continue;
+
+        try {
+          if (link.existsSync()) await link.delete();
+          await file.writeAsBytes(busyboxBytes);
+          await Process.run('chmod', ['755', file.path]);
+          fixed++;
+        } catch (e) {
+          debugPrint('[ProotLauncher] 补全 $dirName/$cmd 失败: $e');
+        }
+      }
+    }
+
+    if (fixed > 0) {
+      debugPrint('[ProotLauncher] 已补全 $fixed 个 busybox 实体命令');
+    }
+  }
+
   static Map<String, String> buildEnv(ProotEnv env) {
     final base = Map<String, String>.from(Platform.environment);
-
-    // ===== 精准修复 1：清除 LD_PRELOAD =====
-    // termux-exec 会通过 LD_PRELOAD 注入 execve() 钩子，与 PRoot 冲突。
-    // 必须清除，否则 PRoot 无法正常拦截和重定向系统调用。
-    base.remove('LD_PRELOAD');
-
-    // ===== 精准修复 2：绕过 seccomp/ptrace 限制 =====
-    // 部分 Android 内核的 seccomp 策略会阻止 PRoot 所需的 ptrace 操作。
-    // 设置此变量是官方推荐的标准绕过方式。
-    base['PROOT_NO_SECCOMP'] = '1';
-
     final existingLd = base['LD_LIBRARY_PATH'] ?? '';
     base['PROOT_TMP_DIR'] = env.tmpDir;
     base['PROOT_LOADER'] = env.prootLoader;
@@ -121,10 +156,6 @@ abstract final class ProotLauncher {
     return [
       '--rootfs=${env.rootfsDir}',
       '-0',
-      // ===== 精准修复 3：移除 --link2symlink =====
-      // 该选项会创建指向宿主绝对路径的符号链接，在 Android 的应用私有目录下
-      // 可能导致 /bin/sh 等关键链接解析失败。
-      // '--link2symlink',   // <-- 已移除
       '--kill-on-exit',
       '-w', '/',
       '--bind=/dev', '--bind=/proc', '--bind=/sys',
