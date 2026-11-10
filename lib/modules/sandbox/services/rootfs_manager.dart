@@ -81,7 +81,7 @@ class RootfsCancelledException implements Exception {
 class SoftwareSource {
   final String id;
   final String label;
-  final String icon; // emoji 或短标识（UI 层转 IconData）
+  final String icon;
   const SoftwareSource(this.id, this.label, this.icon);
 }
 
@@ -157,7 +157,7 @@ class RootfsManager {
         } catch (_) {}
       }
 
-      // ★ 根据 mirrorLabel 决定候选镜像
+      // 根据 mirrorLabel 决定候选镜像
       List<({String label, String url})> targets;
       if (mirrorLabel == null || mirrorLabel.isEmpty) {
         targets = distro.mirrors; // auto：全部尝试
@@ -177,7 +177,6 @@ class RootfsManager {
 
       for (int i = 0; i < targets.length; i++) {
         final mirror = targets[i];
-        // 只在 auto 模式下、且不是第一个时才提示"切换镜像"
         final tag = (mirrorLabel == null && i > 0)
             ? '（切换镜像 ${mirror.label}）'
             : '';
@@ -221,7 +220,6 @@ class RootfsManager {
       }
 
       if (!downloaded) {
-        // 手动指定镜像失败 → 直接报错；auto 模式 → 全部失败
         final msg = mirrorLabel != null
             ? '镜像「$mirrorLabel」下载失败，请尝试其它源'
             : '所有镜像均下载失败，请检查网络';
@@ -260,13 +258,23 @@ class RootfsManager {
     }
 
     // ============================================================
+    // 3.5 实体化符号链接（PRoot 无法跟随 rootfs 内符号链接）
+    //
+    // Alpine 的 /bin/sh -> /bin/busybox、Ubuntu 的 /bin/sh -> /bin/dash
+    // 都是符号链接。PRoot 在 Android 上无法解析这些链接，导致
+    // "'/bin/sh' not found" 错误。必须把指向 busybox/dash 的链接
+    // 替换为实体文件副本。
+    // ============================================================
+    await _resolveBusyboxSymlinks(rootfsDir);
+
+    // ============================================================
     // 4. 修复权限
     // ============================================================
     emit(RootfsStage.fixingPerms);
     await _fixPermissions(rootfsDir);
 
     // ============================================================
-    // 5. 配置网络（DNS + 软件源，软件源用用户偏好）
+    // 5. 配置网络（DNS + 软件源）
     // ============================================================
     emit(RootfsStage.configuring);
     await _setupNetwork(distro, rootfsDir);
@@ -436,7 +444,6 @@ class RootfsManager {
       'nameserver 119.29.29.29\n',
     );
 
-    // ★ 用偏好里保存的软件源；若没装过，按默认
     String sourceId = SandboxPref.softwareMirror;
     if (sourceId.isEmpty) {
       sourceId = SandboxPref.defaultSoftwareMirrorFor(distro.id);
@@ -467,7 +474,6 @@ class RootfsManager {
   // 软件源映射表
   // ============================================================
 
-  /// Alpine 镜像基础 URL（不含 /main /community）
   String? _alpineMirrorBase(String sourceId, String minor) {
     switch (sourceId) {
       case 'aliyun':
@@ -483,7 +489,6 @@ class RootfsManager {
     }
   }
 
-  /// Ubuntu 镜像基础 URL（不含 codename 部分）
   String? _ubuntuMirrorBase(String sourceId) {
     switch (sourceId) {
       case 'tuna':
@@ -573,7 +578,7 @@ Trusted: yes
   }
 
   // ============================================================
-  // 解压 & 权限（与原实现相同）
+  // 解压 & 权限
   // ============================================================
   Future<void> _extractTarGz(File tgz, Directory target) async {
     final bytes = await tgz.readAsBytes();
@@ -622,6 +627,70 @@ Trusted: yes
       }
 
       await Directory(outPath).create(recursive: true);
+    }
+  }
+
+  /// 实体化符号链接
+  ///
+  /// PRoot 在 Android 上无法跟随 rootfs 内部的符号链接。
+  /// Alpine 的 /bin/sh -> /bin/busybox、Ubuntu 的 /bin/sh -> /bin/dash
+  /// 都是符号链接，PRoot 解析失败时报 "'/bin/sh' not found"。
+  ///
+  /// 这里遍历 bin/sbin/usr/bin/usr/sbin，把任何指向 busybox/dash
+  /// 的符号链接替换为实体文件副本。
+  Future<void> _resolveBusyboxSymlinks(Directory rootfs) async {
+    const targetDirs = ['bin', 'sbin', 'usr/bin', 'usr/sbin'];
+    int resolvedCount = 0;
+
+    for (final dirName in targetDirs) {
+      final dir = Directory(p.join(rootfs.path, dirName));
+      if (!dir.existsSync()) continue;
+
+      final entities = dir.listSync(followLinks: false);
+      for (final entity in entities) {
+        if (entity is! Link) continue;
+
+        String target;
+        try {
+          target = await entity.target();
+        } catch (_) {
+          continue;
+        }
+
+        // 只处理指向 busybox 或 dash 的链接（Alpine / Ubuntu 的 /bin/sh）
+        final lowerTarget = target.toLowerCase();
+        if (!lowerTarget.contains('busybox') && !lowerTarget.contains('dash')) {
+          continue;
+        }
+
+        try {
+          // 用 resolveSymbolicLinksSync 跟随多跳链接，找到真实文件
+          final realPath = entity.resolveSymbolicLinksSync();
+          final realFile = File(realPath);
+          if (!realFile.existsSync()) {
+            debugPrint(
+              '[RootfsManager] symlink target missing: ${entity.path} -> $target',
+            );
+            continue;
+          }
+
+          final linkPath = entity.path;
+          await entity.delete();
+          await realFile.copy(linkPath);
+          await Process.run('chmod', ['755', linkPath]);
+          resolvedCount++;
+        } catch (e) {
+          debugPrint(
+            '[RootfsManager] resolve symlink failed: ${entity.path}: $e',
+          );
+        }
+      }
+    }
+
+    if (resolvedCount > 0) {
+      debugPrint(
+        '[RootfsManager] 已实体化 $resolvedCount 个 busybox/dash 符号链接',
+      );
     }
   }
 

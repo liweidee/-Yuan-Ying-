@@ -979,6 +979,12 @@ class _InstalledPluginCard extends StatelessWidget {
                 );
               }),
             );
+            // 查看日志：复用 service_log_sheet 通用组件，与 ServiceTab 行为一致
+            actions.add(_ActionBtn(
+              icon: Icons.receipt_long_outlined,
+              label: '查看日志',
+              onTap: () => showBinaryServiceLog(context, plugin),
+            ));
           }
         }
         break;
@@ -1246,6 +1252,8 @@ class _InstalledPluginCard extends StatelessWidget {
         return '媒体代理服务';
       case 'mediaProxy-win':
         return '媒体代理服务（Windows）';
+      case 'proot':
+        return 'Linux 沙盒运行时（PRoot）';
       case 'frp':
         return 'frp 内网穿透客户端';
       case 'OpenList':
@@ -1258,8 +1266,6 @@ class _InstalledPluginCard extends StatelessWidget {
         return 'Clash Meta 代理内核';
       case 'captcha-bypass':
         return '验证码识别服务';
-      case 'proot':
-        return 'Linux 沙盒运行时（PRoot）';
       default:
         return id;
     }

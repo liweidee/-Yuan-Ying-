@@ -14,6 +14,7 @@ import 'package:yuanying/modules/plugin_center/models/installed_plugin.dart';
 import 'package:yuanying/modules/plugin_center/models/service_config.dart';
 import 'package:yuanying/modules/plugin_center/services/install_manager.dart';
 import 'package:yuanying/modules/plugin_center/services/service_manager.dart';
+import 'package:yuanying/modules/plugin_center/widgets/service_log_sheet.dart';
 import 'package:yuanying/modules/webview/views/webview_page.dart';
 
 // ============================================================
@@ -78,6 +79,11 @@ const Map<String, BinaryServicePreset> _presets = {
   // ------------------------------------------------------------
   // 1. frp v0.71.0
   // ------------------------------------------------------------
+  // plugin.json 原值：
+  //   params: "-c /storage/emulated/0/dsplayer/server/frpc/frpc.toml"
+  //   env: {}
+  //   binaries.android: "frpc-android"
+  //   healthCheck: { type: http, path: /healthz, port: 7400 }
   'frp': BinaryServicePreset(
     pluginId: 'frp',
     displayName: 'frp 内网穿透客户端',
@@ -95,6 +101,16 @@ const Map<String, BinaryServicePreset> _presets = {
   // ------------------------------------------------------------
   // 2. OpenList v1.3.0
   // ------------------------------------------------------------
+  // plugin.json 原值：
+  //   params: "server --data /storage/emulated/0/dsplayer/server/openlist"
+  //   env:
+  //     CNB2API_DNS             "223.5.5.5,119.29.29.29,114.114.114.114,1.1.1.1,8.8.8.8"
+  //     GODEBUG                 "netdns=go+1"
+  //     OPENLIST_ADMIN_PASSWORD "123456"
+  //     OPENLIST_SCHEME_ADDRESS "0.0.0.0"
+  //     OPENLIST_SCHEME_HTTP_PORT "5244"
+  //   binaries.android: "openlist-arm64"
+  //   healthCheck: { type: http, path: /, port: 5244 }
   'OpenList': BinaryServicePreset(
     pluginId: 'OpenList',
     displayName: 'OpenList 网盘服务',
@@ -108,6 +124,7 @@ const Map<String, BinaryServicePreset> _presets = {
       '$_publicDataDir/server/openlist',
     ],
     defaultEnv: {
+      // 5 项完整保留（1.1.1.1 与 8.8.8.8 是 plugin.json 原有的，不能删）
       'CNB2API_DNS': '223.5.5.5,119.29.29.29,114.114.114.114,1.1.1.1,8.8.8.8',
       // ⚠️ 带 +1，与 go-music-dl 的 netdns=go 不同
       'GODEBUG': 'netdns=go+1',
@@ -120,6 +137,13 @@ const Map<String, BinaryServicePreset> _presets = {
   // ------------------------------------------------------------
   // 3. filebrowser v2.63.25
   // ------------------------------------------------------------
+  // plugin.json 原值：
+  //   params: "-a 0.0.0.0 -p 8080 -r /storage/emulated/0 -d filebrowser.db
+  //            --username admin
+  //            --password $2a$10$4n8wTVqWLxykd4b5ic5R0OjTv0vT3VzUDpKY58n1JXkY7mQrIpelq"
+  //   env: { "HOME": "/storage/emulated/0/dsplayer/server/filebrowser" }
+  //   binaries.android: "filebrowser-android"
+  //   healthCheck: { type: http, path: /health, port: 8080 }
   'filebrowser': BinaryServicePreset(
     pluginId: 'filebrowser',
     displayName: 'FileBrowser 文件管理器',
@@ -138,6 +162,7 @@ const Map<String, BinaryServicePreset> _presets = {
       r'$2a$10$4n8wTVqWLxykd4b5ic5R0OjTv0vT3VzUDpKY58n1JXkY7mQrIpelq',
     ],
     defaultEnv: {
+      // HOME 影响 filebrowser 查找 .filebrowser.toml 的位置（可选高级配置）
       'HOME': '$_publicDataDir/server/filebrowser',
     },
   ),
@@ -145,6 +170,13 @@ const Map<String, BinaryServicePreset> _presets = {
   // ------------------------------------------------------------
   // 4. go-music-dl v1.1.1
   // ------------------------------------------------------------
+  // plugin.json 原值：
+  //   params: "web --port 37777 --no-browser"
+  //   env:
+  //     GODEBUG       "netdns=go"
+  //     CNB2API_DNS   "223.5.5.5,119.29.29.29,114.114.114.114,1.1.1.1,8.8.8.8"
+  //   binaries.android: "music-dl-android"
+  //   healthCheck: { type: http, path: /music/healthz, port: 37777 }
   'go-music-dl': BinaryServicePreset(
     pluginId: 'go-music-dl',
     displayName: 'Go Music DL 音乐下载',
@@ -158,7 +190,7 @@ const Map<String, BinaryServicePreset> _presets = {
       '--no-browser',
     ],
     defaultEnv: {
-      // ⚠️ 注意不带 +1，与 OpenList 不同
+      // ⚠️ 注意不带 +1，与 OpenList 的 netdns=go+1 不同，别抄错
       'GODEBUG': 'netdns=go',
       'CNB2API_DNS': '223.5.5.5,119.29.29.29,114.114.114.114,1.1.1.1,8.8.8.8',
     },
@@ -225,7 +257,7 @@ BinaryServicePreset? getBinaryPreset(String pluginId) => _presets[pluginId];
 bool isBinaryPlugin(String pluginId) => _presets.containsKey(pluginId);
 
 // ============================================================
-// 读最新 extras
+// 读最新 extras（端口/参数/env 可被用户在配置对话框改过）
 // ============================================================
 
 int _getPort(InstalledPlugin plugin, BinaryServicePreset preset) {
@@ -259,6 +291,8 @@ Map<String, String> _getEnv(
 // sdcard 目录预创建
 // ============================================================
 
+/// 尝试在 _publicDataDir 下创建子目录
+/// 返回 false 表示权限不足或无法创建
 Future<bool> _ensurePublicDir(String subPath) async {
   try {
     final dir = Directory(p.join(_publicDataDir, subPath));
@@ -303,6 +337,28 @@ Future<void> openBinaryServiceWeb(
 
   final url = 'http://localhost:$port/';
   Get.to(() => WebviewPage(url: url, title: preset.displayName));
+}
+
+// ============================================================
+// 查看运行日志
+// ============================================================
+
+/// 查看服务运行日志（复用 service_log_sheet.dart 的通用组件）
+///
+/// 需要 ServiceManager 里存在该服务的 ServiceConfig；
+/// 若用户从未启动过，则没有 config、也没有日志可看，给 Toast 提示。
+Future<void> showBinaryServiceLog(
+  BuildContext context,
+  InstalledPlugin plugin,
+) async {
+  final preset = getBinaryPreset(plugin.id);
+  if (preset == null) return;
+  final config = ServiceManager.instance.find(preset.serviceId);
+  if (config == null) {
+    SmartDialog.showToast('请先启动一次服务，再查看日志');
+    return;
+  }
+  await showServiceLogSheet(context, config);
 }
 
 // ============================================================
@@ -730,6 +786,17 @@ class _BinaryServiceConfigDialogState
 // 启动 / 停止服务
 // ============================================================
 
+/// 启动服务
+///
+/// 弹「服务启动中...」加载圈；弹窗不占 navigator 栈，不会与
+/// `plugin_center_page` 里 onEvent 弹的错误对话框抢栈。
+/// 加载期间返回键无效、点击遮罩不关闭，直到拿到启动结果。
+///
+/// 为什么不直接用原生 `showDialog(PopScope(canPop:false))`：
+/// `ServiceManager.start` 内部多处 `_emitEvent(failed)` 是同步触发的，
+/// `_onServiceEvent` 会立即 `showDialog` 弹错误框。若 loading 也占
+/// navigator 栈，finally 里的 `nav.pop()` 会关掉错误框而非 loading，
+/// 造成 loading 卡死。用 `SmartDialog` 走 overlay 层可彻底避免。
 Future<void> startBinaryService(
   BuildContext context,
   InstalledPlugin plugin,
@@ -737,12 +804,9 @@ Future<void> startBinaryService(
   final preset = getBinaryPreset(plugin.id);
   if (preset == null) return;
 
-  final controller = Get.find<PluginCenterController>();
-  final port = _getPort(plugin, preset);
-  final args = _getArgs(plugin, preset);
-  final env = _getEnv(plugin, preset);
+  // ===== 前置检查（失败直接 toast，不弹 loading）=====
 
-  // 1. 预创建 sdcard 子目录
+  // 1. sdcard 目录
   if (preset.publicSubDir != null) {
     final ok = await _ensurePublicDir(preset.publicSubDir!);
     if (!ok) {
@@ -754,44 +818,68 @@ Future<void> startBinaryService(
     }
   }
 
-  // 2. 探测可执行文件
+  // 2. 可执行文件
   final exePath = _findBinary(plugin);
   if (exePath == null) {
     SmartDialog.showToast('找不到可执行文件，请检查插件包完整性或从市场重装');
     return;
   }
 
+  final port = _getPort(plugin, preset);
+  final args = _getArgs(plugin, preset);
+  final env = _getEnv(plugin, preset);
+
   final config = ServiceConfig(
     id: preset.serviceId,
     name: preset.displayName,
     port: port,
-    runtime: plugin.id,
+    runtime: plugin.id, // 引用插件自身，ServiceManager 会检查已装+启用
     args: args,
-    cwd: preset.defaultCwd,
+    cwd: preset.defaultCwd, // 占位符，ServiceManager 启动时替换
     autostart: false,
-    keepForeground: true,
+    keepForeground: true, // 后台常驻；App 关闭时不杀、下次启动收养
     env: env,
-    executable: exePath,
+    executable: exePath, // 显式传绝对路径，避免 plugin.json.binaries 解析歧义
     healthType: preset.healthType,
     healthPath: preset.healthPath,
   );
 
-  await ServiceManager.instance.addOrUpdate(config);
-  controller.reloadServices();
-
-  final currentStatus = ServiceManager.instance.getStatus(preset.serviceId);
-  if (currentStatus == ServiceStatus.running ||
-      currentStatus == ServiceStatus.starting) {
-    await ServiceManager.instance.stop(preset.serviceId);
-  }
+  // ===== 不可关闭的加载弹窗 =====
+  // SmartDialog.showLoading 默认：
+  //   - backType: ignore   → 拦返回键
+  //   - clickMaskDismiss: false → 点遮罩不关闭
+  //   - overlay 层          → 不会与 onEvent 的错误对话框抢 navigator 栈
+  SmartDialog.showLoading(msg: '服务启动中...');
 
   try {
-    await ServiceManager.instance.start(preset.serviceId);
-  } catch (_) {
-    // 错误由 ServiceManager.onEvent 统一处理
+    await ServiceManager.instance.addOrUpdate(config);
+    if (Get.isRegistered<PluginCenterController>()) {
+      Get.find<PluginCenterController>().reloadServices();
+    }
+
+    // 已在运行则先停再起（端口/参数可能已变更）
+    final currentStatus = ServiceManager.instance.getStatus(preset.serviceId);
+    if (currentStatus == ServiceStatus.running ||
+        currentStatus == ServiceStatus.starting) {
+      await ServiceManager.instance.stop(preset.serviceId);
+    }
+
+    try {
+      await ServiceManager.instance.start(preset.serviceId);
+      // 成功/失败提示由 ServiceManager.onEvent 统一处理
+    } catch (_) {
+      // 异常由 ServiceManager.onEvent 的 failed 事件统一处理：
+      // 错误对话框会弹在 loading 之上，dismiss 后自然可见
+    }
+
+    // 最短显示时长 300ms：避免前置条件快速失败时"一闪而过"
+    await Future.delayed(const Duration(milliseconds: 300));
+  } finally {
+    SmartDialog.dismiss();
   }
 }
 
+/// 停止服务
 Future<void> stopBinaryService(
   BuildContext context,
   InstalledPlugin plugin,
@@ -804,6 +892,9 @@ Future<void> stopBinaryService(
 // ============================================================
 // 内部：解析可执行文件
 // ============================================================
+//
+// 优先按 plugin.json.binaries.{android|win32} 解析（与 ServiceManager 同语义），
+// 找不到再按项目已知二进制名兜底。
 //
 // 已知二进制名（来自实际 plugin.json）：
 //   frp             → frpc-android
