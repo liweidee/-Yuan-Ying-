@@ -21,6 +21,7 @@ import 'package:yuanying/modules/plugin_center/widgets/python_deps_sheet.dart';
 import 'package:yuanying/modules/plugin_center/widgets/qjs_concurrency_dialog.dart';
 import 'package:yuanying/modules/plugin_center/widgets/py_keep_alive_dialog.dart';
 import 'package:yuanying/modules/setting/controllers/ai_config_controller.dart';
+import 'package:yuanying/modules/plugin_center/widgets/binary_service_actions.dart';
 
 class PluginTab extends StatefulWidget {
   const PluginTab({super.key});
@@ -940,6 +941,48 @@ class _InstalledPluginCard extends StatelessWidget {
         );
         break;
 
+      case 'frp':
+      case 'OpenList':
+      case 'filebrowser':
+      case 'go-music-dl':
+      case 'clash-meta':
+      case 'captcha-bypass':
+        {
+          final preset = getBinaryPreset(plugin.id);
+          if (preset != null) {
+            actions.add(_ActionBtn(
+              icon: Icons.settings_outlined,
+              label: '编辑配置',
+              onTap: () => showBinaryServiceConfigDialog(context, plugin),
+            ));
+            actions.add(_ActionBtn(
+              icon: Icons.open_in_new_outlined,
+              label: '打开 Web',
+              onTap: () => openBinaryServiceWeb(context, plugin),
+            ));
+            actions.add(
+              Obx(() {
+                ServiceManager.instance.revision.value;
+                final status =
+                    ServiceManager.instance.getStatus(preset.serviceId);
+                if (status == ServiceStatus.running) {
+                  return _ActionBtn(
+                    icon: Icons.stop_circle_outlined,
+                    label: '停止服务',
+                    onTap: () => stopBinaryService(context, plugin),
+                  );
+                }
+                return _ActionBtn(
+                  icon: Icons.play_arrow_outlined,
+                  label: '启动服务',
+                  onTap: () => startBinaryService(context, plugin),
+                );
+              }),
+            );
+          }
+        }
+        break;
+
       default:
         break;
     }
@@ -1203,6 +1246,18 @@ class _InstalledPluginCard extends StatelessWidget {
         return '媒体代理服务';
       case 'mediaProxy-win':
         return '媒体代理服务（Windows）';
+      case 'frp':
+        return 'frp 内网穿透客户端';
+      case 'OpenList':
+        return 'OpenList 网盘服务';
+      case 'filebrowser':
+        return 'FileBrowser 文件管理器';
+      case 'go-music-dl':
+        return 'Go Music DL 音乐下载';
+      case 'clash-meta':
+        return 'Clash Meta 代理内核';
+      case 'captcha-bypass':
+        return '验证码识别服务';
       case 'proot':
         return 'Linux 沙盒运行时（PRoot）';
       default:

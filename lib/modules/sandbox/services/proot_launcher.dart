@@ -25,28 +25,7 @@ class ProotEnv {
   });
 }
 
-/// PRoot 启动器
-///
-/// 从 files/plugins/proot/bin/ 加载，依赖：
-///   - targetSdk <= 28（与 DsPlayer 一致），系统不强制执行 W^X 限制
-///   - 插件安装时 4 个 .so 已落到 files/plugins/proot/bin/
-///   - 首次启动前对 4 个 .so 做幂等 chmod 755
-///   - loader 通过 SONAME "libtalloc.so.2" 链接；若插件包只提供
-///     libtalloc.so 而没有 .so.2 副本，首次启动会报
-///     "CANNOT LINK EXECUTABLE ... library 'libtalloc.so.2' not found"，
-///     这里会幂等地补一份副本
 abstract final class ProotLauncher {
-  /// 解析 PRoot 环境（要求 proot 插件已安装）
-  ///
-  /// 返回 null 表示：
-  ///  - 插件未安装 / 已禁用
-  ///  - .so 文件不存在（安装损坏）
-  ///
-  /// 副作用（Android）：
-  ///  - 幂等 chmod 755 四件套
-  ///    插件安装时 archive 不保留可执行位，必须在这里补
-  ///  - 幂等补 libtalloc.so.2 副本
-  ///    插件包若只提供 libtalloc.so，loader 会因 SONAME 缺失而失败
   static Future<ProotEnv?> resolve(String distroId) async {
     final plugin = InstallManager.instance.findInstalled('proot');
     if (plugin == null || !plugin.enabled) return null;
@@ -54,7 +33,6 @@ abstract final class ProotLauncher {
     final installPath = plugin.installPath;
     final binDir = p.join(installPath, 'bin');
 
-    // 兼容两种布局：installPath/bin/libproot_exec.so 或 installPath/libproot_exec.so
     final candidates = [
       p.join(binDir, 'libproot_exec.so'),
       p.join(installPath, 'libproot_exec.so'),
@@ -68,19 +46,14 @@ abstract final class ProotLauncher {
     }
     if (prootExec == null) return null;
 
-    // loader 与 exec 同目录
     final execDir = p.dirname(prootExec);
     final prootLoader = p.join(execDir, 'libproot_loader.so');
     if (!File(prootLoader).existsSync()) return null;
 
-    // 幂等 chmod 四件套
-    // archive 包解压时不保留可执行位，Process.start 会 EACCES
     if (Platform.isAndroid) {
       const fourSuit = [
-        'libproot_exec.so',
-        'libproot_loader.so',
-        'libtalloc.so',
-        'libandroid-shmem.so',
+        'libproot_exec.so', 'libproot_loader.so',
+        'libtalloc.so', 'libandroid-shmem.so',
       ];
       for (final name in fourSuit) {
         final path = p.join(execDir, name);
@@ -93,12 +66,7 @@ abstract final class ProotLauncher {
         }
       }
 
-      // ===== 补全 libtalloc.so.2 依赖 =====
-      // proot 的 loader 通过 SONAME "libtalloc.so.2" 链接。
-      // 若插件包只提供 libtalloc.so（无 .so.2 副本），首次启动会报：
-      //   CANNOT LINK EXECUTABLE ".../libproot_exec.so":
-      //   library "libtalloc.so.2" not found
-      // 这里幂等地补一份 .so.2 副本（仅当 .so 存在且 .so.2 缺失时执行）。
+      // 补全 libtalloc.so.2 依赖（针对 CANNOT LINK EXECUTABLE 错误）
       final talloc = File(p.join(execDir, 'libtalloc.so'));
       final talloc2 = File(p.join(execDir, 'libtalloc.so.2'));
       if (talloc.existsSync() && !talloc2.existsSync()) {
@@ -124,19 +92,24 @@ abstract final class ProotLauncher {
     );
   }
 
-  /// 构建 PRoot 环境变量
-  ///
-  /// Dart Process.start 的 environment 是「完全替换」语义（不合并），
-  /// 因此必须显式拷贝宿主 Platform.environment，否则 proot 内部
-  /// 拿不到 ANDROID_ROOT / TMPDIR 等关键变量，部分 ROM 上 dlopen 会失败。
   static Map<String, String> buildEnv(ProotEnv env) {
     final base = Map<String, String>.from(Platform.environment);
+
+    // ===== 精准修复 1：清除 LD_PRELOAD =====
+    // termux-exec 会通过 LD_PRELOAD 注入 execve() 钩子，与 PRoot 冲突。
+    // 必须清除，否则 PRoot 无法正常拦截和重定向系统调用。
+    base.remove('LD_PRELOAD');
+
+    // ===== 精准修复 2：绕过 seccomp/ptrace 限制 =====
+    // 部分 Android 内核的 seccomp 策略会阻止 PRoot 所需的 ptrace 操作。
+    // 设置此变量是官方推荐的标准绕过方式。
+    base['PROOT_NO_SECCOMP'] = '1';
+
     final existingLd = base['LD_LIBRARY_PATH'] ?? '';
     base['PROOT_TMP_DIR'] = env.tmpDir;
     base['PROOT_LOADER'] = env.prootLoader;
     base['LD_LIBRARY_PATH'] =
         existingLd.isEmpty ? env.binDir : '${env.binDir}:$existingLd';
-    // 以下变量只在 rootfs 内生效（proot chroot 后 exec /bin/sh）
     base['PATH'] = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
     base['HOME'] = '/root';
     base['TERM'] = 'xterm-256color';
@@ -144,39 +117,27 @@ abstract final class ProotLauncher {
     return base;
   }
 
-  /// 构建 PRoot 启动参数
-  ///
-  /// --kill-on-exit：proot 主进程正常退出（含 SIGTERM）时，
-  ///                连带杀掉沙盒内所有子进程，避免漏子进程占端口。
-  /// 注意：SIGKILL 场景无法捕获，此选项不生效——上层必须用 SIGTERM 停服务。
   static List<String> buildArgs(ProotEnv env, List<String> innerCommand) {
     return [
       '--rootfs=${env.rootfsDir}',
       '-0',
-      '--link2symlink',
+      // ===== 精准修复 3：移除 --link2symlink =====
+      // 该选项会创建指向宿主绝对路径的符号链接，在 Android 的应用私有目录下
+      // 可能导致 /bin/sh 等关键链接解析失败。
+      // '--link2symlink',   // <-- 已移除
       '--kill-on-exit',
-      '-w',
-      '/',
-      '--bind=/dev',
-      '--bind=/proc',
-      '--bind=/sys',
+      '-w', '/',
+      '--bind=/dev', '--bind=/proc', '--bind=/sys',
       '--bind=/dev/urandom:/dev/random',
       '--bind=/proc/self/fd:/dev/fd',
       '--bind=/proc/self/fd/0:/dev/stdin',
       '--bind=/proc/self/fd/1:/dev/stdout',
       '--bind=/proc/self/fd/2:/dev/stderr',
-
-      // sdcard 桥接
-      // /storage/emulated/0 对普通 App 在 Android 11+ 需要 MANAGE_EXTERNAL_STORAGE，
-      // 但即使未授权 bind 也会成功（只是空目录），不会让 proot 崩，
-      // 用户进入后 ls 发现是空的就知道要去授权。
       if (Platform.isAndroid) '--bind=/storage/emulated/0:/mnt/sdcard',
-
       ...innerCommand,
     ];
   }
 
-  /// 一次性执行（探活 / 装软件）
   static Future<ProcessResult> runOnce({
     required String distroId,
     required List<String> command,
@@ -192,40 +153,17 @@ abstract final class ProotLauncher {
     );
   }
 
-  /// 探测：用最小命令验证 PRoot 能跑（首次启动前用）
-  ///
-  /// 相比 runOnce，本方法把「resolve 失败」与「proot 执行失败」区分开，
-  /// 给出更精确的错误信息。
   static Future<({bool ok, String stdout, String stderr})> probe(
     String distroId,
   ) async {
     try {
-      final plugin = InstallManager.instance.findInstalled('proot');
-      if (plugin == null) {
-        return (
-          ok: false,
-          stdout: '',
-          stderr: 'proot 插件未安装。请到插件中心 → 市场 → 安装 Linux 沙盒运行时（PRoot）。',
-        );
-      }
-      if (!plugin.enabled) {
-        return (
-          ok: false,
-          stdout: '',
-          stderr: 'proot 插件已禁用。请到插件中心 → 插件 Tab → 启用 proot 插件。',
-        );
-      }
-
       final env = await resolve(distroId);
       if (env == null) {
         return (
-          ok: false,
-          stdout: '',
-          stderr: 'proot 环境解析失败：找不到 libproot_exec.so 或 '
-              'libproot_loader.so。请卸载后从市场重装 proot 插件。',
+          ok: false, stdout: '',
+          stderr: 'proot 环境解析失败：找不到 libproot_exec.so 或 libproot_loader.so。',
         );
       }
-
       final r = await Process.run(
         env.prootExec,
         buildArgs(env, ['/bin/sh', '-c', 'echo PROOT_OK && uname -m']),
