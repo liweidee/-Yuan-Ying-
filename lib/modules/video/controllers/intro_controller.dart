@@ -51,7 +51,12 @@ class IntroController extends GetxController {
     }
     try {
       final favorites = GStorage.getFavorites();
-      isFavorite.value = favorites.any((item) => item['vod_id'] == vodId);
+      final api = currentApiUrl ??
+          Get.find<SourceManager>().currentSite.value?['api']?.toString() ??
+          '';
+      isFavorite.value = favorites.any((item) =>
+          item['vod_id'] == vodId &&
+          (item['api_url']?.toString() ?? '') == api);
     } catch (e) {
       isFavorite.value = false;
     }
@@ -77,16 +82,21 @@ class IntroController extends GetxController {
     final detailType = SourceManager.getDetailTypeFromSite(site);
 
     if (isFavorite.value) {
-      GStorage.removeFavorite(detail.vodId);
+      GStorage.removeFavorite(originalVodId!, apiUrl);
       isFavorite.value = false;
     } else {
+      final typeLabel = SourceManager.sourceTypeLabel(site);
+      final typeName = typeLabel.isEmpty
+          ? sourceName
+          : '$sourceName ($typeLabel)';
+          
       final item = {
         'vod_id': originalVodId!,
         'vod_name': detail.vodName,
         'vod_pic': detail.vodPic,
         'vod_remarks': detail.vodRemarks ?? '',
         'vod_tag': detail.vodTag ?? '',
-        'type_name': sourceName,
+        'type_name': typeName,
         'api_url': apiUrl,
         'site_key': siteKey,
         'config_key': Get.find<SourceManager>().currentConfigKey.value,

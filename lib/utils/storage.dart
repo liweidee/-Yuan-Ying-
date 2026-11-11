@@ -181,16 +181,21 @@ class GStorage {
 
   static Future<void> addFavorite(Map<String, dynamic> item) async {
     final list = getFavorites();
-    final exists = list.any((e) => e['vod_id'] == item['vod_id']);
+    final itemApiUrl = item['api_url']?.toString() ?? '';
+    final exists = list.any((e) =>
+        e['vod_id'] == item['vod_id'] &&
+        (e['api_url']?.toString() ?? '') == itemApiUrl);
     if (!exists) {
       list.add(item);
       await saveFavorites(list);
     }
   }
 
-  static Future<void> removeFavorite(String vodId) async {
+  static Future<void> removeFavorite(String vodId, String apiUrl) async {
     final list = getFavorites();
-    list.removeWhere((e) => e['vod_id'] == vodId);
+    list.removeWhere(
+      (e) => e['vod_id'] == vodId && (e['api_url']?.toString() ?? '') == apiUrl,
+    );
     await saveFavorites(list);
   }
 
@@ -221,9 +226,11 @@ class GStorage {
     await saveHistory(list);
   }
 
-  static Future<void> removeHistory(String vodId) async {
+  static Future<void> removeHistory(String vodId, String apiUrl) async {
     final list = getHistory();
-    list.removeWhere((e) => e['vod_id'] == vodId);
+    list.removeWhere(
+      (e) => e['vod_id'] == vodId && (e['api_url']?.toString() ?? '') == apiUrl,
+    );
     await saveHistory(list);
   }
 

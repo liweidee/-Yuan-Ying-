@@ -19,6 +19,34 @@ class StorageManager {
     _cacheBox = await Hive.openBox(StorageKeys.cacheBox);
   }
 
+  /// 生成带源标识的进度 key
+  /// [prefix] 如 'novel_progress' / 'manga_progress'
+  /// [apiUrl] 为空时退化为旧格式（仅 vodId），兼容极老记录
+  static String progressKey(String prefix, String vodId, String? apiUrl) {
+      if (apiUrl == null || apiUrl.isEmpty) return '${prefix}_$vodId';
+      return '${prefix}_${vodId}_${_stableHash(apiUrl)}';
+  }
+
+  /// 给任意 base key 附加源标识
+  ///
+  /// 用于章节内容缓存、书签、净化规则等非"进度"数据
+  /// [baseKey] 原 base key，如 'novel_chapter_12345_5'
+  /// [apiUrl] 为空时返回原 baseKey（兼容无源信息场景）
+  static String sourceScopedKey(String baseKey, String? apiUrl) {
+      if (apiUrl == null || apiUrl.isEmpty) return baseKey;
+      return '${baseKey}_${_stableHash(apiUrl)}';
+  }
+
+  /// 跨进程稳定的字符串 hash
+  /// 不能用 String.hashCode —— 它在不同进程/重启后可能不同
+  static String _stableHash(String s) {
+      var hash = 0;
+      for (final code in s.codeUnits) {
+        hash = (hash * 31 + code) & 0x7fffffff;
+      }
+      return hash.toRadixString(16).padLeft(8, '0');
+  }
+
   static Future<void> setSetting(String key, dynamic value) async {
     if (kIsWeb) {
       _memoryStorage?[key] = value;

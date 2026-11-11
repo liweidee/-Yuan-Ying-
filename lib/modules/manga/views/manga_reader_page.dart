@@ -128,7 +128,9 @@ class _MangaReaderPageState extends State<MangaReaderPage> with WidgetsBindingOb
       _error = null;
     });
     try {
-      final cacheKey = 'manga_chapter_${_vodId}_$idx';
+      final apiUrl = _site?['api']?.toString() ?? '';
+      final cacheKey = StorageManager.sourceScopedKey(
+          'manga_chapter_${_vodId}_$idx', apiUrl);
       String cached = StorageManager.getCache<String>(cacheKey) ?? '';
       List<String> urls = [];
       if (cached.isNotEmpty) {
@@ -205,7 +207,8 @@ class _MangaReaderPageState extends State<MangaReaderPage> with WidgetsBindingOb
   }
 
   void _saveProgress() {
-    final key = 'manga_progress_$_vodId';
+    final apiUrl = _site?['api']?.toString() ?? '';
+    final key = StorageManager.progressKey('manga_progress', _vodId, apiUrl);
     final progress = {'chapter': _currentChapterIdx};
     StorageManager.setCache(key, progress);
   }

@@ -28,6 +28,10 @@ class _MusicDetailPageState extends State<MusicDetailPage> {
   late String _pwd;
   Map<String, dynamic>? _site;
 
+  // ===== 历史恢复参数 =====
+  int? _resumeEpisodeIndex;
+  String? _resumeEpisodeName;
+
   bool _loading = true;
   String? _error;
   VideoDetail? _detail;
@@ -48,6 +52,12 @@ class _MusicDetailPageState extends State<MusicDetailPage> {
     _vodId = args?['vodId'] ?? '';
     _pwd = args?['pwd'] ?? 'tinydust';
     _site = args?['site'] as Map<String, dynamic>?;
+
+    // ===== 解析历史恢复参数（仅集数，无进度） =====
+    _resumeEpisodeIndex = args?['resumeEpisodeIndex'] is int
+        ? args!['resumeEpisodeIndex'] as int
+        : null;
+    _resumeEpisodeName = args?['resumeEpisodeName']?.toString();
 
     _controller = Get.find<MusicPlayerController>();
     _controller.onPlayCompleted = _onPlayCompleted;
@@ -117,6 +127,9 @@ class _MusicDetailPageState extends State<MusicDetailPage> {
           episodes,
           initialIndex: 0,
           vodId: _vodId,
+          sourceName: _playSourceName,
+          resumeEpisodeIndex: _resumeEpisodeIndex,
+          resumeEpisodeName: _resumeEpisodeName,
           urlFetcher: (episode) async {
             final api = site != null
                 ? Get.find<SourceManager>().createIndependentService(site)
@@ -225,10 +238,12 @@ class _MusicDetailPageState extends State<MusicDetailPage> {
 
     // 先读取当前状态
     final favorites = GStorage.getFavorites();
-    final isFav = favorites.any((item) => item['vod_id'] == _vodId);
+    final isFav = favorites.any((item) =>
+        item['vod_id'] == _vodId &&
+        (item['api_url']?.toString() ?? '') == apiUrl);
 
     if (isFav) {
-      GStorage.removeFavorite(_vodId);
+      GStorage.removeFavorite(_vodId, apiUrl);
       ToastUtils.show('已取消收藏');
     } else {
       final item = {
@@ -328,11 +343,15 @@ class _MusicDetailPageState extends State<MusicDetailPage> {
         foregroundColor: colorScheme.onSurface,
         actions: [
           Obx(() {
-            // 依赖版本号触发重建
-            final _ = _controller.favoriteVersion.value;
-            final favorites = GStorage.getFavorites();
-            final isFav = favorites.any((item) => item['vod_id'] == _vodId);
-            return IconButton(
+              // 依赖版本号触发重建
+              final _ = _controller.favoriteVersion.value;
+              final favorites = GStorage.getFavorites();
+              final site = _site ?? Get.find<SourceManager>().currentSite.value;
+              final apiUrl = site?['api']?.toString() ?? '';
+              final isFav = favorites.any((item) =>
+                  item['vod_id'] == _vodId &&
+                  (item['api_url']?.toString() ?? '') == apiUrl);
+              return IconButton(
               icon: Icon(
                 isFav ? Icons.star : Icons.star_border,
                 color: isFav ? colorScheme.primary : colorScheme.outline,

@@ -214,6 +214,26 @@ class SourceManager extends GetxController {
     return DetailType.video;
   }
 
+  /// 根据站点配置返回爬虫类型标签（用于区分同名不同源）
+  ///
+  /// 返回短标签（如 'PY' / 'T4' / 'DR2'），便于拼到源名称后面：
+  ///   "七猫 (PY)" vs "七猫 (T4)"
+  ///
+  /// [site] 为 null 时返回空字符串（调用方应跳过标签拼接）。
+  static String sourceTypeLabel(Map<String, dynamic>? site) {
+    if (site == null) return '';
+    if (isPurePy3Site(site)) return 'PY';
+    if (isNodeJSSite(site)) return 'Node';
+    if (isDrpy2Site(site)) return 'DR2';
+    if (isDrpy3Site(site)) return 'DR3';
+    if (isXbpqSite(site)) return 'XBPQ';
+    if (isXyqSite(site)) return 'XYQ';
+    if (isCatVodOpenSite(site)) return 'CatVod';
+    if (isAppCmsSite(site)) return 'AppCMS';
+    if (isAppYsV2Site(site)) return 'YsV2';
+    return 'T4';
+  }
+
   ISpiderService get currentApiService {
     final site = currentSite.value;
     if (site == null) return _apiService;
@@ -267,7 +287,19 @@ class SourceManager extends GetxController {
         final service = Py3SpiderService(key);
         Get.put(service, tag: tag, permanent: true);
       }
-      return Get.find<Py3SpiderService>(tag: tag);
+      final service = Get.find<Py3SpiderService>(tag: tag);
+      // ===== 修复：py3 独立服务必须显式 switchSite，否则 _apiUrl 恒为 null，
+      //       Py3SpiderService._call() 会抛 "py 源路径未设置"。
+      //
+      // 幂等保护：仅当源地址变化时才 switchSite。
+      //   - 首次进详情页（currentApiUrl == null ≠ api）→ 执行 switchSite
+      //   - 退出再进同一详情页（同一 tag 实例复用，currentApiUrl == api）
+      //     → 跳过 switchSite，保留 _androidKey，省掉 Android 侧重复 loadSource
+      //   - 切换到不同 py 源小说/漫画 → 地址变化 → 执行 switchSite 重新 loadSource
+      if (service.currentApiUrl != api) {
+        service.switchSite(api, key, ext: ext);
+      }
+      return service;
     }
     if (isDrpy3Site(site)) return _drpy3Service;
     if (isDrpy2Site(site)) return _drpy2Service;

@@ -57,6 +57,30 @@ import 'package:yuanying/modules/subtitle_translation/services/subtitle_translat
 import 'package:yuanying/modules/subtitle_translation/services/translation_engine.dart';
 import 'package:yuanying/modules/agent_llm/models/playback_context.dart';
 
+/// 从历史恢复播放的位置信息
+class _ResumeInfo {
+  final int? episodeIndex;
+  final int? sourceIndex;
+  final String? sourceName;
+  final String? episodeName;
+  final int? positionSeconds;
+
+  _ResumeInfo({
+    this.episodeIndex,
+    this.sourceIndex,
+    this.sourceName,
+    this.episodeName,
+    this.positionSeconds,
+  });
+
+  bool get hasData =>
+      episodeIndex != null ||
+      sourceIndex != null ||
+      (sourceName != null && sourceName!.isNotEmpty) ||
+      (episodeName != null && episodeName!.isNotEmpty) ||
+      positionSeconds != null;
+}
+
 class DetailController extends GetxController with GetTickerProviderStateMixin {
   // ===== tag 用于隔离控制器 =====
   final String? _tag;
@@ -90,6 +114,9 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
   //   因为 push 模式下 introController.currentPlayEpisode 可能是错的，
   //   只有 directTitle 才代表用户实际点击的那一集
   String? _currentDirectTitle;
+
+  /// 从历史恢复的播放信息（仅 loadVideoDetail 首次消费一次）
+  _ResumeInfo? _resumeInfo;
 
   // 外部上报的进度 Timer（仅在注入了 listener 时启动）
   Timer? _externalProgressTimer;
@@ -723,6 +750,32 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
         final apiUrl = currentSite['api']?.toString() ?? '';
         introController.setCurrentApiUrl(apiUrl);
       }
+
+      // ===== 解析从历史恢复的播放信息 =====
+      final rEpIdx   = args['resumeEpisodeIndex'];
+      final rSrcIdx  = args['resumeSourceIndex'];
+      final rSrcName = args['resumeSourceName']?.toString();
+      final rEpName  = args['resumeEpisodeName']?.toString();
+      final rPos     = args['resumePositionSeconds'];
+      if (rEpIdx is int ||
+          rSrcIdx is int ||
+          rPos is num ||
+          (rSrcName != null && rSrcName.isNotEmpty) ||
+          (rEpName != null && rEpName.isNotEmpty)) {
+        _resumeInfo = _ResumeInfo(
+          episodeIndex: rEpIdx is int ? rEpIdx : null,
+          sourceIndex: rSrcIdx is int ? rSrcIdx : null,
+          sourceName: rSrcName,
+          episodeName: rEpName,
+          positionSeconds: rPos is num ? rPos.toInt() : null,
+        );
+        debugPrint('[DetailController] 收到历史恢复参数: '
+            'epIdx=${_resumeInfo!.episodeIndex}, '
+            'srcIdx=${_resumeInfo!.sourceIndex}, '
+            'srcName=${_resumeInfo!.sourceName}, '
+            'epName=${_resumeInfo!.episodeName}, '
+            'pos=${_resumeInfo!.positionSeconds}');
+      }
     } else {
       detailError.value = '参数错误';
       isLoadingDetail.value = false;
@@ -1082,6 +1135,14 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
           if (firstSource.episodes.isNotEmpty) {
             isLoadingDetail.value = false;
 
+            // ===== 优先：从历史恢复播放 =====
+            if (_resumeInfo != null && _resumeInfo!.hasData) {
+              final resume = _resumeInfo!;
+              _resumeInfo = null; // 只消费一次
+              await _playWithResume(detail, resume);
+              return;
+            }
+
             // ===== 检测第一集是否为推送链接 =====
             final firstEpisode = firstSource.episodes.first;
             if (firstEpisode.url.startsWith('push://')) {
@@ -1124,6 +1185,85 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
       detailError.value = '请求异常: ${e.toString()}';
       isLoadingDetail.value = false;
     }
+  }
+
+  /// 从历史恢复播放：定位到对应线路 + 集数 + 进度后播放
+  ///
+  /// 匹配策略（优先级从高到低）：
+  ///   1. source_name / episode_name 名称匹配（防 line/episode 顺序变化）
+  ///   2. source_index / episode_index 索引匹配
+  ///   3. 缺失时回退到 0
+  ///
+  /// 保证：任一字段缺失/匹配失败都不会抛异常，
+  /// 最坏情况等价于"从第 1 集从头播"。
+  Future<void> _playWithResume(VideoDetail detail, _ResumeInfo resume) async {
+    if (detail.playSources.isEmpty) {
+      isLoadingDetail.value = false;
+      return;
+    }
+
+    // ---- 1. 定位线路 ----
+    int sourceIdx = resume.sourceIndex ?? 0;
+    if (resume.sourceName != null && resume.sourceName!.isNotEmpty) {
+      final found = detail.playSources.indexWhere(
+        (s) => s.name == resume.sourceName,
+      );
+      if (found >= 0) sourceIdx = found;
+    }
+    sourceIdx = sourceIdx.clamp(0, detail.playSources.length - 1);
+
+    final source = detail.playSources[sourceIdx];
+    if (source.episodes.isEmpty) {
+      isLoadingDetail.value = false;
+      return;
+    }
+
+    // ---- 2. 定位集数 ----
+    int epIdx = resume.episodeIndex ?? 0;
+    if (resume.episodeName != null && resume.episodeName!.isNotEmpty) {
+      final found = source.episodes.indexWhere(
+        (e) => e.name == resume.episodeName,
+      );
+      if (found >= 0) epIdx = found;
+    }
+    epIdx = epIdx.clamp(0, source.episodes.length - 1);
+
+    // ---- 3. 同步 UI / 状态索引 ----
+    introController.switchDisplaySource(sourceIdx);
+    introController.switchPlaySource(sourceIdx);
+    introController.switchEpisode(epIdx);
+
+    final episode = source.episodes[epIdx];
+
+    // ---- 4. 推送链接：走原有推送逻辑（不自动播，也无需恢复进度）----
+    if (episode.url.startsWith('push://')) {
+      checkAndHandlePushEpisode(episode);
+      return;
+    }
+
+    // ---- 5. 播放 ----
+    final posSec = resume.positionSeconds ?? 0;
+    final seekTo = posSec > 0 ? Duration(seconds: posSec) : null;
+
+    final bool autoPlay = PlayerPref.autoPlayEnable;
+    if (autoPlay) _showPlayLoading();
+    try {
+      await _playEpisode(
+        episode,
+        sourceIndex: sourceIdx,
+        episodeIndex: epIdx,
+        autoPlay: autoPlay,
+        seekTo: seekTo,
+      );
+    } finally {
+      SmartDialog.dismiss(tag: 'play_loading', force: true);
+    }
+    if (!autoPlay) isLoadingDetail.value = false;
+
+    debugPrint('[DetailController] 历史恢复完成: '
+        'src=$sourceIdx/${detail.playSources.length}, '
+        'ep=$epIdx/${source.episodes.length}, '
+        'seek=${seekTo?.inSeconds}s');
   }
 
   void _showPlayLoading() {
@@ -1759,7 +1899,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
       _loadDanmakuOnPlay(null, playUrl.headers);
     }
 
-    _addToHistory();
+    _addToHistory(initialPosition: effectiveSeek);
 
     // ---- 播放完成监听（自动切换） ----
     if (_playCompletedListener != null) {
@@ -1903,7 +2043,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
   }
 
   // ===== 添加历史记录 =====
-  void _addToHistory() {
+  void _addToHistory({Duration? initialPosition}) {
     try {
       final detail = introController.videoDetail.value;
       if (detail == null) return;
@@ -1923,7 +2063,27 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
         return;
       }
 
-      // 读取现有历史数据
+      // 当前线路名（PlaySource.name）
+      final playSource = introController.getCurrentPlaySource();
+      final lineName = playSource?.name ?? '';
+
+      // 进度位置：优先 seekTo 目标值（setDataSource 返回时 position 可能未就绪），
+      // 否则用当前 playerController.position
+      Duration effectivePosition;
+      if (initialPosition != null && initialPosition > Duration.zero) {
+        effectivePosition = initialPosition;
+      } else if (playerController.position > Duration.zero) {
+        effectivePosition = playerController.position;
+      } else {
+        effectivePosition = Duration.zero;
+      }
+      final duration = playerController.duration.value;
+      final progressStr = duration.inSeconds > 0
+          ? '${_formatDuration(effectivePosition)} / ${_formatDuration(duration)}'
+          : '00:00 / 00:00';
+      final progressSeconds = effectivePosition.inSeconds;
+
+      // 读取现有历史
       final existingHistory = GStorage.getHistory();
 
       // 查找是否存在相同 vod_id 且相同 api_url 的记录
@@ -1932,25 +2092,43 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
       );
 
       if (existingIndex != -1) {
-        // 同一源同一视频：更新进度和时间
-        existingHistory[existingIndex]['progress'] = '00:00 / 00:00';
-        existingHistory[existingIndex]['watchTime'] = DateTime.now().millisecondsSinceEpoch;
+        // 同一源同一视频：更新
+        final item = existingHistory[existingIndex];
+        item['vod_remarks'] = episode.name;
+        item['watchTime'] = DateTime.now().millisecondsSinceEpoch;
+        item['progress'] = progressStr;
+        item['progress_seconds'] = progressSeconds;
+        item['episode_index'] = _currentEpisodeIndex;
+        item['episode_name'] = episode.name;
+        item['source_index'] = _currentSourceIndex;
+        item['source_name'] = lineName;
         GStorage.saveHistory(existingHistory);
       } else {
         // 不同源：新增一条独立记录
+        // ===== 拼装带源类型标签的显示名 =====
+        final typeLabel = SourceManager.sourceTypeLabel(site);
+        final typeName = typeLabel.isEmpty
+            ? sourceName
+            : '$sourceName ($typeLabel)';
+
         final historyItem = {
           'vod_id': vodId,
           'vod_name': detail.vodName,
           'vod_pic': detail.vodPic,
           'vod_remarks': episode.name,
           'vod_tag': detail.vodTag ?? '',
-          'type_name': sourceName,
+          'type_name': typeName,
           'api_url': currentApiUrl,
           'site_key': siteKey,
           'config_key': Get.find<SourceManager>().currentConfigKey.value,
-          'progress': '00:00 / 00:00',
+          'progress': progressStr,
+          'progress_seconds': progressSeconds,
           'watchTime': DateTime.now().millisecondsSinceEpoch,
           'detail_type': detailType,
+          'episode_index': _currentEpisodeIndex,
+          'episode_name': episode.name,
+          'source_index': _currentSourceIndex,
+          'source_name': lineName,
         };
         existingHistory.insert(0, historyItem);
         if (existingHistory.length > 500) {
@@ -2044,18 +2222,59 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
       // duration 使用 .value（是 Rx<Duration>）
       final position = playerController.position;
       final duration = playerController.duration.value;
-      if (duration.inSeconds == 0) return;
 
       final posStr = _formatDuration(position);
-      final durStr = _formatDuration(duration);
+      final durStr =
+          duration.inSeconds > 0 ? _formatDuration(duration) : '--:--';
       final progress = '$posStr / $durStr';
 
       final historyList = GStorage.getHistory();
-      final index = historyList.indexWhere((item) => item['vod_id'] == detail.vodId);
-      if (index != -1) {
-        historyList[index]['progress'] = progress;
-        GStorage.saveHistory(historyList);
+
+      // 与 _addToHistory 一致：vod_id + api_url 精确定位；
+      // api_url 缺失时回退到 vod_id 匹配（保持原行为）。
+      // 额外加了 detail.vodId 双匹配兜底：若构造时的 vodId 与 API 返回的
+      // detail.vodId 不一致（少数源会出现），依然能命中同一条记录。
+      final currentApiUrl = _currentSiteConfig?['api']?.toString() ?? '';
+      int index = -1;
+      if (currentApiUrl.isNotEmpty) {
+        index = historyList.indexWhere(
+          (item) =>
+              item['vod_id'] == vodId &&
+              item['api_url'] == currentApiUrl,
+        );
+        if (index == -1) {
+          index = historyList.indexWhere(
+            (item) =>
+                item['vod_id'] == detail.vodId &&
+                item['api_url'] == currentApiUrl,
+          );
+        }
       }
+      if (index == -1) {
+        index = historyList.indexWhere((item) => item['vod_id'] == vodId);
+        if (index == -1) {
+          index = historyList.indexWhere(
+            (item) => item['vod_id'] == detail.vodId,
+          );
+        }
+      }
+      if (index == -1) return;
+
+      final item = historyList[index];
+      item['progress'] = progress;
+      item['progress_seconds'] = position.inSeconds;
+      item['episode_index'] = _currentEpisodeIndex;
+      item['source_index'] = _currentSourceIndex;
+
+      final ep = _currentEpisode;
+      if (ep != null) {
+        item['episode_name'] = ep.name;
+        item['vod_remarks'] = ep.name;
+      }
+      final ps = introController.getCurrentPlaySource();
+      if (ps != null) item['source_name'] = ps.name;
+
+      GStorage.saveHistory(historyList);
     } catch (e) {
       // 忽略更新失败
     }

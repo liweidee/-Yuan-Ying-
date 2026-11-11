@@ -6,6 +6,7 @@ import 'package:yuanying/modules/novel/widgets/book_cover.dart';
 import 'package:yuanying/core/theme/style.dart';
 import 'package:yuanying/common/widgets/image_viewer/gallery_viewer.dart';
 import 'package:yuanying/common/widgets/image_viewer/hero.dart';
+import 'package:yuanying/common/widgets/route_aware_mixin.dart';
 
 const int kGroupSize = 50;
 
@@ -16,7 +17,8 @@ class NovelDetailPage extends StatefulWidget {
   State<NovelDetailPage> createState() => _NovelDetailPageState();
 }
 
-class _NovelDetailPageState extends State<NovelDetailPage> {
+class _NovelDetailPageState extends State<NovelDetailPage>
+    with RouteAware, RouteAwareMixin<NovelDetailPage> {
   late final NovelDetailController controller;
   late final String vodId;
   late final String pwd;
@@ -36,6 +38,14 @@ class _NovelDetailPageState extends State<NovelDetailPage> {
     if (vodId.isNotEmpty) {
       controller = Get.put(NovelDetailController(), tag: vodId);
       controller.init(vodId, pwd, site);
+    }
+  }
+
+  @override
+  void didPopNext() {
+    // 从阅读器返回时触发：重新从 storage 读取最新章节
+    if (vodId.isNotEmpty) {
+      controller.refreshProgress();
     }
   }
 
@@ -144,6 +154,11 @@ class _NovelDetailPageState extends State<NovelDetailPage> {
     return Scaffold(
       backgroundColor: colorScheme.surface,
       body: Obx(() {
+        // ===== Fix: 显式读取 savedChapter，建立 Obx 响应式依赖 =====
+        // 不加这行，SliverList.builder 里读 controller.savedChapter.value
+        // 发生在 lazy build 阶段，脱离 Obx 作用域，变化不会触发重建。
+        final savedChapterIndex = controller.savedChapter.value;
+    
         if (controller.isLoading.value) {
           return const Center(child: CircularProgressIndicator());
         }
@@ -335,7 +350,7 @@ class _NovelDetailPageState extends State<NovelDetailPage> {
                 delegate: SliverChildBuilderDelegate(
                   (context, i) {
                     final idx = indices[i];
-                    final isSaved = idx == controller.savedChapter.value;
+                    final isSaved = idx == savedChapterIndex;
                     return InkWell(
                       onTap: () => controller.openReader(idx),
                       borderRadius: BorderRadius.circular(10),
@@ -375,7 +390,7 @@ class _NovelDetailPageState extends State<NovelDetailPage> {
               delegate: SliverChildBuilderDelegate(
                 (context, i) {
                   final idx = indices[i];
-                  final isSaved = idx == controller.savedChapter.value;
+                  final isSaved = idx == savedChapterIndex;
                   return Column(
                     children: [
                       ListTile(
@@ -414,6 +429,7 @@ class _NovelDetailPageState extends State<NovelDetailPage> {
 
         // ========== CustomScrollView ==========
         final scrollView = CustomScrollView(
+          key: PageStorageKey('novel_detail_scroll_$vodId'),
           slivers: slivers,
         );
 

@@ -7,25 +7,50 @@ import 'package:yuanying/core/constants/app_constants.dart';
 
 class FavoriteController extends GetxController {
   final videoList = <VideoItem>[].obs;
-  final _apiUrlMap = <String, String>{}.obs;
-  final _siteKeyMap = <String, String>{}.obs;
-  final _configKeyMap = <String, String>{}.obs;
+
+  // ===== 所有辅助 map 统一使用复合 key =====
+  final _apiUrlMap     = <String, String>{}.obs;
+  final _siteKeyMap    = <String, String>{}.obs;
+  final _configKeyMap  = <String, String>{}.obs;
   final _detailTypeMap = <String, String>{}.obs;
 
-  // 过滤类型
-  final filterType = 'all'.obs;  // 'all', 'video', 'audio', 'novel', 'manga'
-  final isLoading = false.obs;
+  // 与 videoList 一一对应的复合 key
+  final List<String> _recordKeys = [];
 
-  String? getConfigKey(String vodId) => _configKeyMap[vodId];
+  final filterType = 'all'.obs;
+  final isLoading = false.obs;
 
   final SourceManager _sourceManager = Get.find<SourceManager>();
 
-  // 计算属性
+  // ==========================================================================
+  // 复合 key 工具
+  // ==========================================================================
+
+  static String _makeKey(String vodId, String apiUrl) =>
+      apiUrl.isEmpty ? vodId : '$vodId|$apiUrl';
+
+  String _keyOf(VideoItem item) {
+    final idx = videoList.indexOf(item);
+    if (idx >= 0 && idx < _recordKeys.length) return _recordKeys[idx];
+    return item.vodId;
+  }
+
+  // ==========================================================================
+  // 过滤
+  // ==========================================================================
+
   List<VideoItem> get filteredList {
     if (filterType.value == 'all') return videoList;
-    return videoList.where((item) {
-      return _detailTypeMap[item.vodId] == filterType.value;
-    }).toList();
+    final result = <VideoItem>[];
+    for (int i = 0; i < videoList.length; i++) {
+      final key = i < _recordKeys.length
+          ? _recordKeys[i]
+          : videoList[i].vodId;
+      if (_detailTypeMap[key] == filterType.value) {
+        result.add(videoList[i]);
+      }
+    }
+    return result;
   }
 
   @override
@@ -34,55 +59,93 @@ class FavoriteController extends GetxController {
     loadFavorites();
   }
 
+  // ==========================================================================
+  // 加载
+  // ==========================================================================
+
   void loadFavorites() {
     isLoading.value = true;
     try {
       final data = GStorage.getFavorites();
-      final list = <VideoItem>[];
-      final urlMap = <String, String>{};
-      final siteKeyMap = <String, String>{};
+      final list     = <VideoItem>[];
+      final keys     = <String>[];
+      final urlM     = <String, String>{};
+      final siteM    = <String, String>{};
+      final configM  = <String, String>{};
+      final typeM    = <String, String>{};
+
       for (final item in data) {
-        final videoItem = VideoItem.fromJson(item);
-        if (item['config_key'] != null) {
-          _configKeyMap[videoItem.vodId] = item['config_key'].toString();
-        }
-        list.add(videoItem);
-        if (item['api_url'] != null) {
-          urlMap[videoItem.vodId] = item['api_url'].toString();
-        }
+        final v = VideoItem.fromJson(item);
+        final apiUrl = item['api_url']?.toString() ?? '';
+        final key = _makeKey(v.vodId, apiUrl);
+
+        list.add(v);
+        keys.add(key);
+
+        if (apiUrl.isNotEmpty) urlM[key] = apiUrl;
         if (item['site_key'] != null) {
-          siteKeyMap[videoItem.vodId] = item['site_key'].toString();
+          siteM[key] = item['site_key'].toString();
         }
-        final type = item['detail_type']?.toString() ?? 'video';
-        _detailTypeMap[videoItem.vodId] = type;
+        if (item['config_key'] != null) {
+          configM[key] = item['config_key'].toString();
+        }
+        typeM[key] = item['detail_type']?.toString() ?? 'video';
       }
+
       videoList.value = list;
-      _apiUrlMap.value = urlMap;
-      _siteKeyMap.value = siteKeyMap;
+      _recordKeys
+        ..clear()
+        ..addAll(keys);
+      _apiUrlMap.value     = urlM;
+      _siteKeyMap.value    = siteM;
+      _configKeyMap.value  = configM;
+      _detailTypeMap.value = typeM;
     } catch (e) {
       print('加载收藏失败: $e');
-      videoList.clear();
-      _apiUrlMap.clear();
-      _siteKeyMap.clear();
+      _clearState();
     } finally {
       isLoading.value = false;
     }
   }
 
+  void _clearState() {
+    videoList.clear();
+    _recordKeys.clear();
+    _apiUrlMap.clear();
+    _siteKeyMap.clear();
+    _configKeyMap.clear();
+    _detailTypeMap.clear();
+  }
+
+  // ==========================================================================
+  // 删除 / 清空
+  // ==========================================================================
+
   Future<void> clearAll() async {
     await GStorage.clearFavorites();
-    videoList.clear();
-    _apiUrlMap.clear();
+    _clearState();
   }
 
-  Future<void> removeFavorite(String vodId) async {
-    await GStorage.removeFavorite(vodId);
-    videoList.removeWhere((item) => item.vodId == vodId);
-    _apiUrlMap.remove(vodId);
+  Future<void> removeFavorite(VideoItem item) async {
+    final key = _keyOf(item);
+    final apiUrl = _apiUrlMap[key] ?? '';
+    await GStorage.removeFavorite(item.vodId, apiUrl);
+
+    final idx = videoList.indexOf(item);
+    if (idx >= 0) {
+      videoList.removeAt(idx);
+      if (idx < _recordKeys.length) _recordKeys.removeAt(idx);
+    }
+
+    _apiUrlMap.remove(key);
+    _siteKeyMap.remove(key);
+    _configKeyMap.remove(key);
+    _detailTypeMap.remove(key);
   }
 
-  String? getApiUrl(String vodId) => _apiUrlMap[vodId];
-  String? getSiteKey(String vodId) => _siteKeyMap[vodId];
+  // ==========================================================================
+  // 时间格式化
+  // ==========================================================================
 
   String formatTimeAgo(int timestamp) {
     final now = DateTime.now().millisecondsSinceEpoch;
@@ -101,18 +164,23 @@ class FavoriteController extends GetxController {
     return '${days ~/ 365}年前';
   }
 
+  // ==========================================================================
+  // 跳转
+  // ==========================================================================
+
   void navigateToDetail(VideoItem item) {
-    final type = _detailTypeMap[item.vodId] ?? 'video';
+    final key = _keyOf(item);
+    final type = _detailTypeMap[key] ?? 'video';
 
     // ---- 小说 ----
     if (type == 'novel') {
-      final storedConfigKey = getConfigKey(item.vodId);
+      final storedConfigKey = _configKeyMap[key];
       final currentConfigKey = _sourceManager.currentConfigKey.value;
       if (storedConfigKey != null && storedConfigKey != currentConfigKey) {
         SmartDialog.showToast('该小说所属配置接口 "$storedConfigKey" 已切换，请切换回该配置后重试');
         return;
       }
-      final siteKey = getSiteKey(item.vodId);
+      final siteKey = _siteKeyMap[key];
       Map<String, dynamic>? targetSite;
       if (siteKey != null && siteKey.isNotEmpty) {
         try {
@@ -140,13 +208,13 @@ class FavoriteController extends GetxController {
 
     // ---- 漫画 ----
     if (type == 'manga') {
-      final storedConfigKey = getConfigKey(item.vodId);
+      final storedConfigKey = _configKeyMap[key];
       final currentConfigKey = _sourceManager.currentConfigKey.value;
       if (storedConfigKey != null && storedConfigKey != currentConfigKey) {
         SmartDialog.showToast('该漫画所属配置接口 "$storedConfigKey" 已切换，请切换回该配置后重试');
         return;
       }
-      final siteKey = getSiteKey(item.vodId);
+      final siteKey = _siteKeyMap[key];
       Map<String, dynamic>? targetSite;
       if (siteKey != null && siteKey.isNotEmpty) {
         try {
@@ -174,13 +242,13 @@ class FavoriteController extends GetxController {
 
     // ---- 音频 ----
     if (type == 'audio') {
-      final storedConfigKey = getConfigKey(item.vodId);
+      final storedConfigKey = _configKeyMap[key];
       final currentConfigKey = _sourceManager.currentConfigKey.value;
       if (storedConfigKey != null && storedConfigKey != currentConfigKey) {
         SmartDialog.showToast('该音频所属配置接口 "$storedConfigKey" 已切换，请切换回该配置后重试');
         return;
       }
-      final siteKey = getSiteKey(item.vodId);
+      final siteKey = _siteKeyMap[key];
       Map<String, dynamic>? targetSite;
       if (siteKey != null && siteKey.isNotEmpty) {
         try {
@@ -206,14 +274,14 @@ class FavoriteController extends GetxController {
       return;
     }
 
-    // ---- 原有视频逻辑 ----
-    final storedConfigKey = getConfigKey(item.vodId);
+    // ---- 视频 ----
+    final storedConfigKey = _configKeyMap[key];
     final currentConfigKey = _sourceManager.currentConfigKey.value;
     if (storedConfigKey != null && storedConfigKey != currentConfigKey) {
       SmartDialog.showToast('该收藏所属配置接口 "$storedConfigKey" 已切换，请切换回该配置后重试');
       return;
     }
-    final siteKey = getSiteKey(item.vodId);
+    final siteKey = _siteKeyMap[key];
     Map<String, dynamic>? targetSite;
     bool isCurrent = false;
 
@@ -231,7 +299,7 @@ class FavoriteController extends GetxController {
       }
     }
     if (targetSite == null) {
-      final apiUrl = getApiUrl(item.vodId);
+      final apiUrl = _apiUrlMap[key];
       if (apiUrl != null && apiUrl.isNotEmpty) {
         Get.toNamed('/detail', arguments: {
           'vodId': item.vodId,

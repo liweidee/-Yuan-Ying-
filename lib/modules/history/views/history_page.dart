@@ -168,9 +168,11 @@ class _HistoryPageState extends State<HistoryPage> {
         itemCount: list.length,
         itemBuilder: (context, index) {
           final item = list[index];
-          final progress = controller.getProgress(item.vodId) ?? '';
-          final watchTime = controller.getWatchTime(item.vodId);
+          final progress = controller.getProgress(item) ?? '';
+          final watchTime = controller.getWatchTime(item);
           final timeAgo = watchTime != null ? controller.formatTimeAgo(watchTime) : '';
+          final episodeTitle = item.vodRemarks ?? '';
+
           return MediaCard(
             videoItem: item,
             onTap: () => controller.navigateToDetail(item),
@@ -180,7 +182,7 @@ class _HistoryPageState extends State<HistoryPage> {
             progressText: progress,
             showDeleteButton: true,
             onDelete: () => _showDeleteConfirmDialog(context, item),
-            bottomSubText: progress.isNotEmpty ? progress.split(' / ').first : '',
+            bottomSubText: episodeTitle,
             bottomSubColor: Theme.of(context).colorScheme.outline,
             timeAgo: timeAgo,
           );
@@ -201,7 +203,7 @@ class _HistoryPageState extends State<HistoryPage> {
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: Text('取消', style: TextStyle(color: colorScheme.outline, fontSize: 14))),
           TextButton(
-            onPressed: () async { Navigator.pop(ctx); await controller.removeHistory(item.vodId); },
+            onPressed: () async { Navigator.pop(ctx); await controller.removeHistory(item); },
             child: Text('确认', style: TextStyle(color: colorScheme.error, fontSize: 14, fontWeight: FontWeight.w500)),
           ),
         ],

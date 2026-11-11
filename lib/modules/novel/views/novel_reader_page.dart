@@ -296,7 +296,9 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
       _error = null;
     });
     try {
-      final cacheKey = 'novel_chapter_${_vodId}_$idx';
+      final apiUrl = _site?['api']?.toString() ?? '';
+      final cacheKey = StorageManager.sourceScopedKey(
+          'novel_chapter_${_vodId}_$idx', apiUrl);
       String text = StorageManager.getCache<String>(cacheKey) ?? '';
       if (text.isEmpty) {
         final playUrl = await _apiService.getPlayUrl(
@@ -405,20 +407,9 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
     }
   }
 
-  // Future<void> _saveProgress() async {
-  //   final key = 'novel_progress_$_vodId';
-  //   double offset = 0;
-  //   if (_paged && _pagedReady && _pageUnits.length > 1) {
-  //     offset = _pageIndex / (_pageUnits.length - 1);
-  //   } else if (_scroll.hasClients && _scroll.position.maxScrollExtent > 0) {
-  //     offset = _scroll.position.pixels / _scroll.position.maxScrollExtent;
-  //   }
-  //   final progress = {'chapter': _index, 'offset': offset};
-  //   await StorageManager.setCache(key, progress);
-  // }
-
   Future<void> _saveProgress() async {
-    final key = 'novel_progress_$_vodId';
+    final apiUrl = _site?['api']?.toString() ?? '';
+    final key = StorageManager.progressKey('novel_progress', _vodId, apiUrl);
     final progress = {'chapter': _index};
     await StorageManager.setCache(key, progress);
   }
@@ -805,7 +796,9 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
       searchableChapters: indexes,
       titles: _titles,
       chapterText: (i) async {
-        final cacheKey = 'novel_chapter_${_vodId}_$i';
+        final apiUrl = _site?['api']?.toString() ?? '';
+        final cacheKey = StorageManager.sourceScopedKey(
+            'novel_chapter_${_vodId}_$i', apiUrl);
         final cached = StorageManager.getCache<String>(cacheKey);
         if (cached != null) return cached;
         final playUrl = await _apiService.getPlayUrl(

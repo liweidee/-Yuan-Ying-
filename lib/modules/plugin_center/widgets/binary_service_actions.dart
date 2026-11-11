@@ -523,9 +523,10 @@ class _BinaryServiceConfigDialogState
                 ),
               ),
               const SizedBox(height: 12),
+              // minLines: 1 使输入框起始高度与端口框一致；内容超出后自动扩展至 maxLines
               TextField(
                 controller: _argsCtrl,
-                minLines: 2,
+                minLines: 1,
                 maxLines: 4,
                 decoration: const InputDecoration(
                   labelText: '启动参数',
@@ -811,7 +812,9 @@ Future<void> startBinaryService(
     args: args,
     cwd: preset.defaultCwd,
     autostart: false,
-    keepForeground: true, // 后台常驻，App 关闭时不杀、下次启动收养
+    // 默认关闭：App 关闭时服务随之停止。
+    // 常驻（退出后仍存活）属于高级行为，需用户主动开启。
+    keepForeground: false,
     env: env,
     executable: exePath,
     healthType: preset.healthType,

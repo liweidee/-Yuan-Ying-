@@ -441,10 +441,18 @@ class MusicPlayerView extends StatelessWidget {
         return const SizedBox.shrink();
       }
 
+      final apiUrl = Get.find<SourceManager>()
+          .currentSite
+          .value?['api']
+          ?.toString() ??
+      '';
+
       bool isFav = false;
       if (vodId != null && vodId.isNotEmpty) {
         final favorites = GStorage.getFavorites();
-        isFav = favorites.any((item) => item['vod_id'] == vodId);
+        isFav = favorites.any((item) =>
+            item['vod_id'] == vodId &&
+            (item['api_url']?.toString() ?? '') == apiUrl);
       }
       return IconButton(
         iconSize: 22,
@@ -460,7 +468,6 @@ class MusicPlayerView extends StatelessWidget {
           final sourceManager = Get.find<SourceManager>();
           final site = sourceManager.currentSite.value;
           final sourceName = site?['name']?.toString() ?? '音乐';
-          final apiUrl = site?['api']?.toString() ?? '';
           final siteKey = site?['key']?.toString() ?? '';
           final configKey = sourceManager.currentConfigKey.value;
           const detailType = DetailType.audio;
@@ -468,16 +475,21 @@ class MusicPlayerView extends StatelessWidget {
           final cover = controller.coverUrl.value;
 
           if (isFav) {
-            GStorage.removeFavorite(vodId);
+            GStorage.removeFavorite(vodId, apiUrl);
             ToastUtils.show('已取消收藏');
           } else {
+            final typeLabel = SourceManager.sourceTypeLabel(site);
+            final typeName = typeLabel.isEmpty
+                ? sourceName
+                : '$sourceName ($typeLabel)';
+          
             final item = {
               'vod_id': vodId,
               'vod_name': songName,
               'vod_pic': cover,
               'vod_remarks': '',
               'vod_tag': '',
-              'type_name': sourceName,
+              'type_name': typeName,
               'api_url': apiUrl,
               'site_key': siteKey,
               'config_key': configKey,

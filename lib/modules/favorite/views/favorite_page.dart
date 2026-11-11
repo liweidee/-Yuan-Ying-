@@ -200,7 +200,7 @@ class _FavoritePageState extends State<FavoritePage> {
           TextButton(
             onPressed: () async {
               Navigator.pop(ctx);
-              await controller.removeFavorite(item.vodId);
+              await controller.removeFavorite(item);
             },
             child: Text('确认', style: TextStyle(color: colorScheme.error, fontSize: 14, fontWeight: FontWeight.w500)),
           ),

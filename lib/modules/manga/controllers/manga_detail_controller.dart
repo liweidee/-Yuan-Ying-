@@ -4,7 +4,7 @@ import 'package:yuanying/t4/models/video_detail.dart';
 import 'package:yuanying/t4/services/source_manager.dart';
 import 'package:yuanying/t4/services/i_spider_service.dart';
 import 'package:yuanying/utils/storage.dart';
-import 'package:yuanying/utils/storage_manager.dart';  // 新增导入
+import 'package:yuanying/utils/storage_manager.dart';
 import 'package:yuanying/core/constants/app_constants.dart';
 
 class MangaDetailController extends GetxController {
@@ -50,14 +50,13 @@ class MangaDetailController extends GetxController {
         _loadFavoriteStatus();
 
         // ===== 读取阅读进度（只读章节索引） =====
-        final progressKey = 'manga_progress_$vodId';
-        final progress = StorageManager.getCache<Map>(progressKey);
+        final progress = _readProgress();
         if (progress != null && progress['chapter'] != null) {
-          final chapter = progress['chapter'] as int;
-          if (chapter >= 0 && chapter < episodes.length) {
-            savedChapter.value = chapter;
-            hasProgress.value = true;
-          }
+            final chapter = (progress['chapter'] as num).toInt();
+            if (chapter >= 0 && chapter < episodes.length) {
+                savedChapter.value = chapter;
+                hasProgress.value = true;
+            }
         }
       } else {
         error.value = '未获取到章节信息';
@@ -69,9 +68,39 @@ class MangaDetailController extends GetxController {
     }
   }
 
+  /// 当前生效的 apiUrl（site 优先，回退全局源）
+  String get _currentApiUrl =>
+      site?['api']?.toString() ??
+      Get.find<SourceManager>().currentSite.value?['api']?.toString() ??
+      '';
+
+  /// 读取阅读进度（新 key miss 时读旧 key 并一次性迁移）
+  Map? _readProgress() {
+      final apiUrl = _currentApiUrl;
+      final newKey =
+          StorageManager.progressKey('manga_progress', vodId, apiUrl);
+      var progress = StorageManager.getCache<Map>(newKey);
+      if (progress == null && apiUrl.isNotEmpty) {
+          // 回退：读旧 key 并迁移到新 key，再删旧 key
+          final legacyKey = 'manga_progress_$vodId';
+          final legacy = StorageManager.getCache<Map>(legacyKey);
+          if (legacy != null) {
+              StorageManager.setCache(newKey, legacy);
+              StorageManager.deleteCache(legacyKey);
+              progress = legacy;
+          }
+      }
+      return progress;
+  }
+
   void _loadFavoriteStatus() {
     final favorites = GStorage.getFavorites();
-    isFavorite.value = favorites.any((item) => item['vod_id'] == vodId);
+    final api = site?['api']?.toString() ??
+        Get.find<SourceManager>().currentSite.value?['api']?.toString() ??
+        '';
+    isFavorite.value = favorites.any((item) =>
+        item['vod_id'] == vodId &&
+        (item['api_url']?.toString() ?? '') == api);
   }
 
   void toggleFavorite() {
@@ -86,16 +115,21 @@ class MangaDetailController extends GetxController {
     final detailType = SourceManager.getDetailTypeFromSite(site);
 
     if (isFavorite.value) {
-      GStorage.removeFavorite(vodId);
+      GStorage.removeFavorite(vodId, apiUrl);
       isFavorite.value = false;
     } else {
+      final typeLabel = SourceManager.sourceTypeLabel(site);
+      final typeName = typeLabel.isEmpty
+          ? sourceName
+          : '$sourceName ($typeLabel)';
+          
       final item = {
         'vod_id': vodId,
         'vod_name': detail.vodName,
         'vod_pic': detail.vodPic,
         'vod_remarks': detail.vodRemarks ?? '',
         'vod_tag': detail.vodTag ?? '',
-        'type_name': sourceName,
+        'type_name': typeName,
         'api_url': apiUrl,
         'site_key': siteKey,
         'config_key': configKey,
@@ -110,6 +144,9 @@ class MangaDetailController extends GetxController {
     if (detail.value == null || episodes.isEmpty) return;
     final index = chapterIndex ?? savedChapter.value;
     if (index < 0 || index >= episodes.length) return;
+
+    savedChapter.value = index;
+    hasProgress.value = true;
 
     _addToHistory(index);
 
@@ -141,13 +178,19 @@ class MangaDetailController extends GetxController {
       (item) => item['vod_id'] == vodId && item['api_url'] == apiUrl,
     );
 
+    // ===== 拼装带源类型标签的显示名 =====
+    final typeLabel = SourceManager.sourceTypeLabel(site);
+    final typeName = typeLabel.isEmpty
+        ? sourceName.value
+        : '${sourceName.value} ($typeLabel)';
+
     final historyItem = {
       'vod_id': vodId,
       'vod_name': detail.vodName,
       'vod_pic': detail.vodPic,
       'vod_remarks': episode.name,
       'vod_tag': detail.vodTag ?? '',
-      'type_name': sourceName.value,
+      'type_name': typeName,
       'api_url': apiUrl,
       'site_key': site?['key']?.toString() ?? '',
       'config_key': Get.find<SourceManager>().currentConfigKey.value,
@@ -162,5 +205,20 @@ class MangaDetailController extends GetxController {
       historyList.insert(0, historyItem);
     }
     GStorage.saveHistory(historyList);
+  }
+
+  /// 从 storage 重新读取阅读进度（轻量，不重拉详情）
+  /// 由详情页在 didPopNext 时调用。
+  void refreshProgress() {
+    if (episodes.isEmpty) return;
+    final progress = _readProgress();
+    if (progress == null) return;
+    final raw = progress['chapter'];
+    if (raw == null) return;
+    final chapter = (raw as num).toInt();
+    if (chapter >= 0 && chapter < episodes.length) {
+        savedChapter.value = chapter;
+        hasProgress.value = true;
+    }
   }
 }

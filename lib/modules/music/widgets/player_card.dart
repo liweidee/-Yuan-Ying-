@@ -57,7 +57,14 @@ class PlayerCardState extends State<PlayerCard>
       _loadLxFavoriteStatus(vodId);
     } else {
       final favorites = GStorage.getFavorites();
-      _isLike.value = favorites.any((item) => item['vod_id'] == vodId);
+      final apiUrl = Get.find<SourceManager>()
+              .currentSite
+              .value?['api']
+              ?.toString() ??
+          '';
+      _isLike.value = favorites.any((item) =>
+          item['vod_id'] == vodId &&
+          (item['api_url']?.toString() ?? '') == apiUrl);
     }
   }
 
@@ -99,17 +106,22 @@ class PlayerCardState extends State<PlayerCard>
     final cover = controller.coverUrl.value;
 
     if (_isLike.value) {
-      GStorage.removeFavorite(vodId);
+      GStorage.removeFavorite(vodId, apiUrl);
       _isLike.value = false;
       ToastUtils.show('已取消收藏');
     } else {
+      final typeLabel = SourceManager.sourceTypeLabel(site);
+      final typeName = typeLabel.isEmpty
+          ? sourceName
+          : '$sourceName ($typeLabel)';
+                
       final item = {
         'vod_id': vodId,
         'vod_name': songName,
         'vod_pic': cover,
         'vod_remarks': '',
         'vod_tag': '',
-        'type_name': sourceName,
+        'type_name': typeName,
         'api_url': apiUrl,
         'site_key': siteKey,
         'config_key': configKey,
@@ -774,7 +786,14 @@ class PlayerCardState extends State<PlayerCard>
         isFav = _isLike.value;
       } else {
         final favorites = GStorage.getFavorites();
-        isFav = favorites.any((item) => item['vod_id'] == vodId);
+        final apiUrl = Get.find<SourceManager>()
+                .currentSite
+                .value?['api']
+                ?.toString() ??
+            '';
+        isFav = favorites.any((item) =>
+            item['vod_id'] == vodId &&
+            (item['api_url']?.toString() ?? '') == apiUrl);
       }
     }
     actions.add(_TopAction(

@@ -38,6 +38,12 @@ class Py3SpiderService implements ISpiderService {
   @override
   String? get currentKey => _siteKey;
 
+  /// 当前生效的源地址。null 表示尚未通过 switchSite 初始化。
+  String? get currentApiUrl => _apiUrl;
+
+  /// 当前生效的扩展参数。null 表示尚未初始化。
+  dynamic get currentExt => _ext;
+
   @override
   void setBaseUrl(String url) {}
 

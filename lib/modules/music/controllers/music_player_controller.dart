@@ -84,6 +84,9 @@ class MusicPlayerController extends GetxController {
   String? _currentVodId;
   String? get currentVodId => _currentVodId;
 
+  /// 当前线路名（PlaySource.name），供历史记录使用
+  String? _currentSourceName;
+
   // ===== 定时器相关 =====
   final RxInt timerMinutes = 0.obs;
   final RxBool stopAfterCurrent = false.obs;
@@ -181,11 +184,15 @@ class MusicPlayerController extends GetxController {
     List<Episode> episodes, {
     int initialIndex = 0,
     String? vodId,
+    String? sourceName,           // 当前线路名
+    int? resumeEpisodeIndex,      // 历史恢复曲目索引
+    String? resumeEpisodeName,    // 历史恢复曲目名称（名称匹配优先）
     Future<PlayUrl?> Function(Episode episode)? urlFetcher,
   }) {
     if (episodes.isEmpty) return;
 
     _urlFetcher = urlFetcher;
+    _currentSourceName = sourceName;
 
     skipStartDuration.value = 0;
     skipEndDuration.value = 0;
@@ -194,12 +201,25 @@ class MusicPlayerController extends GetxController {
     _currentVodId = vodId;
 
     int savedIndex = initialIndex;
-    if (vodId != null && vodId.isNotEmpty) {
+
+    // 优先级 1：历史记录传入的 resume 索引（名称优先匹配，防索引错位）
+    if (resumeEpisodeIndex != null &&
+        resumeEpisodeIndex >= 0 &&
+        resumeEpisodeIndex < episodes.length) {
+      savedIndex = resumeEpisodeIndex;
+      if (resumeEpisodeName != null && resumeEpisodeName.isNotEmpty) {
+        final found =
+            episodes.indexWhere((e) => e.name == resumeEpisodeName);
+        if (found >= 0) savedIndex = found;
+      }
+    } else if (vodId != null && vodId.isNotEmpty) {
+      // 优先级 2：本地存储索引（收藏 / 常规进入）
       final loaded = _loadCurrentIndex(vodId);
       if (loaded != null && loaded >= 0 && loaded < episodes.length) {
         savedIndex = loaded;
       }
     }
+
     currentIndex.value = savedIndex;
   }
 
@@ -240,19 +260,31 @@ class MusicPlayerController extends GetxController {
       (item) => item['vod_id'] == _currentVodId && item['api_url'] == apiUrl,
     );
 
+    // ===== 拼装带源类型标签的显示名 =====
+    final baseName = site?['name']?.toString() ?? '音乐';
+    final typeLabel = SourceManager.sourceTypeLabel(site);
+    final typeName = typeLabel.isEmpty
+        ? baseName
+        : '$baseName ($typeLabel)';
+
     final historyItem = {
       'vod_id': _currentVodId,
       'vod_name': episode.name,
       'vod_pic': coverUrl.value,
       'vod_remarks': episode.name,
       'vod_tag': '',
-      'type_name': sourceManager.currentSite.value?['name']?.toString() ?? '音乐',
+      'type_name': typeName,
       'api_url': apiUrl,
       'site_key': site?['key']?.toString() ?? '',
       'config_key': sourceManager.currentConfigKey.value,
-      'progress': '',
+      'progress': '', // 不记录进度
       'watchTime': DateTime.now().millisecondsSinceEpoch,
       'detail_type': DetailType.audio,
+      // ===== 新增：集数与线路（供下次续播定位） =====
+      'episode_index': currentIndex.value,
+      'episode_name': episode.name,
+      'source_index': 0, // 音频单线路，固定 0
+      'source_name': _currentSourceName ?? '',
     };
 
     if (existingIndex != -1) {
@@ -841,11 +873,18 @@ class MusicPlayerController extends GetxController {
   static const String _storageMusicIndex = 'music_index_';
 
   void _saveCurrentIndex(String vodId, int index) {
-    StorageManager.setSetting('$_storageMusicIndex$vodId', index);
+    // Hive 单 key 上限 255 字符，vod_id 可能是长 URL，用 hashCode 兜底
+    final key = vodId.length <= 200
+        ? '$_storageMusicIndex$vodId'
+        : '$_storageMusicIndex${vodId.hashCode}_${vodId.length}';
+    StorageManager.setSetting(key, index);
   }
 
   int? _loadCurrentIndex(String vodId) {
-    return StorageManager.getSetting<int>('$_storageMusicIndex$vodId');
+    final key = vodId.length <= 200
+        ? '$_storageMusicIndex$vodId'
+        : '$_storageMusicIndex${vodId.hashCode}_${vodId.length}';
+    return StorageManager.getSetting<int>(key);
   }
 
   void _savePlayMode(MusicPlayMode mode) {

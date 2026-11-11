@@ -7,6 +7,7 @@ import 'dart:io' show Platform;
 import 'package:yuanying/modules/danmaku/controllers/danmaku_controller.dart';
 import 'package:yuanying/modules/danmaku/widgets/danmaku_view.dart';
 import 'package:yuanying/modules/video/controllers/video_controller.dart';
+import 'package:yuanying/modules/video/controllers/intro_controller.dart';
 import 'package:yuanying/modules/video/widgets/header_control.dart';
 import 'package:yuanying/modules/video/widgets/introduction/intro_view.dart';
 import 'package:yuanying/plugin/pl_player/view.dart';
@@ -180,7 +181,33 @@ class _DetailPageState extends State<DetailPage>
 
   @override
   void dispose() {
-    super.dispose();
+      // 手动清理详情页控制器
+      //
+      // DetailController 与 IntroController 是通过 Get.put 手动注册的
+      // （不是 GetPage 的 bindings），GetX 不会随路由销毁自动清理。
+      // 若不在 State.dispose 中手动 Get.delete，会导致：
+      //
+      //   1. DetailController.onClose 永远不执行 →
+      //      - 退出时的最终进度兜底（_updateHistoryProgress）不写入，
+      //        拖拽进度条 / 快速退出 等场景丢失播放进度
+      //      - playerController 的监听器、Timer、播放资源泄漏
+      //      - 多次进入详情页时状态互相污染
+      //
+      //   2. IntroController.onClose 永远不执行 → videoDetail 引用不释放
+      //
+      // 删除顺序很重要：
+      //   先删 DetailController，其 onClose 中要读取
+      //   introController.videoDetail.value 做最后一次进度兜底；
+      //   再删 IntroController，其 onClose 会清空 videoDetail。
+      //   顺序反了会导致兜底时 videoDetail 已为 null。
+      if (Get.isRegistered<DetailController>(tag: _controllerTag)) {
+        Get.delete<DetailController>(tag: _controllerTag);
+      }
+      if (Get.isRegistered<IntroController>(tag: _controllerTag)) {
+        Get.delete<IntroController>(tag: _controllerTag);
+      }
+
+      super.dispose();
   }
 
   // ===== 手动播放 UI（封面 + 导航栏 + 播放按钮） =====
