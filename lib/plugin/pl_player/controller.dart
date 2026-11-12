@@ -665,4 +665,18 @@ class PlPlayerController {
   RxInt get videoWidth => _ensureEngine().videoWidth;
   RxInt get videoHeight => _ensureEngine().videoHeight;
   RxDouble get downloadSpeed => _ensureEngine().downloadSpeed;
+
+  // ============================================================
+  // 媒体详细信息（透传）
+  // ============================================================
+  String? get mediaFormat => _ensureEngine().mediaFormat;
+  int? get mediaBitRate => _ensureEngine().mediaBitRate;
+  int? get mediaFileSize => _ensureEngine().mediaFileSize;
+  String? get videoCodec => _ensureEngine().videoCodec;
+  String? get audioCodec => _ensureEngine().audioCodec;
+  double? get audioBitrate => _ensureEngine().audioBitrate;
+  int? get audioSampleRate => _ensureEngine().audioSampleRate;
+  int? get audioChannels => _ensureEngine().audioChannels;
+  List<String> get audioTrackNames => _ensureEngine().audioTrackNames;
+  List<String> get subtitleTrackNames => _ensureEngine().subtitleTrackNames;
 }

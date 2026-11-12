@@ -366,4 +366,38 @@ abstract class IPlayerEngine {
   RxInt get videoWidth;
   RxInt get videoHeight;
   RxDouble get downloadSpeed;
+
+  // ============================================================
+  // 媒体详细信息（取不到返回 null；不支持则返回空列表）
+  // ============================================================
+
+  /// 容器格式（如 "mp4" / "matroska,webm"）
+  String? get mediaFormat;
+
+  /// 总码率（bps）
+  int? get mediaBitRate;
+
+  /// 文件大小（字节）
+  int? get mediaFileSize;
+
+  /// 当前视频编码
+  String? get videoCodec;
+
+  /// 当前音频编码
+  String? get audioCodec;
+
+  /// 当前音频码率（bps）
+  double? get audioBitrate;
+
+  /// 当前音频采样率（Hz）
+  int? get audioSampleRate;
+
+  /// 当前音频声道数
+  int? get audioChannels;
+
+  /// 所有可用音轨名称（不含 auto / no 虚拟项）
+  List<String> get audioTrackNames;
+
+  /// 所有可用字幕轨名称（不含 auto / no 虚拟项）
+  List<String> get subtitleTrackNames;
 }

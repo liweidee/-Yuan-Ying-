@@ -4,6 +4,7 @@ import 'package:get/get.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:yuanying/common/widgets/custom_icon.dart';
 import 'dart:io' show Platform;
+import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:yuanying/modules/danmaku/controllers/danmaku_controller.dart';
 import 'package:yuanying/modules/danmaku/widgets/danmaku_view.dart';
 import 'package:yuanying/modules/video/controllers/video_controller.dart';
@@ -264,47 +265,104 @@ class _DetailPageState extends State<DetailPage>
               ],
             ),
             actions: [
-              // 内核切换按钮
+              // ===== 内核切换按钮（弹菜单让用户选）=====
               // 失败视图会覆盖 HeaderControl（因为 autoPlay == false 时显示此视图），
-              // 用户无法通过顶部栏切内核。增加这个按钮让用户在失败视图直接
-              // 切换内核重试，无需退出详情页重新进入。
-              // - 显示当前内核（MDK / MPV），点击直接切到另一个
-              // - 传 autoPlayOverride: true：失败视图里用户点切换即期望能播放，
+              // 用户无法通过顶部栏切内核，所以这里提供入口。
+              //
+              // 交互与顶部栏 HeaderControl 保持一致：
+              //   点击 → 弹出菜单列出所有内核 → 用户主动选择 → 才真正切换
+              // 而不是直接切到"另一个"内核（否则用户会误以为是重新加载/点击穿透）。
+              //
+              // - initialValue 高亮当前内核
+              // - onSelected 里对"选了当前内核"做短路，避免无意义的重载
+              // - autoPlayOverride: true：失败视图里用户点切换即期望能播放，
               //   不像顶部栏那样沿用"切换前是否在播放"的状态
-              // - 复用 DetailController.switchPlayerEngine，行为与顶部栏完全一致
-              IconButton(
+              PopupMenuButton<PlayerEngineType>(
                 tooltip: '切换播放内核',
-                style: const ButtonStyle(
-                  padding: WidgetStatePropertyAll(EdgeInsets.zero),
+                offset: const Offset(0, 40),
+                color: Colors.black.withValues(alpha: 0.85),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
                 ),
-                onPressed: () {
-                  final newType = PlayerPref.playerEngine == PlayerEngineType.fvp
-                      ? PlayerEngineType.mediaKit
-                      : PlayerEngineType.fvp;
+                initialValue: PlayerPref.playerEngine,
+                itemBuilder: (context) => [
+                  PopupMenuItem<PlayerEngineType>(
+                    value: PlayerEngineType.mediaKit,
+                    height: 40,
+                    child: Row(
+                      children: [
+                        const Text(
+                          'MPV',
+                          style: TextStyle(color: Colors.white, fontSize: 13),
+                        ),
+                        const Spacer(),
+                        if (PlayerPref.playerEngine ==
+                            PlayerEngineType.mediaKit)
+                          const Icon(
+                            Icons.check,
+                            color: Colors.white,
+                            size: 16,
+                          ),
+                      ],
+                    ),
+                  ),
+                  PopupMenuItem<PlayerEngineType>(
+                    value: PlayerEngineType.fvp,
+                    height: 40,
+                    child: Row(
+                      children: [
+                        const Text(
+                          'MDK',
+                          style: TextStyle(color: Colors.white, fontSize: 13),
+                        ),
+                        const Spacer(),
+                        if (PlayerPref.playerEngine == PlayerEngineType.fvp)
+                          const Icon(
+                            Icons.check,
+                            color: Colors.white,
+                            size: 16,
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+                onSelected: (newType) {
+                  // 选了当前内核 → 不重复切换，避免一次无意义的重载
+                  if (newType == PlayerPref.playerEngine) {
+                    SmartDialog.showToast('已是当前内核');
+                    return;
+                  }
                   controller.switchPlayerEngine(
                     newType,
                     autoPlayOverride: true,
                   );
                 },
-                icon: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.play_arrow, size: 14, color: Colors.white),
-                      const SizedBox(width: 2),
-                      Text(
-                        PlayerPref.playerEngine == PlayerEngineType.fvp
-                            ? 'MDK'
-                            : 'MPV',
-                        style: const TextStyle(
+                child: SizedBox(
+                  height: 34,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(
+                          Icons.play_arrow,
+                          size: 14,
                           color: Colors.white,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w500,
                         ),
-                      ),
-                    ],
+                        const SizedBox(width: 2),
+                        Text(
+                          PlayerPref.playerEngine == PlayerEngineType.fvp
+                              ? 'MDK'
+                              : 'MPV',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),

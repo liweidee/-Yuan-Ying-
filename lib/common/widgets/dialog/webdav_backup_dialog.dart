@@ -342,6 +342,7 @@ class _WebDavBackupDialogState extends State<_WebDavBackupDialog> {
               });
             },
           ),
+        _buildSensitiveHint(theme),
         const SizedBox(height: 8),
         _buildActionButton(
           theme: theme,
@@ -351,6 +352,44 @@ class _WebDavBackupDialogState extends State<_WebDavBackupDialog> {
           onPressed: _doUpload,
         ),
       ],
+    );
+  }
+
+  // ============================================================
+  // 敏感凭据提示
+  // ============================================================
+  Widget _buildSensitiveHint(ThemeData theme) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.errorContainer.withValues(alpha: 0.35),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(
+              Icons.warning_amber_rounded,
+              size: 14,
+              color: theme.colorScheme.error,
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                '备份包含账号凭据与密钥（Emby / Jellyfin / Alist / AI / TMDB 等），'
+                '请妥善保管，勿上传至公共网盘。',
+                style: TextStyle(
+                  fontSize: 11,
+                  height: 1.4,
+                  color: theme.colorScheme.onErrorContainer,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

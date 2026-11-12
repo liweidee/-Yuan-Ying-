@@ -200,6 +200,113 @@ class MediaKitEngine implements IPlayerEngine {
   @override
   RxDouble get downloadSpeed => _downloadSpeed;
 
+  // ============================================================
+  // 媒体详细信息（media_kit 1.2.6）
+  //
+  // 说明：
+  //   - media_kit 无容器格式 / 总码率 / 文件大小的公开 API，返回 null
+  //   - state.track 在 auto 模式下是虚拟轨道，codec 全 null；
+  //     真实数据在 state.tracks 列表里，前两项通常是 id='auto' / id='no'
+  //     的虚拟项，必须过滤掉
+  // ============================================================
+
+  VideoTrack? get _realVideoTrack {
+    final tracks = _videoPlayerController?.state.tracks.video;
+    if (tracks == null) return null;
+    for (final t in tracks) {
+      if (t.id != 'auto' &&
+          t.id != 'no' &&
+          t.codec != null &&
+          t.codec!.isNotEmpty) {
+        return t;
+      }
+    }
+    return null;
+  }
+
+  AudioTrack? get _realAudioTrack {
+    final tracks = _videoPlayerController?.state.tracks.audio;
+    if (tracks == null) return null;
+    for (final t in tracks) {
+      if (t.id != 'auto' &&
+          t.id != 'no' &&
+          t.codec != null &&
+          t.codec!.isNotEmpty) {
+        return t;
+      }
+    }
+    return null;
+  }
+
+  @override
+  String? get mediaFormat => null;
+
+  @override
+  int? get mediaBitRate => null;
+
+  @override
+  int? get mediaFileSize => null;
+
+  @override
+  String? get videoCodec => _realVideoTrack?.codec;
+
+  @override
+  String? get audioCodec => _realAudioTrack?.codec;
+
+  @override
+  double? get audioBitrate {
+    final br = _videoPlayerController?.state.audioBitrate;
+    return (br != null && br > 0) ? br : null;
+  }
+
+  @override
+  int? get audioSampleRate {
+    final sr = _realAudioTrack?.samplerate ??
+        _videoPlayerController?.state.audioParams.sampleRate;
+    return (sr != null && sr > 0) ? sr : null;
+  }
+
+  @override
+  int? get audioChannels {
+    final ch = _realAudioTrack?.channelscount ??
+        _videoPlayerController?.state.audioParams.channelCount;
+    return (ch != null && ch > 0) ? ch : null;
+  }
+
+  @override
+  List<String> get audioTrackNames {
+    final tracks = _videoPlayerController?.state.tracks.audio;
+    if (tracks == null) return const [];
+    final result = <String>[];
+    var idx = 0;
+    for (final t in tracks) {
+      if (t.id == 'auto' || t.id == 'no') continue;
+      idx++;
+      var name = (t.title ?? '').trim();
+      if (name.isEmpty) name = (t.language ?? '').trim();
+      if (name.isEmpty) name = '音轨 $idx';
+      result.add(name);
+    }
+    return result;
+  }
+
+  @override
+  List<String> get subtitleTrackNames {
+    final tracks = _videoPlayerController?.state.tracks.subtitle;
+    if (tracks == null) return const [];
+    final result = <String>[];
+    var idx = 0;
+    for (final t in tracks) {
+      if (t.id == 'auto' || t.id == 'no') continue;
+      idx++;
+      var name = (t.title ?? '').trim();
+      if (name.isEmpty) name = (t.language ?? '').trim();
+      if (name.isEmpty) name = '字幕 $idx';
+      result.add(name);
+    }
+    return result;
+  }
+
   late DataSource dataSource;
 
   Timer? _timer;
@@ -592,7 +699,20 @@ class MediaKitEngine implements IPlayerEngine {
     final player = _videoPlayerController;
     if (player == null) return;
 
-    final newAudio = player.state.tracks.audio;
+    // ===== 音轨过滤 =====
+    // media_kit 的 state.tracks.audio 前两项是 id='auto' / id='no' 的虚拟项，
+    // codec / title / language 全为 null，不是真实可播放的音轨。
+    // 必须过滤掉，否则：
+    //   1. 设置页「音轨选择」弹窗会把 auto/no 当普通音轨列出
+    //      （顶部已有独立的"自动选择"和"关闭音轨"，造成重复）
+    //   2. 底部栏「音轨」按钮的"多音轨"判定会误判（单音轨也会算成 3 条）
+    //   3. 真实音轨无 title 时，fallback 到"音轨 N"的编号错乱（从 3 开始）
+    // 注：currentAudioTrack.value 仍从 player.state.track.audio 读，
+    //    它是"当前激活"的轨道，可以是 auto / no，需要保留；
+    //    UI 层通过 currentAudioIndex 的 -2 / -3 特判来区分。
+    final newAudio = player.state.tracks.audio
+        .where((t) => t.id != 'auto' && t.id != 'no')
+        .toList();
     final newVideo = player.state.tracks.video;
     final newSubtitle = player.state.tracks.subtitle
         .where((track) => _isValidSubtitleTrack(track))

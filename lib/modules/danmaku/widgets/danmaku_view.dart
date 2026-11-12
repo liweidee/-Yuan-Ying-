@@ -41,19 +41,33 @@ class _DanmakuViewState extends State<DanmakuView> {
 
   late final void Function(PlayerStatus) _statusListener;
 
+  /// 监听 DanmakuController.dataVersion 变化，用于清空渲染层
+  ///
+  /// 场景：
+  ///   - 手动"搜索弹幕"应用新弹幕 → 旧弹幕立即消失，新弹幕开始飘
+  ///   - 切集自动匹配加载新弹幕 → 旧集弹幕不再残留飘过
+  Worker? _dataVersionWorker;
+
   @override
   void initState() {
     super.initState();
     _statusListener = _onStatus;
     widget.playerController.addPositionListener(_onPosition);
     widget.playerController.addStatusLister(_statusListener);
+
+    // 监听数据版本变化 → 清空 canvas 渲染层
+    _dataVersionWorker = ever(widget.danmakuController.dataVersion, (_) {
+      _canvasController?.clear();
+      // 重置位置 key，确保同一 progress 点下也能立即发射新数据
+      _lastPosition = -1;
+    });
   }
 
   @override
   void dispose() {
+    _dataVersionWorker?.dispose();
     widget.playerController.removePositionListener(_onPosition);
     widget.playerController.removeStatusLister(_statusListener);
-    // 清除 playerController 中的渲染控制器引用，避免悬空
     widget.playerController.danmakuController = null;
     _canvasController = null;
     _lastPosition = -1;
@@ -91,18 +105,27 @@ class _DanmakuViewState extends State<DanmakuView> {
 
       for (final item in items) {
         final Color textColor;
+        Color? gradStart;
+        Color? gradEnd;
+
         if (colorMode == 1) {
           textColor = _pickRandomColor(item, randomPalette);
         } else if (colorMode == 2) {
-          textColor = _pickGradientColor(item, gradientPalette, progress);
+          final (start, end) = _pickGradientPair(item, gradientPalette);
+          textColor = start; // 兜底色，用于 count 部分等
+          gradStart = start;
+          gradEnd = end;
         } else {
           textColor = Color(item.opaqueColor);
         }
+
         _canvasController!.addDanmaku(
           canvas.DanmakuContentItem(
             item.content,
             color: textColor,
             type: _toDanmakuItemType(item.mode),
+            gradientStartColor: gradStart,
+            gradientEndColor: gradEnd,
             extra: item,
           ),
         );
@@ -133,34 +156,25 @@ class _DanmakuViewState extends State<DanmakuView> {
     return DanmakuColorPalette.parseHex(hex) ?? Colors.white;
   }
 
-  /// 渐变：从基色盘抽一对 (start, end)，用 progress 计算 t 做线性插值
+  /// 渐变：从基色盘抽一对 (start, end)，直接返回双色用于填充渐变
   ///
-  /// - 同一对内部，随播放时间从 start 平滑走向 end
-  /// - 多条弹幕来自不同对，整体多彩但有时间渐变趋势
-  /// - 空盘 → 回退到"随时间旋转色相"
-  Color _pickGradientColor(
+  /// - 每条弹幕固定一对起止色，渲染层做左→右线性渐变
+  /// - 空盘 → 回退到同色相下的明暗双色
+  (Color, Color) _pickGradientPair(
     DanmakuItem item,
     List<String> palette,
-    int progress,
   ) {
     if (palette.isEmpty) {
-      final seconds = progress / 1000;
+      final seconds = item.progress / 1000;
       final hue = (seconds * 12) % 360;
-      return HSLColor.fromAHSL(1.0, hue, 1.0, 0.5).toColor();
+      return (
+        HSLColor.fromAHSL(1.0, hue, 1.0, 0.6).toColor(),
+        HSLColor.fromAHSL(1.0, hue, 1.0, 0.4).toColor(),
+      );
     }
     final rand = Random(item.progress * 31 + item.content.hashCode);
     final entry = palette[rand.nextInt(palette.length)];
-    final pair = DanmakuColorPalette.parsePair(entry);
-
-    // t：按视频总时长归一；直播 / 未加载时回退到 60s 周期
-    final totalMs = widget.playerController.duration.value.inMilliseconds;
-    final double t;
-    if (totalMs > 0) {
-      t = (progress / totalMs).clamp(0.0, 1.0);
-    } else {
-      t = (progress % 60000) / 60000.0;
-    }
-    return Color.lerp(pair.$1, pair.$2, t) ?? pair.$1;
+    return DanmakuColorPalette.parsePair(entry);
   }
 
   canvas.DanmakuOption _buildOption() {

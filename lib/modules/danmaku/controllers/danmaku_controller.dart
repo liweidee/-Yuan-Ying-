@@ -11,6 +11,15 @@ class DanmakuController extends GetxController {
   /// 配置版本号，每次保存设置时递增，用于通知 DanmakuView 更新选项
   final RxInt configVersion = 0.obs;
 
+  /// 数据版本号：每次 loadDanmaku / clear 递增。
+  ///
+  /// DanmakuView 监听此字段变化，回调里调用 canvas 渲染层 clear()，
+  /// 用于解决"手动应用新弹幕后旧弹幕残留、交叉输出"的问题。
+  ///
+  /// 只在数据真正被替换/清空时递增；`reloadFilter()`（屏蔽规则变化）
+  /// 刻意不递增，避免"改屏蔽规则就把屏幕上已发射的弹幕清光"的意外行为。
+  final RxInt dataVersion = 0.obs;
+
   // ===== 屏蔽规则（内存缓存）=====
   List<String> _keywords = const [];
   List<RegExp> _regexps = const [];
@@ -23,6 +32,7 @@ class DanmakuController extends GetxController {
 
     final compiled = <RegExp>[];
     for (final raw in PlayerPref.danmakuFilterRegexes) {
+      //                                    ↑ 这里是 Regexes，不是 Regexps
       if (raw.isEmpty) continue;
       try {
         compiled.add(RegExp(raw, caseSensitive: false));
@@ -31,6 +41,7 @@ class DanmakuController extends GetxController {
       }
     }
     _regexps = compiled;
+    // 注意：这里不递增 dataVersion（不主动清屏）
   }
 
   bool _shouldBlock(String content) {
@@ -58,6 +69,8 @@ class DanmakuController extends GetxController {
       _danmakuMap[key]!.add(item);
     }
     totalCount.value = items.length;
+    // ← 通知渲染层清空 canvas，避免旧弹幕与新弹幕交叉输出
+    dataVersion.value++;
     debugPrint('DanmakuController: 加载完成，共 ${totalCount.value} 条');
   }
 
@@ -92,6 +105,8 @@ class DanmakuController extends GetxController {
   void clear() {
     _danmakuMap.clear();
     totalCount.value = 0;
+    // 通知渲染层清空 canvas
+    dataVersion.value++;
   }
 
   int get count => totalCount.value;

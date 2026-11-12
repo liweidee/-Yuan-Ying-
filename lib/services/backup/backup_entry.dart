@@ -11,7 +11,13 @@ class BackupEntry {
   /// 用户可见名
   final String displayName;
 
-  /// 导出/导入时需要从 Box 中过滤掉的键（例如运行期生成的下载记录）
+  /// 导出时需要从 Box 中过滤掉的键
+  ///
+  /// 用于排除「跨设备失效」的数据，例如：
+  /// - 下载记录（本地文件路径）
+  /// - 本地扫描路径（用户设备专属）
+  ///
+  /// 导入时不做特殊处理（统一 clear + putAll）。
   final Set<String> excludedKeys;
 
   const BackupEntry({

@@ -3590,4 +3590,183 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
       return false;
     }
   }
+
+  /// 根据用户选定的标题手动加载弹幕
+  ///
+  /// 作用域：**仅当前集生效**。
+  /// 切换剧集后 `_startPlay` 会重置 `_danmakuLoaded` 并触发
+  /// `_loadDanmakuOnPlay` → `_loadDanmakuFromUserApi`，使用视频原始 `vodName`
+  /// 重新走自动匹配，手动选择的弹幕不会残留到下一集，也不影响自动匹配机制。
+  ///
+  /// 流程：
+  ///   1. 读取当前选中的弹幕 API base（currentKey 失效时回退第一个）
+  ///   2. 构造 /api/v2/fongmi/danmaku?name=title&episode=N 请求
+  ///   3. 若返回候选列表（[{url:...}]）→ 取第一个 url 再下载
+  ///      否则直接按弹幕内容解析
+  ///
+  /// 与 `_loadDanmakuFromUserApi` 区别：不检查 autoMatch 开关，
+  /// 用调用方传入的 title，而不是当前视频名。
+  Future<void> loadDanmakuByTitle(String title) async {
+    final trimmed = title.trim();
+    if (trimmed.isEmpty) {
+      SmartDialog.showToast('标题为空');
+      return;
+    }
+
+    // 1. 读取 API 配置
+    final apisJson =
+        StorageManager.getSetting<List<dynamic>>(SettingBoxKey.danmakuApis) ??
+            [];
+    if (apisJson.isEmpty) {
+      SmartDialog.showToast('未配置弹幕API，请先在弹幕设置中添加');
+      return;
+    }
+    final currentKey =
+        StorageManager.getSetting<String>(SettingBoxKey.danmakuCurrentKey) ??
+            '';
+
+    Map<String, dynamic>? apiMap;
+    if (currentKey.isNotEmpty) {
+      for (final item in apisJson) {
+        if (item is Map) {
+          final m = Map<String, dynamic>.from(item);
+          if (m['key'] == currentKey) {
+            apiMap = m;
+            break;
+          }
+        }
+      }
+    }
+    // 兜底：currentKey 未落库时取第一个
+    if (apiMap == null) {
+      final first = apisJson.firstWhere(
+        (e) => e is Map,
+        orElse: () => null,
+      );
+      if (first is Map) apiMap = Map<String, dynamic>.from(first);
+    }
+    if (apiMap == null) {
+      SmartDialog.showToast('未找到弹幕API配置');
+      return;
+    }
+
+    final apiBase = apiMap['api']?.toString();
+    if (apiBase == null || apiBase.isEmpty) {
+      SmartDialog.showToast('弹幕API地址无效');
+      return;
+    }
+
+    // 2. 构造 FongMi URL（使用当前集数）
+    final episodeNumber = introController.currentEpisodeIndex.value + 1;
+    final fongmiUrl = _buildFongmiUrl(apiBase, trimmed, episodeNumber);
+    debugPrint(
+        '[Danmaku] 手动加载: title=$trimmed, ep=$episodeNumber, url=$fongmiUrl');
+
+    // 3. loading（独立 tag，避免误关其它弹窗）
+    const loadingTag = 'danmaku_manual_loading';
+    SmartDialog.dismiss(tag: loadingTag, force: true);
+    SmartDialog.show(
+      tag: loadingTag,
+      maskColor: Colors.black54,
+      clickMaskDismiss: false,
+      animationType: SmartAnimationType.scale,
+      builder: (_) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
+        decoration: BoxDecoration(
+          color: Colors.black87,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: const Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 36,
+              height: 36,
+              child: CircularProgressIndicator(
+                strokeWidth: 3,
+                color: Colors.white,
+              ),
+            ),
+            SizedBox(height: 14),
+            Text(
+              '正在加载弹幕...',
+              style: TextStyle(color: Colors.white, fontSize: 14),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    // 4. 请求 FongMi 接口
+    try {
+      final dio = Dio();
+      final response = await dio.get(
+        fongmiUrl,
+        options: Options(
+          headers: {
+            'User-Agent':
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          },
+          responseType: ResponseType.plain,
+        ),
+      );
+
+      if (isClosed) return;
+      SmartDialog.dismiss(tag: loadingTag, force: true);
+
+      if (response.statusCode != 200) {
+        SmartDialog.showToast('接口返回异常 (${response.statusCode})');
+        return;
+      }
+
+      final raw = response.data;
+      debugPrint('[Danmaku] FongMi 响应类型: ${raw.runtimeType}');
+
+      // 4.1 候选列表 [{url: ...}] → 取第一个 url
+      String? actualUrl;
+      if (raw is String && raw.trim().startsWith('[')) {
+        try {
+          final decoded = jsonDecode(raw);
+          if (decoded is List &&
+              decoded.isNotEmpty &&
+              decoded[0] is Map &&
+              (decoded[0] as Map).containsKey('url')) {
+            actualUrl = decoded[0]['url']?.toString();
+          }
+        } catch (_) {}
+      } else if (raw is List &&
+          raw.isNotEmpty &&
+          raw[0] is Map &&
+          (raw[0] as Map).containsKey('url')) {
+        actualUrl = raw[0]['url']?.toString();
+      }
+
+      final parser = DanmakuParser();
+      final items = (actualUrl != null && actualUrl.isNotEmpty)
+          ? await parser.loadFromUrl(actualUrl)
+          : await parser.loadFromUrl(fongmiUrl);
+
+      if (isClosed) return;
+
+      if (items.isNotEmpty && Get.isRegistered<DanmakuController>()) {
+        Get.find<DanmakuController>().loadDanmaku(items);
+
+        // 弹幕开关关闭时主动提示，避免"应用了却看不到"的困惑
+        if (!playerController.enableShowDanmaku.value) {
+          SmartDialog.showToast(
+            '已加载 ${items.length} 条，但弹幕开关已关闭，请手动打开',
+          );
+        } else {
+          SmartDialog.showToast('已加载 ${items.length} 条弹幕（仅当前集）');
+        }
+      } else {
+        SmartDialog.showToast('未找到该视频的弹幕');
+      }
+    } catch (e) {
+      if (isClosed) return;
+      SmartDialog.dismiss(tag: loadingTag, force: true);
+      debugPrint('[Danmaku] 手动加载异常: $e');
+      SmartDialog.showToast('加载弹幕失败：$e');
+    }
+  }
 }

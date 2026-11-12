@@ -29,6 +29,9 @@ import 'package:material_design_icons_flutter/material_design_icons_flutter.dart
 import 'package:yuanying/plugin/pl_player/models/hwdec_type.dart';
 import 'package:media_kit/media_kit.dart' hide Subtitle;
 import 'package:yuanying/core/routes/app_pages.dart';
+import 'package:yuanying/utils/storage_manager.dart';
+import 'package:yuanying/core/constants/storage_keys.dart';
+import 'package:yuanying/modules/video/widgets/danmaku_search_dialog.dart';
 
 // ===== 播放地址信息卡片数据模型 =====
 class _AddressInfoItem {
@@ -47,6 +50,30 @@ class _AddressInfoItem {
     required this.color,
     this.isJson = false,
   });
+}
+
+// ============================================================
+// 弹窗尺寸统一规格
+//   - 选择类（音轨/视轨/字幕轨/硬解）：480 宽
+//   - 信息类（播放地址/播放信息）：560 宽
+//   - 高度、圆角、外边距所有自定义 Dialog 统一
+// ============================================================
+class _DialogSpec {
+  /// 列表型选择弹窗（内容短）
+  static const double smallWidth = 480.0;
+
+  /// 信息展示弹窗（含长文本）
+  static const double largeWidth = 560.0;
+
+  /// 最大高度占屏幕比例
+  static const double maxHeightRatio = 0.8;
+
+  /// 统一圆角
+  static const double borderRadius = 16.0;
+
+  /// 统一外边距
+  static const EdgeInsets insetPadding =
+      EdgeInsets.symmetric(horizontal: 20, vertical: 24);
 }
 
 /// 更多设置面板 - 支持桌面端右侧弹出和移动端底部弹出
@@ -225,6 +252,14 @@ class _SettingSheetState extends State<SettingSheet> {
         onTap: _showDanmakuSettings,
       ),
 
+      // ===== 搜索弹幕 =====
+      _buildSettingItem(
+        icon: Icons.manage_search,
+        title: '搜索弹幕',
+        subtitle: '手动搜索并加载弹幕',
+        onTap: _showDanmakuSearchDialog,
+      ),
+
       // ===== 字幕设置 =====
       if (playerController.supportsExternalSubtitle || playerController.supportsEmbeddedSubtitle)
         _buildSettingItem(
@@ -394,30 +429,6 @@ class _SettingSheetState extends State<SettingSheet> {
     );
   }
 
-  List<Widget> _buildMediaInfoRows(ColorScheme colorScheme) {
-    final info = controller.playerController.mediaInfo.value;
-    if (info == null) {
-      return [_infoRow('媒体详情', '暂未获取', colorScheme)];
-    }
-
-    String? format;
-    int? bitRate;
-    int? fileSize;
-    bool? isSeekable;
-
-    // 防御式访问，字段名异常时返回 null 不抛错
-    try { format = (info as dynamic).format as String?; } catch (_) {}
-    try { bitRate = (info as dynamic).bitRate as int?; } catch (_) {}
-    try { fileSize = (info as dynamic).fileSize as int?; } catch (_) {}
-    try { isSeekable = (info as dynamic).isSeekable as bool?; } catch (_) {}
-
-    return [
-      _infoRow('容器格式', format ?? '未知', colorScheme),
-      _infoRow('码率', bitRate != null ? '${(bitRate / 1000).toStringAsFixed(0)} kbps' : '未知', colorScheme),
-      _infoRow('文件大小', fileSize != null ? '${(fileSize / 1024 / 1024).toStringAsFixed(2)} MB' : '未知', colorScheme),
-    ];
-  }
-
   // ===== 水平操作区 =====
   Widget _buildActionRow() {
     final theme = Theme.of(context);
@@ -573,8 +584,16 @@ class _SettingSheetState extends State<SettingSheet> {
       showDialog(
         context: Get.context!,
         builder: (context) => Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(_DialogSpec.borderRadius),
+          ),
+          insetPadding: _DialogSpec.insetPadding,
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 500),
+            constraints: BoxConstraints(
+              maxWidth: _DialogSpec.smallWidth,
+              maxHeight: MediaQuery.sizeOf(context).height *
+                  _DialogSpec.maxHeightRatio,
+            ),
             child: Padding(
               padding: const EdgeInsets.all(20),
               child: Column(
@@ -620,7 +639,11 @@ class _SettingSheetState extends State<SettingSheet> {
     Navigator.pop(context);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final colorScheme = Theme.of(Get.context!).colorScheme;
-      final tracks = controller.audioTracks;
+      // 防御性过滤：理论上 engine 层已过滤 auto/no 虚拟项，
+      // 这里再保险一次，避免 engine 变更后设置页出现虚假条目
+      final tracks = controller.audioTracks
+          .where((t) => t.id != 'auto' && t.id != 'no')
+          .toList();
       if (tracks.isEmpty) {
         SmartDialog.showToast('没有可用的音轨');
         return;
@@ -628,8 +651,16 @@ class _SettingSheetState extends State<SettingSheet> {
       showDialog(
         context: Get.context!,
         builder: (context) => Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(_DialogSpec.borderRadius),
+          ),
+          insetPadding: _DialogSpec.insetPadding,
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 400),
+            constraints: BoxConstraints(
+              maxWidth: _DialogSpec.smallWidth,
+              maxHeight: MediaQuery.sizeOf(context).height *
+                  _DialogSpec.maxHeightRatio,
+            ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -721,8 +752,16 @@ class _SettingSheetState extends State<SettingSheet> {
       showDialog(
         context: Get.context!,
         builder: (context) => Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(_DialogSpec.borderRadius),
+          ),
+          insetPadding: _DialogSpec.insetPadding,
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 400),
+            constraints: BoxConstraints(
+              maxWidth: _DialogSpec.smallWidth,
+              maxHeight: MediaQuery.sizeOf(context).height *
+                  _DialogSpec.maxHeightRatio,
+            ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -865,8 +904,16 @@ class _SettingSheetState extends State<SettingSheet> {
       showDialog(
         context: Get.context!,
         builder: (context) => Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(_DialogSpec.borderRadius),
+          ),
+          insetPadding: _DialogSpec.insetPadding,
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 400),
+            constraints: BoxConstraints(
+              maxWidth: _DialogSpec.smallWidth,
+              maxHeight: MediaQuery.sizeOf(context).height *
+                  _DialogSpec.maxHeightRatio,
+            ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1116,6 +1163,31 @@ class _SettingSheetState extends State<SettingSheet> {
         backgroundColor: Colors.transparent,
         builder: (context) => DanmakuSettings(controller: controller),
       );
+    });
+  }
+
+  /// 弹出弹幕搜索对话框（底部弹窗）
+  ///
+  /// 打开前先校验弹幕API是否已配置：
+  ///   - 未配置 → 直接 toast 引导去弹幕设置，不打开弹窗
+  ///   - 已配置 → 关闭更多设置面板，弹出底部搜索弹窗
+  void _showDanmakuSearchDialog() {
+    // 1. 打开前先检查弹幕 API 是否已配置
+    final apis =
+        StorageManager.getSetting<List<dynamic>>(SettingBoxKey.danmakuApis) ??
+            [];
+    if (apis.isEmpty) {
+      SmartDialog.showToast('请先在「设置 → 弹幕设置」中配置弹幕API');
+      return;
+    }
+
+    // 2. 关闭更多设置面板
+    Navigator.pop(context);
+
+    // 3. 等一帧后再打开底部弹窗，避免与面板关闭动画冲突
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      DanmakuSearchDialog.show(Get.context!, controller);
     });
   }
 
@@ -1761,13 +1833,14 @@ class _SettingSheetState extends State<SettingSheet> {
           return Dialog(
             backgroundColor: colorScheme.surface,
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(_DialogSpec.borderRadius),
             ),
-            insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+            insetPadding: _DialogSpec.insetPadding,
             child: Container(
-              width: 560,
+              width: _DialogSpec.largeWidth,
               constraints: BoxConstraints(
-                maxHeight: MediaQuery.sizeOf(context).height * 0.8,
+                maxHeight: MediaQuery.sizeOf(context).height *
+                    _DialogSpec.maxHeightRatio,
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -1817,10 +1890,11 @@ class _SettingSheetState extends State<SettingSheet> {
                     ),
                   ),
                   // ===== 内容区域（可滚动） =====
-                  Expanded(
+                  Flexible(
                     child: SingleChildScrollView(
                       padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
                       child: Column(
+                        mainAxisSize: MainAxisSize.min,
                         children: items.map((item) => _buildInfoCard(context, item)).toList(),
                       ),
                     ),
@@ -2128,68 +2202,151 @@ class _SettingSheetState extends State<SettingSheet> {
     Navigator.pop(context);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final colorScheme = Theme.of(Get.context!).colorScheme;
+      final pc = playerController;
 
-      // 获取基本信息（适用于所有引擎）
-      final pos = playerController.position;
-      final dur = playerController.duration.value;
-      final isPlaying = playerController.playerStatus.value.isPlaying;
-      final speed = playerController.playbackSpeed;
-      final hwdec = PlayerPref.hardwareDecoding;
+      final rows = <(String, String)>[];
 
-      // 分辨率（优先使用 playerController.width/height）
-      int width = playerController.width ?? 0;
-      int height = playerController.height ?? 0;
-      // 如果仍为 0，尝试从底层 state 获取（仅 MediaKit）
-      if (width == 0 || height == 0) {
-        final player = playerController.videoPlayerController;
-        if (player != null) {
-          width = player.state.width ?? 0;
-          height = player.state.height ?? 0;
-        }
+      void add(String label, String? value) {
+        if (value == null) return;
+        final s = value.trim();
+        if (s.isEmpty || s == 'null') return;
+        rows.add((label, s));
       }
-      final resolution = (width > 0 && height > 0) ? '${width}x${height}' : '未知';
 
-      // 音轨/视轨名称（仅 MediaKit 有实际值，FVP 下为 '默认'）
-      final audioName = playerController.currentAudioTrack.value?.title ?? '默认';
-      final videoName = playerController.currentVideoTrack.value?.title ?? '默认';
+      // ===== 容器级（仅 FVP 有值） =====
+      add('容器格式', pc.mediaFormat);
+
+      final totalBr = pc.mediaBitRate;
+      if (totalBr != null && totalBr > 0) {
+        add('总码率', '${(totalBr / 1000000).toStringAsFixed(2)} Mbps');
+      }
+
+      // ===== 视频 =====
+      final vw = pc.videoWidth.value;
+      final vh = pc.videoHeight.value;
+      if (vw > 0 && vh > 0) {
+        add('分辨率', '${vw}x$vh');
+      }
+      add('视频编码', pc.videoCodec);
+
+      // ===== 音频 =====
+      add('音频编码', pc.audioCodec);
+
+      final ab = pc.audioBitrate;
+      if (ab != null && ab > 0) {
+        add('音频码率', '${(ab / 1000).toStringAsFixed(0)} kbps');
+      }
+
+      final sr = pc.audioSampleRate;
+      final ch = pc.audioChannels;
+      if ((sr != null && sr > 0) || (ch != null && ch > 0)) {
+        final parts = <String>[];
+        if (sr != null && sr > 0) {
+          parts.add('${(sr / 1000.0).toStringAsFixed(1)} kHz');
+        }
+        if (ch != null && ch > 0) {
+          parts.add('$ch ch');
+        }
+        add('采样率 / 声道', parts.join(' / '));
+      }
+
+      // ===== 轨道名称列表（顿号分隔） =====
+      final audioNames = pc.audioTrackNames;
+      if (audioNames.isNotEmpty) {
+        add('音轨', audioNames.join('、'));
+      }
+
+      final subtitleNames = pc.subtitleTrackNames;
+      if (subtitleNames.isNotEmpty) {
+        add('字幕轨', subtitleNames.join('、'));
+      }
+
+      // ===== 兜底 =====
+      if (rows.isEmpty) {
+        rows.add(('提示', '当前无法获取媒体详细信息'));
+      }
 
       showDialog(
         context: Get.context!,
-        builder: (context) => AlertDialog(
-          title: const Text('播放信息'),
-          contentPadding: const EdgeInsets.fromLTRB(24, 12, 24, 4),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _infoRow('状态', isPlaying ? '播放中' : '已暂停', colorScheme),
-              _infoRow('当前位置', DurationUtils.formatDuration(pos.inSeconds), colorScheme),
-              _infoRow('总时长', DurationUtils.formatDuration(dur.inSeconds), colorScheme),
-              _infoRow('进度', dur.inSeconds > 0
-                  ? '${(pos.inSeconds / dur.inSeconds * 100).toStringAsFixed(1)}%'
-                  : '0%', colorScheme),
-              _infoRow('倍速', '${speed}X', colorScheme),
-              _infoRow('分辨率', resolution, colorScheme),
-              _infoRow('当前音轨', audioName, colorScheme),
-              _infoRow('当前视轨', videoName, colorScheme),
-              _infoRow('硬解模式', hwdec, colorScheme),
-              // ===== FVP 高级信息 =====
-              if (PlayerPref.playerEngine == PlayerEngineType.fvp) ...[
-                _infoRow('是否直播', controller.playerController.isLive.value ? '是' : '否', colorScheme),
-                ..._buildMediaInfoRows(colorScheme),
-              ],
-            ],
-          ),
-          actions: [
-            TextButton(
-              style: TextButton.styleFrom(
-                foregroundColor: colorScheme.outline,
-              ),
-              onPressed: () => Navigator.pop(context),
-              child: const Text('关闭'),
+        barrierDismissible: true,
+        builder: (context) {
+          return Dialog(
+            backgroundColor: colorScheme.surface,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(_DialogSpec.borderRadius),
             ),
-          ],
-        ),
+            insetPadding: _DialogSpec.insetPadding,
+            child: Container(
+              width: _DialogSpec.largeWidth,
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.sizeOf(context).height *
+                    _DialogSpec.maxHeightRatio,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // ===== 标题栏（与「播放地址信息」保持一致） =====
+                  Container(
+                    padding: const EdgeInsets.fromLTRB(20, 16, 16, 12),
+                    decoration: BoxDecoration(
+                      border: Border(
+                        bottom: BorderSide(
+                          color: colorScheme.outline.withValues(alpha: 0.1),
+                        ),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.info_outline_rounded,
+                          size: 20,
+                          color: colorScheme.primary,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            '播放信息',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                              color: colorScheme.onSurface,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          icon: Icon(
+                            Icons.close_rounded,
+                            size: 20,
+                            color: colorScheme.outline,
+                          ),
+                          onPressed: () => Navigator.pop(context),
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          style: IconButton.styleFrom(
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // ===== 内容区域（可滚动） =====
+                  Flexible(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: rows
+                            .map((r) => _infoRow(r.$1, r.$2, colorScheme))
+                            .toList(),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
       );
     });
   }

@@ -238,13 +238,28 @@ class _HeaderControlState extends State<HeaderControl> {
                               if (!ok) {
                                 SmartDialog.showToast('当前设备不支持画中画');
                               }
-                            } else {
-                              if (playerController.isDesktopPip) {
-                                playerController.exitDesktopPip();
-                              } else {
-                                playerController.enterDesktopPip();
-                              }
+                              return;
                             }
+
+                            // ===== 桌面端 =====
+                            // 退出 PiP：任何时候都允许
+                            if (playerController.isDesktopPip) {
+                              playerController.exitDesktopPip();
+                              return;
+                            }
+
+                            // 进入 PiP：全屏时拦截并提示
+                            // 原因：全屏 → 自动退全屏 → 再进 PiP 会触发窗口状态机时序问题
+                            //      （setSize 与 Flutter flushPaint 撞帧，且 _lastWindowBounds
+                            //      可能在退出全屏过渡期抓到错误尺寸，导致退出 PiP 后
+                            //      视频区域仍为 PiP 大小、周围黑屏）。
+                            // 让用户手动退全屏后再进入 PiP，交互更稳定、预期更明确。
+                            if (playerController.isFullScreen.value) {
+                              SmartDialog.showToast('请先退出全屏再使用画中画');
+                              return;
+                            }
+
+                            playerController.enterDesktopPip();
                           },
                           icon: Icon(
                             isPip

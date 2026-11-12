@@ -643,6 +643,109 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
           ),
         );
       }),
+      // ===== 音轨选择（条件显示：≥2 个真实音轨时才有入口） =====
+      //
+      // 交互与字幕一致：
+      //   - 自动选择 / 关闭音轨 / 每个真实音轨
+      //   - 过滤掉 media_kit 的 auto / no 虚拟项，避免菜单出现"自动/关闭"重复项
+      //   - FVP 的 availableAudioTracks 本身不含虚拟项，过滤逻辑无副作用
+      //   - 图标：有激活轨时 audiotrack，关闭时 audiotrack_outlined
+      //   - 用 PopupMenuButton 而非 Dialog，符合底部栏轻量交互，对齐字幕
+      BottomControlType.audio => Obx(() {
+        final tracks = widget.plPlayerController.availableAudioTracks
+            .where((t) => t.id != 'auto' && t.id != 'no')
+            .toList();
+        if (tracks.length < 2) {
+          return const SizedBox.shrink();
+        }
+        final currentTrack =
+            widget.plPlayerController.currentAudioTrack.value;
+        Object initialValue;
+        if (currentTrack == null ||
+            currentTrack.id == 'no' ||
+            currentTrack.id == '') {
+          initialValue = '_no';
+        } else if (currentTrack.id == 'auto') {
+          initialValue = '_auto';
+        } else {
+          initialValue = currentTrack.id;
+        }
+        return PopupMenuButton<Object>(
+          tooltip: '音轨',
+          requestFocus: false,
+          initialValue: initialValue,
+          color: Colors.black.withValues(alpha: 0.8),
+          itemBuilder: (context) {
+            final items = <PopupMenuItem<Object>>[];
+            items.add(
+              PopupMenuItem<Object>(
+                value: '_auto',
+                height: 35,
+                onTap: () {
+                  widget.plPlayerController
+                      .setAudioTrack(AudioTrack.auto());
+                },
+                child: const Text(
+                  '自动选择',
+                  style: TextStyle(color: Colors.white, fontSize: 13),
+                ),
+              ),
+            );
+            items.add(
+              PopupMenuItem<Object>(
+                value: '_no',
+                height: 35,
+                onTap: () {
+                  widget.plPlayerController.setAudioTrack(AudioTrack.no());
+                },
+                child: const Text(
+                  '关闭音轨',
+                  style: TextStyle(color: Colors.white, fontSize: 13),
+                ),
+              ),
+            );
+            for (final track in tracks) {
+              final title = track.title?.trim();
+              final lang = track.language?.trim();
+              final label = (title != null && title.isNotEmpty)
+                  ? title
+                  : (lang != null && lang.isNotEmpty)
+                      ? lang
+                      : '音轨 ${tracks.indexOf(track) + 1}';
+              items.add(
+                PopupMenuItem<Object>(
+                  value: track.id,
+                  height: 35,
+                  onTap: () {
+                    widget.plPlayerController.setAudioTrack(track);
+                  },
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+              );
+            }
+            return items;
+          },
+          child: SizedBox(
+            width: widgetWidth,
+            height: 30,
+            child: Icon(
+              initialValue == '_no'
+                  ? Icons.graphic_eq_outlined
+                  : Icons.graphic_eq,
+              size: 20,
+              color: initialValue == '_no' ? Colors.white54 : Colors.white,
+            ),
+          ),
+        );
+      }),
       BottomControlType.fullscreen => ComBtn(
         width: widgetWidth,
         height: 30,
@@ -698,6 +801,7 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
       BottomControlType.parser,
       BottomControlType.episode,
       BottomControlType.fit,
+      BottomControlType.audio,
       BottomControlType.subtitle,
       BottomControlType.speed,
       if (!plPlayerController.isDesktopPip) BottomControlType.fullscreen,

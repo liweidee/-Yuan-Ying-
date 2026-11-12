@@ -830,6 +830,31 @@ class FvpEngine implements IPlayerEngine {
         final audioList = info.audio ?? [];
         for (int i = 0; i < audioList.length; i++) {
           final stream = audioList[i];
+
+          // ---- 空占位音轨过滤 ----
+          // 与字幕轨同策略：过滤掉只有 1 帧或极小字节数的"空音轨"，
+          // 这类轨道切换后无任何音频效果，会造成"选了没声音"的困惑。
+          // 实践中音频极少出现空占位（不像字幕轨那样常见），
+          // 但理论上存在（损坏文件 / 特殊压制工具），保留与字幕一致的保护。
+          int? frameCount;
+          int? byteCount;
+          try {
+            final m = stream.metadata;
+            if (m is Map) {
+              frameCount = int.tryParse(m['NUMBER_OF_FRAMES']?.toString() ?? '');
+              byteCount = int.tryParse(m['NUMBER_OF_BYTES']?.toString() ?? '');
+            }
+          } catch (_) {}
+
+          final isEmptyTrack =
+              (frameCount != null && frameCount < 2) ||
+              (byteCount != null && byteCount < 100);
+          if (isEmptyTrack) {
+            debugPrint('[FvpEngine] 跳过空占位音轨 '
+                'index=${stream.index} (frames=$frameCount, bytes=$byteCount)');
+            continue;
+          }
+
           String? title;
           String? lang;
           try {
@@ -858,8 +883,11 @@ class FvpEngine implements IPlayerEngine {
           }
           if (codecName.isNotEmpty) buf.write(' · ${codecName.toUpperCase()}');
 
+          // 用过滤后列表的长度作为 id 后缀，保证 id 连续（0,1,2...），
+          // 与 setAudioTracks 的位置语义匹配（getActiveAudioTracks 返回的就是这个位置）
+          final pos = availableAudioTracks.length;
           availableAudioTracks.add(
-            AudioTrack('fvp_audio_$i', buf.toString(), lang ?? ''),
+            AudioTrack('fvp_audio_$pos', buf.toString(), lang ?? ''),
           );
         }
 
@@ -1002,6 +1030,106 @@ class FvpEngine implements IPlayerEngine {
     } catch (e, st) {
       debugPrint('[FvpEngine] _updateTracks error: $e\n$st');
     }
+  }
+
+  // ============================================================
+  // 媒体详细信息（fvp 0.39.0 mdk）
+  //
+  // 说明：
+  //   - mdk.MediaInfo.video / audio 列表里，每个元素的 codec 是
+  //     VideoCodecParameters / AudioCodecParameters 对象，
+  //     真正的编码 / 码率 / 采样率 / 声道都在该对象内部
+  //   - availableAudioTracks / availableSubtitleTracks 已在
+  //     _updateTracks() 里构造好 title（含过滤空占位字幕轨），
+  //     轨道名称直接读它们的 title 即可
+  // ============================================================
+
+  mdk.MediaInfo? get _info {
+    final v = mediaInfo.value;
+    if (v is mdk.MediaInfo) return v;
+    return null;
+  }
+
+  @override
+  String? get mediaFormat {
+    final f = _info?.format;
+    return (f != null && f.isNotEmpty) ? f : null;
+  }
+
+  @override
+  int? get mediaBitRate {
+    final br = _info?.bitRate;
+    return (br != null && br > 0) ? br : null;
+  }
+
+  @override
+  int? get mediaFileSize => null;
+
+  @override
+  String? get videoCodec {
+    final list = _info?.video;
+    if (list == null || list.isEmpty) return null;
+    final c = list.first.codec.codec;
+    return c.isNotEmpty ? c : null;
+  }
+
+  @override
+  String? get audioCodec {
+    final list = _info?.audio;
+    if (list == null || list.isEmpty) return null;
+    final c = list.first.codec.codec;
+    return c.isNotEmpty ? c : null;
+  }
+
+  @override
+  double? get audioBitrate {
+    final list = _info?.audio;
+    if (list == null || list.isEmpty) return null;
+    final br = list.first.codec.bitRate;
+    return (br > 0) ? br.toDouble() : null;
+  }
+
+  @override
+  int? get audioSampleRate {
+    final list = _info?.audio;
+    if (list == null || list.isEmpty) return null;
+    final sr = list.first.codec.sampleRate;
+    return (sr > 0) ? sr : null;
+  }
+
+  @override
+  int? get audioChannels {
+    final list = _info?.audio;
+    if (list == null || list.isEmpty) return null;
+    final ch = list.first.codec.channels;
+    return (ch > 0) ? ch : null;
+  }
+
+  @override
+  List<String> get audioTrackNames {
+    final list = availableAudioTracks;
+    if (list.isEmpty) return const [];
+    final result = <String>[];
+    for (var i = 0; i < list.length; i++) {
+      final raw = (list[i].title ?? '').trim();
+      // _updateTracks 里音频轨 title 形如 "English · EAC3"，去掉编码后缀
+      final sep = raw.indexOf(' · ');
+      final name = sep > 0 ? raw.substring(0, sep).trim() : raw;
+      result.add(name.isEmpty ? '音轨 ${i + 1}' : name);
+    }
+    return result;
+  }
+
+  @override
+  List<String> get subtitleTrackNames {
+    final list = availableSubtitleTracks;
+    if (list.isEmpty) return const [];
+    final result = <String>[];
+    for (var i = 0; i < list.length; i++) {
+      final raw = (list[i].title ?? '').trim();
+      result.add(raw.isEmpty ? '字幕 ${i + 1}' : raw);
+    }
+    return result;
   }
 
   @override
