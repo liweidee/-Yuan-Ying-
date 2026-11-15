@@ -541,6 +541,17 @@ class FvpEngine implements IPlayerEngine {
 
       _addListeners();
 
+      // 外挂音频挂载（必须在 play 之前）
+      if (dataSource.audioSource != null &&
+          dataSource.audioSource!.isNotEmpty) {
+        try {
+          setExternalAudio(dataSource.audioSource);
+          debugPrint('[FvpEngine] setExternalAudio 已调用');
+        } catch (e) {
+          debugPrint('[FvpEngine] setExternalAudio 失败: $e');
+        }
+      }
+
       if (autoplay) {
         debugPrint('[FvpEngine] Autoplay: playing');
         if (_isPlaying) {
@@ -1423,27 +1434,24 @@ class FvpEngine implements IPlayerEngine {
   //
   @override
   void setExternalAudio(String? url) {
-    _externalAudioUrl = url;
-    if (_controller == null || !_isInitialized) {
-      debugPrint('[FvpEngine] setExternalAudio deferred: $url');
+    if (url == null || url.isEmpty) {
+      debugPrint('[FvpEngine] setExternalAudio 被调用，但 url 为空');
       return;
     }
 
-    if (url == null || url.isEmpty) {
-      debugPrint('[FvpEngine] 外部音频已清除');
+    if (_controller == null || !_isInitialized) {
+      debugPrint('[FvpEngine] setExternalAudio 延迟执行：controller 未就绪');
       return;
     }
 
     try {
-      final platform = (_controller as dynamic).platform;
-      if (platform != null) {
-        (platform as dynamic).setMedia(url, mdk.MediaType.audio);
-        debugPrint('[FvpEngine] 外部音频已加载: $url');
-      } else {
-        debugPrint('[FvpEngine] 无法获取底层 Player');
-      }
+      // FVP 官方扩展：直接在 VideoPlayerController 上调用 setExternalAudio
+      // 必须在 controller.initialize() 之后调用，此处 _isInitialized 已为 true
+      _controller!.setExternalAudio(url);
+      debugPrint('[FvpEngine] setExternalAudio 调用成功: '
+          '${url.substring(0, url.length > 60 ? 60 : url.length)}...');
     } catch (e) {
-      debugPrint('[FvpEngine] 外部音频加载异常: $e');
+      debugPrint('[FvpEngine] setExternalAudio 失败: $e');
     }
   }
 

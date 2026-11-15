@@ -56,6 +56,7 @@ import 'package:yuanying/modules/subtitle_translation/services/subtitle_srt_pars
 import 'package:yuanying/modules/subtitle_translation/services/subtitle_translation_service.dart';
 import 'package:yuanying/modules/subtitle_translation/services/translation_engine.dart';
 import 'package:yuanying/modules/agent_llm/models/playback_context.dart';
+import 'package:yuanying/services/mpd_parser.dart';
 
 /// 从历史恢复播放的位置信息
 class _ResumeInfo {
@@ -100,6 +101,16 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
 
   final RxString currentPlayUrl = ''.obs;
   final RxList<PlayQuality> currentQualities = <PlayQuality>[].obs;
+
+  /// 用户当前选中的原始 quality。
+  /// `currentPlayUrl` 存的是解析后的实际播放 URL，
+  /// 两者语义不同：UI 高亮对比必须用本字段。
+  final Rx<PlayQuality?> currentQuality = Rx<PlayQuality?>(null);
+
+  /// 当前播放源的 isDash 快照（用于 switchQuality 同步决策）
+  /// null = 接口未指定；1 = DASH；0 = 非 DASH
+  int? _currentPlayUrlIsDash;
+
   final RxBool isPlaying = false.obs;
   bool _isDirectPushMode = false;
 
@@ -317,7 +328,20 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
         if (entry.isData) {
           track = SubtitleTrack.data(entry.id, title: subtitle.lanDoc, language: subtitle.lan);
         } else {
-          track = SubtitleTrack(entry.id, subtitle.lanDoc, subtitle.lan, uri: true);
+          // 修复本地文件路径格式转换
+          //
+          // 原始代码：SubtitleTrack(entry.id, ..., uri: true)
+          //   entry.id 是 file:///C:/... 三斜杠 URI，mpv 的 sub-add 对
+          //   Windows 三斜杠 URI 的编码兼容性差，路径含中文 / & / 空格时
+          //   常报 "Can not open external file file:///C:/..."。
+          //
+          // 修复后：转为裸路径（正斜杠），uri 保持 true
+          //   - 裸路径 C:/Users/.../x.ass 是 mpv 最稳的本地文件格式
+          //   - uri: true 必须保留：media_kit 的 uri 标志为 false 时会构造
+          //     sub-add memory://<base64(id)>，把路径当内联字幕内容，
+          //     导致完全无字幕、CC 按钮不出现
+          final localPath = _toLocalPath(entry.id).replaceAll('\\', '/');
+          track = SubtitleTrack(localPath, subtitle.lanDoc, subtitle.lan, uri: true);
         }
       }
 
@@ -361,6 +385,30 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
       }
     } catch (e) {
       SmartDialog.showToast('加载字幕异常: $e');
+    }
+  }
+
+  /// 将 file:// URI 或原始路径统一转为本地文件路径（不带 file:// 前缀）
+  ///
+  /// 处理场景：
+  /// - Windows: `file:///C:/Users/xxx/a.ass` → `C:\Users\xxx\a.ass`
+  /// - macOS/Linux: `file:///Users/xxx/a.ass` → `/Users/xxx/a.ass`
+  /// - 裸路径（已经是本地路径）：原样返回
+  /// - 网络 URL（http/https）：原样返回
+  String _toLocalPath(String id) {
+    if (!id.startsWith('file://')) return id;
+    try {
+      return Uri.parse(id).toFilePath();
+    } catch (_) {
+      // 兜底：手动解析
+      var path = id.substring('file://'.length);
+      if (Platform.isWindows && path.startsWith('/')) {
+        path = path.substring(1);
+      }
+      try {
+        path = Uri.decodeComponent(path);
+      } catch (_) {}
+      return path;
     }
   }
 
@@ -648,6 +696,66 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     await playerController.setSubtitleTrack(SubtitleTrack.no());
     vttSubtitlesIndex.value = 0;
     playerController.currentSubtitleTrack.value = null;
+  }
+
+  /// 从内容字符串挂载外部字幕（供字幕网站搜索下载使用）
+  ///
+  /// 存储格式与 `_loadSubtitle` 完全一致，保证新代码走原始 `setSubtitle`
+  /// 的已知正常工作路径，不引入新分支：
+  /// - SRT：转为 VTT 内容，`isData: true`（与 JSON 加载一致）
+  /// - VTT：直接存内容，`isData: true`
+  /// - ASS/SSA/SUB：写临时文件，`isData: false + file:// URI`（与本地字幕加载一致）
+  Future<void> addSubtitleFromContent({
+    required String content,
+    required String name,
+    required String ext,
+  }) async {
+    if (isClosed) return;
+    final index = subtitles.length;
+    final lower = ext.toLowerCase();
+
+    if (lower == 'srt') {
+      vttSubtitles[index] = (isData: true, id: _srtToVtt(content));
+    } else if (lower == 'vtt') {
+      vttSubtitles[index] = (isData: true, id: content);
+    } else {
+      // ASS / SSA / SUB：写临时文件，保留原格式
+      // 关键：存 file:// URI，与 _loadSubtitle 完全一致，
+      // 这样 setSubtitle 里 FVP / media_kit 分支都能走原始已知正常路径
+      final path = await _writeSubtitleToTempFile(content, lower);
+      vttSubtitles[index] = (
+        isData: false,
+        id: Uri.file(path).toString(),
+      );
+    }
+
+    subtitles.add(Subtitle(lan: '', lanDoc: name));
+    await setSubtitle(index + 1);
+    if (!isClosed) {
+      SmartDialog.showToast('已加载字幕：$name');
+    }
+  }
+
+  /// SRT 内容转 VTT 内容
+  ///
+  /// 关键点：
+  /// 1. 补 `WEBVTT` 头
+  /// 2. 时间戳行的逗号必须改为点（SRT 是 `00:00:00,000`，VTT 规范要求 `00:00:00.000`）
+  ///    不转换会导致 mpv / mdk 按严格模式解析失败，字幕不显示
+  ///    只对时间戳行转换，不碰文本内容里的逗号
+  String _srtToVtt(String srt) {
+    final normalized = srt.replaceAll('\r\n', '\n');
+    final lines = normalized.split('\n');
+    final buffer = StringBuffer('WEBVTT\n\n');
+    final tsPattern = RegExp(r'^\d{1,2}:\d{2}:\d{2},\d{3}\s*-->');
+    for (final line in lines) {
+      if (tsPattern.hasMatch(line)) {
+        buffer.writeln(line.replaceAll(',', '.'));
+      } else {
+        buffer.writeln(line);
+      }
+    }
+    return buffer.toString().trim();
   }
 
   // ===== 音轨切换 =====
@@ -1783,16 +1891,76 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
 
     this.autoPlay.value = autoPlay;
 
-    final defaultUrl = playUrl.defaultUrl;
+    String? defaultUrl = playUrl.defaultUrl;
     if (defaultUrl == null) {
       _handlePlayFailure('获取播放地址失败');
       return;
     }
 
+    // ===== DASH 决策：强信号 > 显式声明 > 自动检测 =====
+    // 优先级：
+    //   1. audioUrl 非空 → 直接 DASH（无视 isDash，audioUrl 是强信号）
+    //   2. isDash == 1   → 强制解析；失败报错（接口声明是 DASH 但不可解析 = 接口 bug）
+    //   3. isDash == 0   → 明确跳过
+    //   4. isDash == null → 白名单判断；命中则解析，失败降级直连
+    String? resolvedAudioUrl = playUrl.audioUrl;
+    if (resolvedAudioUrl != null && resolvedAudioUrl.isEmpty) {
+      resolvedAudioUrl = null;
+    }
+
+    bool shouldParseMpd = false;
+    bool strictDash = false; // isDash=1 时解析失败必须报错
+
+    if (resolvedAudioUrl != null) {
+      debugPrint('[DetailController] audioUrl 非空，直接 DASH 播放');
+    } else {
+      final dash = playUrl.isDash;
+      if (dash == 1) {
+        shouldParseMpd = true;
+        strictDash = true;
+        debugPrint('[DetailController] isDash=1，强制解析');
+      } else if (dash == 0) {
+        debugPrint('[DetailController] isDash=0，跳过 DASH 检测');
+      } else {
+        shouldParseMpd = MpdParser.looksLikeMpd(defaultUrl);
+        if (shouldParseMpd) {
+          debugPrint('[DetailController] isDash 未指定，白名单命中');
+        }
+      }
+    }
+
+    if (shouldParseMpd) {
+      debugPrint('[DetailController] MPD 候选: $defaultUrl');
+      final mpdInfo = await MpdParser.parse(
+        defaultUrl,
+        headers: playUrl.headers,
+      );
+      if (mpdInfo != null) {
+        defaultUrl = mpdInfo.videoUrl;
+        resolvedAudioUrl = mpdInfo.hasAudio ? mpdInfo.audioUrl : null;
+        debugPrint(
+          '[DetailController] MPD 解析成功: '
+          'audio=${resolvedAudioUrl != null ? "有" : "无"}',
+        );
+      } else if (strictDash) {
+        // isDash=1 但解析失败：接口明确声明是 DASH，解析不出来的情况
+        // 属于数据错误，报错而非静默播放坏链接
+        _handlePlayFailure('DASH 流解析失败，无法播放');
+        return;
+      } else {
+        // 白名单命中但解析失败：降级直连（与旧逻辑一致）
+        debugPrint('[DetailController] MPD 解析失败，降级直连');
+      }
+    }
+
     // ===== 根据策略处理请求头 =====
-    Map<String, String>? headers = playUrl.headers != null
+    Map<String, String> headers = playUrl.headers != null
         ? Map<String, String>.from(playUrl.headers!)
         : <String, String>{};
+
+    // 清洗 header 值中的控制字符（\r \n \t 等），
+    // HTTP 规范禁止 header 值包含裸 CR/LF，B 站 Cookie 偶带 \r
+    headers = _sanitizeHeaders(headers);
 
     final strategy = PlayerPref.requestHeaderStrategy;
 
@@ -1826,27 +1994,35 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
         break;
     }
 
-    // currentPlayUrl.value = defaultUrl;
-    // currentQualities.value = playUrl.qualities;
-    // currentHeaders.value = headers;
-
-    // final dataSource = NetworkSource(
-    //   videoSource: defaultUrl,
-    //   audioSource: null,
-    //   headers: headers,
-    // );
-
-    // UI / 投屏 / 第三方播放器用原始 URL
+    // UI / 投屏 / 第三方播放器用原始 URL + 记录 currentQuality
     currentPlayUrl.value = defaultUrl;
     currentQualities.value = playUrl.qualities;
     currentHeaders.value = headers;
+    _currentPlayUrlIsDash = playUrl.isDash;
+
+    // currentQuality 按 label 匹配保留用户选择；匹配不上时重置为第一个
+    if (playUrl.qualities.isNotEmpty) {
+      final prevLabel = currentQuality.value?.label;
+      PlayQuality? matched;
+      if (prevLabel != null) {
+        for (final q in playUrl.qualities) {
+          if (q.label == prevLabel) {
+            matched = q;
+            break;
+          }
+        }
+      }
+      currentQuality.value = matched ?? playUrl.qualities.first;
+    } else {
+      currentQuality.value = null;
+    }
 
     // 只有播放器数据源走代理（M3U8 + 开关开启时）
     final proxyUrl = _wrapUrlIfNeeded(defaultUrl, headers: headers);
 
     final dataSource = NetworkSource(
       videoSource: proxyUrl,
-      audioSource: null,
+      audioSource: resolvedAudioUrl,
       headers: headers,
     );
 
@@ -2016,6 +2192,18 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     } catch (_) {
       return '';
     }
+  }
+
+  /// 移除 header 值中的 ASCII 控制字符（\r \n \t 等）
+  /// HTTP 规范禁止 header 值包含裸 CR/LF，B 站等源偶尔会返回带 \r 的 Cookie
+  Map<String, String> _sanitizeHeaders(Map<String, String>? raw) {
+    if (raw == null) return {};
+    final cleaned = <String, String>{};
+    for (final e in raw.entries) {
+      final v = e.value.replaceAll(RegExp(r'[\x00-\x1F\x7F]'), '').trim();
+      if (v.isNotEmpty) cleaned[e.key] = v;
+    }
+    return cleaned;
   }
 
   /// 从 headers 里找 Referer（大小写不敏感）
@@ -2290,38 +2478,81 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
   }
 
   Future<void> switchQuality(PlayQuality quality) async {
-    print('=== switchQuality called, url: ${quality.url} ===');
-    print('=== currentPlayUrl: ${currentPlayUrl.value} ===');
-    if (currentPlayUrl.value == quality.url) return;
+    if (currentQuality.value?.url == quality.url) return;
+
     final position = playerController.position;
-    currentPlayUrl.value = quality.url;
-    // _showPlayLoading();
+
+    // 复用当前播放已生效的 headers（首次播放已写入 currentHeaders）
+    final headers = currentHeaders.value.isNotEmpty
+        ? Map<String, String>.from(currentHeaders.value)
+        : <String, String>{};
+
+    // ===== DASH 决策树（与 _startPlay 保持一致） =====
+    // 说明：PlayQuality 本身不带 audioUrl（audioUrl 属于 PlayUrl 视频级），
+    //       所以这里不需要处理"audioUrl 非空优先"的分支。
+    // 优先级：
+    //   - isDash == 1   → 强制解析；失败报错
+    //   - isDash == 0   → 跳过
+    //   - isDash == null → 白名单判断；失败降级直连
+    String videoUrl = quality.url;
+    String? audioUrl;
+
+    bool shouldParseMpd = false;
+    bool strictDash = false;
+    final dash = _currentPlayUrlIsDash;
+    if (dash == 1) {
+      shouldParseMpd = true;
+      strictDash = true;
+      debugPrint('[DetailController] 切画质 isDash=1，强制解析');
+    } else if (dash == 0) {
+      debugPrint('[DetailController] 切画质 isDash=0，跳过 DASH 检测');
+    } else {
+      shouldParseMpd = MpdParser.looksLikeMpd(quality.url);
+      if (shouldParseMpd) {
+        debugPrint('[DetailController] 切画质 isDash 未指定，白名单命中');
+      }
+    }
+
+    if (shouldParseMpd) {
+      final mpdInfo = await MpdParser.parse(
+        quality.url,
+        headers: headers.isEmpty ? null : headers,
+      );
+      if (mpdInfo == null) {
+        SmartDialog.showToast(
+          strictDash ? 'DASH 流解析失败' : '解析播放地址失败',
+        );
+        return;
+      }
+      videoUrl = mpdInfo.videoUrl;
+      audioUrl = mpdInfo.hasAudio ? mpdInfo.audioUrl : null;
+      debugPrint('[DetailController] 切画质 MPD 解析成功');
+    }
+
+    // 记录选中项与实际播放 URL（两者分离）
+    currentQuality.value = quality;
+    currentPlayUrl.value = videoUrl;
+
     try {
       playerController.skipStartDuration.value = skipStartDuration.value;
       playerController.skipEndDuration.value = skipEndDuration.value;
-      // await playerController.setDataSource(
-      //   NetworkSource(
-      //     videoSource: quality.url,
-      //     audioSource: null,
-      //   ),
-      //   autoplay: true,
-      //   seekTo: position,
-      // );
 
-      // M3U8 走代理
-      final proxyUrl = _wrapUrlIfNeeded(quality.url);
+      final proxyUrl = _wrapUrlIfNeeded(
+        videoUrl,
+        headers: headers.isEmpty ? null : headers,
+      );
+
       await playerController.setDataSource(
         NetworkSource(
-          videoSource: proxyUrl,   // ← 改为 proxyUrl
-          audioSource: null,
+          videoSource: proxyUrl,
+          audioSource: audioUrl,
+          headers: headers.isEmpty ? null : headers,
         ),
         autoplay: true,
         seekTo: position,
       );
 
-      // 应用片头跳过
       await playerController.applySkipStart();
-
       await playerController.play();
       isPlaying.value = true;
     } catch (e) {
@@ -2955,7 +3186,10 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
 
   Future<void> _loadDanmaku(String url, Map<String, String>? headers) async {
     try {
-      final items = await _danmakuParser.loadFromUrl(url, headers: headers);
+      final items = await _danmakuParser.loadFromUrl(
+        url,
+        headers: _sanitizeHeaders(headers),
+      );
       if (items.isNotEmpty && Get.isRegistered<DanmakuController>()) {
         final danmakuController = Get.find<DanmakuController>();
         danmakuController.loadDanmaku(items);
@@ -3235,6 +3469,8 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     // 清空播放地址
     currentPlayUrl.value = '';
     currentQualities.clear();
+    currentQuality.value = null;
+    _currentPlayUrlIsDash = null;
     // 重置数据状态
     playerController.dataStatus.value = DataStatus.none;
   }

@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:get/get.dart';
@@ -5,6 +6,7 @@ import 'package:yuanying/core/theme/style.dart';
 import 'package:yuanying/modules/video/controllers/video_controller.dart';
 import 'package:yuanying/modules/video/controllers/intro_controller.dart';
 import 'package:yuanying/t4/models/video_detail.dart';
+import 'package:yuanying/t4/models/play_url.dart';
 import 'package:yuanying/t4/services/source_manager.dart';
 import 'package:yuanying/common/widgets/scroll_behavior.dart';
 import 'package:yuanying/common/widgets/image_viewer/gallery_viewer.dart';
@@ -349,6 +351,41 @@ class IntroView extends StatelessWidget {
     final colorScheme = theme.colorScheme;
     final currentIndex = introController.displaySourceIndex.value;
 
+    Widget buildSourceButton(int index) {
+      final name = sourceNames[index];
+      final isSelected = index == currentIndex;
+      return GestureDetector(
+        onTap: () => detailController.switchSource(index),
+        child: Container(
+          height: 32,
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          decoration: BoxDecoration(
+            color: isSelected
+                ? colorScheme.primary.withValues(alpha: 0.15)
+                : colorScheme.onInverseSurface,
+            borderRadius: BorderRadius.circular(16), // 胶囊
+            border: isSelected
+                ? Border.all(color: colorScheme.primary, width: 1.2)
+                : null,
+          ),
+          child: Center(
+            child: Text(
+              name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12,
+                color:
+                    isSelected ? colorScheme.primary : colorScheme.onSurface,
+                fontWeight:
+                    isSelected ? FontWeight.w500 : FontWeight.normal,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 4, 12, 2),
       child: Column(
@@ -366,44 +403,24 @@ class IntroView extends StatelessWidget {
             ),
           ),
           SizedBox(
-            height: 36,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: sourceNames.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 8),
-              itemBuilder: (context, index) {
-                final name = sourceNames[index];
-                final isSelected = index == currentIndex;
-                return GestureDetector(
-                  onTap: () => detailController.switchSource(index),
-                  child: Container(
-                    height: 30,
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    decoration: BoxDecoration(
-                      color: isSelected
-                          ? colorScheme.primary.withValues(alpha: 0.15)
-                          : colorScheme.onInverseSurface,
-                      borderRadius: BorderRadius.circular(16),
-                      border: isSelected
-                          ? Border.all(
-                              color: colorScheme.primary,
-                              width: 1.2,
-                            )
-                          : null,
-                    ),
-                    child: Center(
-                      child: Text(
-                        name,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: isSelected ? colorScheme.primary : colorScheme.onSurface,
-                          fontWeight: isSelected ? FontWeight.w500 : FontWeight.normal,
-                        ),
-                      ),
-                    ),
-                  ),
-                );
-              },
+            height: 32,
+            child: ScrollConfiguration(
+              behavior: ScrollConfiguration.of(context).copyWith(
+                scrollbars: false, // 桌面端隐藏横向滚动条
+                dragDevices: {
+                  PointerDeviceKind.touch,
+                  PointerDeviceKind.mouse, // 允许鼠标拖拽
+                  PointerDeviceKind.trackpad,
+                  PointerDeviceKind.stylus,
+                },
+              ),
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                padding: EdgeInsets.zero,
+                itemCount: sourceNames.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                itemBuilder: (context, index) => buildSourceButton(index),
+              ),
             ),
           ),
         ],
@@ -421,12 +438,42 @@ class IntroView extends StatelessWidget {
 
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    final currentUrl = detailController.currentPlayUrl.value;
+    // 用 currentQuality 对比（currentPlayUrl 可能是 mpd 解析后的 URL）
+    final currentQualityUrl = detailController.currentQuality.value?.url;
 
-    final currentQuality = qualities.firstWhere(
-      (q) => q.url == currentUrl,
-      orElse: () => qualities.first,
-    );
+    Widget buildQualityButton(PlayQuality quality) {
+      final isSelected = quality.url == currentQualityUrl;
+      return GestureDetector(
+        onTap: () => detailController.switchQuality(quality),
+        child: Container(
+          height: 32,
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          decoration: BoxDecoration(
+            color: isSelected
+                ? colorScheme.primary.withValues(alpha: 0.15)
+                : colorScheme.onInverseSurface,
+            borderRadius: BorderRadius.circular(16), // 胶囊
+            border: isSelected
+                ? Border.all(color: colorScheme.primary, width: 1.2)
+                : null,
+          ),
+          child: Center(
+            child: Text(
+              quality.label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12,
+                color:
+                    isSelected ? colorScheme.primary : colorScheme.onSurface,
+                fontWeight:
+                    isSelected ? FontWeight.w500 : FontWeight.normal,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 2, 12, 2),
@@ -444,38 +491,27 @@ class IntroView extends StatelessWidget {
               ),
             ),
           ),
-          Wrap(
-            spacing: 8,
-            runSpacing: 6,
-            children: qualities.map((quality) {
-              final isSelected = quality.url == currentUrl;
-              return GestureDetector(
-                onTap: () => detailController.switchQuality(quality),  // ← 修复
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: isSelected
-                        ? colorScheme.primary.withValues(alpha: 0.15)
-                        : colorScheme.onInverseSurface,
-                    borderRadius: BorderRadius.circular(16),
-                    border: isSelected
-                        ? Border.all(
-                            color: colorScheme.primary,
-                            width: 1.2,
-                          )
-                        : null,
-                  ),
-                  child: Text(
-                    quality.label,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: isSelected ? colorScheme.primary : colorScheme.onSurface,
-                      fontWeight: isSelected ? FontWeight.w500 : FontWeight.normal,
-                    ),
-                  ),
-                ),
-              );
-            }).toList(),
+          SizedBox(
+            height: 32,
+            child: ScrollConfiguration(
+              behavior: ScrollConfiguration.of(context).copyWith(
+                scrollbars: false, // 桌面端隐藏横向滚动条
+                dragDevices: {
+                  PointerDeviceKind.touch,
+                  PointerDeviceKind.mouse, // 允许鼠标拖拽
+                  PointerDeviceKind.trackpad,
+                  PointerDeviceKind.stylus,
+                },
+              ),
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                padding: EdgeInsets.zero,
+                itemCount: qualities.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                itemBuilder: (context, index) =>
+                    buildQualityButton(qualities[index]),
+              ),
+            ),
           ),
           const SizedBox(height: 4),
         ],

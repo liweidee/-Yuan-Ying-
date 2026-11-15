@@ -7,6 +7,8 @@ class PlayUrl {
   final String? danmaku;
   final String? script;
   final String? lrc;
+  final String? audioUrl;
+  final int? isDash;   // 1=DASH流 0=非DASH null=未指定
 
   PlayUrl({
     required this.parse,
@@ -16,6 +18,8 @@ class PlayUrl {
     this.danmaku,
     this.script,
     this.lrc,
+    this.audioUrl,
+    this.isDash,
   });
 
   // 是否直链
@@ -45,7 +49,22 @@ class PlayUrl {
       danmaku: json['danmaku']?.toString(),
       script: json['script']?.toString(),
       lrc: json['lrc']?.toString(),
+      audioUrl: (json['audioUrl'] ?? json['audio_url'])?.toString(),
+      isDash: _parseIsDash(json),
     );
+  }
+
+  /// 兼容 int(1/0) / bool(true/false) / String("1"/"0"/"true"/"false")
+  /// 兼容 key: isDash / is_dash / dash
+  static int? _parseIsDash(Map<String, dynamic> json) {
+    final raw = json['isDash'] ?? json['is_dash'] ?? json['dash'];
+    if (raw == null) return null;
+    if (raw is int) return raw == 1 ? 1 : (raw == 0 ? 0 : null);
+    if (raw is bool) return raw ? 1 : 0;
+    final s = raw.toString().trim().toLowerCase();
+    if (s == '1' || s == 'true') return 1;
+    if (s == '0' || s == 'false') return 0;
+    return null;
   }
 
   static List<PlayQuality> _parseQualities(dynamic urlData) {

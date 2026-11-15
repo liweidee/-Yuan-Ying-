@@ -32,6 +32,7 @@ import 'package:yuanying/core/routes/app_pages.dart';
 import 'package:yuanying/utils/storage_manager.dart';
 import 'package:yuanying/core/constants/storage_keys.dart';
 import 'package:yuanying/modules/video/widgets/danmaku_search_dialog.dart';
+import 'package:yuanying/modules/subtitle_site/views/subtitle_search_dialog.dart';
 
 // ===== 播放地址信息卡片数据模型 =====
 class _AddressInfoItem {
@@ -169,14 +170,8 @@ class _SettingSheetState extends State<SettingSheet> {
         _buildSettingItem(
           icon: Icons.high_quality,
           title: '选择画质',
-          subtitle: controller.currentPlayUrl.value.isNotEmpty
-              ? controller.currentQualities
-                  .firstWhere(
-                    (q) => q.url == controller.currentPlayUrl.value,
-                    orElse: () => controller.currentQualities.first,
-                  )
-                  .label
-              : '默认',
+          // 直接读 currentQuality，避免用 currentPlayUrl 匹配失败
+          subtitle: controller.currentQuality.value?.label ?? '默认',
           onTap: _showQualityDialog,
         ),
 
@@ -268,6 +263,15 @@ class _SettingSheetState extends State<SettingSheet> {
           subtitle: '字幕样式及加载',
           onTap: _showSubtitleSettings,
         ),
+
+
+      // ===== 搜索字幕 =====
+      _buildSettingItem(
+        icon: Icons.subtitles_outlined,
+        title: '搜索字幕',
+        subtitle: '从字幕网站搜索并挂载',
+        onTap: _showSubtitleSearchDialog,
+      ),
 
       // ===== 翻译当前字幕=====
       if (playerController.supportsExternalSubtitle)
@@ -556,7 +560,9 @@ class _SettingSheetState extends State<SettingSheet> {
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: qualities.map((quality) {
-              final isSelected = controller.currentPlayUrl.value == quality.url;
+              // 对比原始 quality，不用 currentPlayUrl
+              final isSelected =
+                  controller.currentQuality.value?.url == quality.url;
               return ListTile(
                 dense: true,
                 title: Text(quality.label),
@@ -1188,6 +1194,19 @@ class _SettingSheetState extends State<SettingSheet> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       DanmakuSearchDialog.show(Get.context!, controller);
+    });
+  }
+
+  /// 弹出字幕搜索对话框
+  ///
+  /// 流程：关闭设置面板 → 等一帧后打开底部弹窗，避免与面板关闭动画冲突。
+  void _showSubtitleSearchDialog() {
+    Navigator.pop(context);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final ctx = Get.context;
+      if (ctx == null) return;
+      SubtitleSearchDialog.show(ctx, controller);
     });
   }
 

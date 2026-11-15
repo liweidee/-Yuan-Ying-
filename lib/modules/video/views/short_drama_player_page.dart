@@ -11,6 +11,7 @@ import 'package:yuanying/modules/video/controllers/video_controller.dart';
 import 'package:yuanying/modules/video/widgets/danmaku_settings.dart';
 import 'package:yuanying/modules/video/widgets/setting_sheet.dart';
 import 'package:yuanying/plugin/pl_player/controller.dart';
+import 'package:yuanying/plugin/pl_player/models/data_status.dart';
 import 'package:yuanying/plugin/pl_player/view.dart';
 import 'package:yuanying/t4/models/play_url.dart';
 import 'package:yuanying/t4/models/video_detail.dart';
@@ -40,6 +41,19 @@ class _ShortDramaPlayerPageState extends State<ShortDramaPlayerPage> {
   late final PageController _pages;
   late int _current;
 
+  /// 切集防抖：快速连滑时只在最终停下的页触发 switchEpisode，
+  /// 避免中途每一页都执行 player.stop() + setDataSource
+  Timer? _switchDebounce;
+
+  /// 监听 introController.currentEpisodeIndex，播放完成自动切集时主动翻页
+  Worker? _indexWorker;
+
+  /// 用户正在滑动（用于阻止自动翻页打断手势）
+  bool _userScrolling = false;
+
+  /// 上次边界提示时间（防抖）
+  DateTime? _lastBoundaryToastAt;
+
   @override
   void initState() {
     super.initState();
@@ -53,10 +67,45 @@ class _ShortDramaPlayerPageState extends State<ShortDramaPlayerPage> {
 
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+
+    // 预加载封面，避免首次滑动时封面从网络加载出现空白
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final cover = ic.videoDetail.value?.vodPic;
+      if (cover != null && cover.isNotEmpty) {
+        precacheImage(NetworkImage(cover), context);
+      }
+    });
+
+    // 监听播放集索引变化：播放完成自动切集时主动翻页
+    // - 用户手动滑动时，_current 会先变，此处 idx == _current 被挡住
+    // - 播放完成自动切集时，_current 还是旧值，此处触发 animateToPage
+    // - 用户滑动中不响应（_userScrolling），避免打断手势
+    _indexWorker = ever<int>(
+      ic.currentEpisodeIndex,
+      (idx) {
+        if (!mounted || idx == _current || _userScrolling) return;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted || _userScrolling) return;
+          final ic2 = widget.detailController.introController;
+          // 二次校验：期间可能被用户滑动或再次切集覆盖
+          if (idx != ic2.currentEpisodeIndex.value) return;
+          final len2 = ic2.displayEpisodes.length;
+          if (idx < 0 || idx >= len2) return;
+          _pages.animateToPage(
+            idx,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOut,
+          );
+        });
+      },
+    );
   }
 
   @override
   void dispose() {
+    _indexWorker?.dispose();
+    _switchDebounce?.cancel();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     SystemChrome.setPreferredOrientations(DeviceOrientation.values);
     _pages.dispose();
@@ -66,7 +115,54 @@ class _ShortDramaPlayerPageState extends State<ShortDramaPlayerPage> {
   void _onPageChanged(int index) {
     if (index == _current) return;
     setState(() => _current = index);
-    widget.detailController.switchEpisode(index);
+    // 如果 index 已经是播放器当前播放集（比如播放完成自动翻页触发），
+    // 跳过 switchEpisode，避免重复 _playEpisode
+    final playingIdx =
+        widget.detailController.introController.currentEpisodeIndex.value;
+    if (index == playingIdx) return;
+    // 250ms 防抖：连续滑动时只在用户停下 250ms 后触发一次切集
+    _switchDebounce?.cancel();
+    _switchDebounce = Timer(const Duration(milliseconds: 250), () {
+      if (!mounted || index != _current) return;
+      // 二次校验：期间可能被播放完成自动切集覆盖
+      if (index ==
+          widget.detailController.introController.currentEpisodeIndex.value) {
+        return;
+      }
+      widget.detailController.switchEpisode(index);
+    });
+  }
+
+  bool _onScrollNotification(ScrollNotification n) {
+    if (n is ScrollStartNotification) {
+      _userScrolling = true;
+    } else if (n is ScrollEndNotification) {
+      _userScrolling = false;
+    }
+    return false;
+  }
+
+  bool _onOverscroll(OverscrollNotification n) {
+    final now = DateTime.now();
+    // 2 秒防抖，避免持续滑动时刷屏
+    if (_lastBoundaryToastAt != null &&
+        now.difference(_lastBoundaryToastAt!) < const Duration(seconds: 2)) {
+      return false;
+    }
+    final total =
+        widget.detailController.introController.displayEpisodes.length;
+    String? msg;
+    // 垂直 PageView：第一页向下滑 overscroll < 0；最后一页向上滑 overscroll > 0
+    if (n.overscroll < 0 && _current == 0) {
+      msg = '已经是第一集';
+    } else if (n.overscroll > 0 && _current == total - 1) {
+      msg = '已经是最后一集';
+    }
+    if (msg != null) {
+      _lastBoundaryToastAt = now;
+      SmartDialog.showToast(msg);
+    }
+    return false;
   }
 
   @override
@@ -80,31 +176,75 @@ class _ShortDramaPlayerPageState extends State<ShortDramaPlayerPage> {
         ),
       );
     }
+    final cover =
+        widget.detailController.introController.videoDetail.value?.vodPic;
 
     return PopScope(
       canPop: true,
       child: AnnotatedRegion<SystemUiOverlayStyle>(
         value: const SystemUiOverlayStyle(
           statusBarColor: Colors.transparent,
-          statusBarIconBrightness: Brightness.light,   // Android 白图标
-          statusBarBrightness: Brightness.dark,        // iOS 白文字
+          statusBarIconBrightness: Brightness.light, // Android 白图标
+          statusBarBrightness: Brightness.dark, // iOS 白文字
         ),
         child: Scaffold(
           backgroundColor: Colors.black,
-          body: PageView.builder(
-            controller: _pages,
-            scrollDirection: Axis.vertical,
-            onPageChanged: _onPageChanged,
-            itemCount: episodes.length,
-            itemBuilder: (context, index) {
-              if (index != _current) {
-                return _PagePlaceholder(episode: episodes[index]);
-              }
-              return _ShortDramaContent(
-                detailController: widget.detailController,
-                controllerTag: widget.controllerTag,
-              );
-            },
+          body: NotificationListener<ScrollNotification>(
+            onNotification: _onScrollNotification,
+            child: NotificationListener<OverscrollNotification>(
+              onNotification: _onOverscroll,
+              child: PageView.builder(
+                controller: _pages,
+                scrollDirection: Axis.vertical,
+                // BouncingScrollPhysics：让 Android 也能触发 overscroll 边界提示
+                physics: const BouncingScrollPhysics(),
+                onPageChanged: _onPageChanged,
+                itemCount: episodes.length,
+                itemBuilder: (context, index) {
+                  // 非当前页：不渲染播放器，仅显示封面 + 「第 X 集」+ loading
+                  if (index != _current) {
+                    return _PagePlaceholder(
+                      index: index,
+                      coverUrl: cover,
+                    );
+                  }
+                  // 当前页：底层播放器 + 首帧门控（用 AnimatedSwitcher 淡出占位）
+                  return Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      _ShortDramaContent(
+                        detailController: widget.detailController,
+                        controllerTag: widget.controllerTag,
+                        episodeIndex: index,
+                      ),
+                      Obx(() {
+                        final dc = widget.detailController;
+                        final pc = dc.playerController;
+                        final ready =
+                            pc.dataStatus.value == DataStatus.loaded &&
+                                dc.introController.currentEpisodeIndex.value ==
+                                    index;
+                        // ready 时占位淡出，视频自然显示；未就绪时占位遮住黑屏
+                        return AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 200),
+                          child: ready
+                              ? const SizedBox.shrink(
+                                  key: ValueKey('_sd_video'),
+                                )
+                              : IgnorePointer(
+                                  key: const ValueKey('_sd_placeholder'),
+                                  child: _PagePlaceholder(
+                                    index: index,
+                                    coverUrl: cover,
+                                  ),
+                                ),
+                        );
+                      }),
+                    ],
+                  );
+                },
+              ),
+            ),
           ),
         ),
       ),
@@ -112,20 +252,56 @@ class _ShortDramaPlayerPageState extends State<ShortDramaPlayerPage> {
   }
 }
 
-/// 非当前页占位（不渲染播放器，避免多实例冲突）
+/// 占位页：非当前页 / 当前页未就绪时显示
+/// 内容：封面（半透明）+「第 X 集」+ loading
+/// 集号用 PageView 的列表序号（index + 1），不依赖 episode.name，保证稳定
 class _PagePlaceholder extends StatelessWidget {
-  final Episode episode;
-  const _PagePlaceholder({required this.episode});
+  final int index;
+  final String? coverUrl;
+
+  const _PagePlaceholder({required this.index, this.coverUrl});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      color: Colors.black,
-      alignment: Alignment.center,
-      child: Text(
-        episode.name,
-        style: const TextStyle(color: Colors.white54, fontSize: 24),
-      ),
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        const ColoredBox(color: Colors.black),
+        if (coverUrl != null && coverUrl!.isNotEmpty)
+          Opacity(
+            opacity: 0.55,
+            child: Image.network(
+              coverUrl!,
+              fit: BoxFit.cover,
+              errorBuilder: (_, _, _) => const SizedBox.shrink(),
+            ),
+          ),
+        const ColoredBox(color: Color(0x66000000)),
+        Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                '第 ${index + 1} 集',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 24,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 16),
+              const SizedBox(
+                width: 28,
+                height: 28,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.5,
+                  color: Colors.white,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
@@ -134,10 +310,12 @@ class _PagePlaceholder extends StatelessWidget {
 class _ShortDramaContent extends StatefulWidget {
   final DetailController detailController;
   final String controllerTag;
+  final int episodeIndex;
 
   const _ShortDramaContent({
     required this.detailController,
     required this.controllerTag,
+    required this.episodeIndex,
   });
 
   @override
@@ -155,9 +333,19 @@ class _ShortDramaContentState extends State<_ShortDramaContent> {
   @override
   void initState() {
     super.initState();
-    // 详情页 didPushNext 会暂停播放器，这里恢复播放
+    // 只在「首次进入短剧页」时恢复播放：
+    // - dataStatus == loaded：播放器已就绪（详情页 open 过）
+    // - currentEpisodeIndex == episodeIndex：播放器当前集与页面一致
+    // - !isPlaying：详情页 didPushNext 暂停了
+    // 切集过程中 dataStatus 会短暂为 none，不会误触发
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && !_pc.playerStatus.value.isPlaying) {
+      if (!mounted) return;
+      final isCurrent =
+          widget.detailController.introController.currentEpisodeIndex.value ==
+              widget.episodeIndex;
+      if (isCurrent &&
+          _pc.dataStatus.value == DataStatus.loaded &&
+          !_pc.playerStatus.value.isPlaying) {
         _pc.play(hideControls: false);
       }
     });
@@ -357,6 +545,8 @@ class _ShortDramaContentState extends State<_ShortDramaContent> {
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.sizeOf(context);
+    final episodes = _dc.introController.displayEpisodes;
+
     return Stack(
       fit: StackFit.expand,
       children: [
@@ -395,6 +585,8 @@ class _ShortDramaContentState extends State<_ShortDramaContent> {
           if (!visible) return const SizedBox.shrink();
           return _ShortDramaOverlay(
             detailController: _dc,
+            currentIndex: widget.episodeIndex,
+            totalEpisodes: episodes.length,
             onShowDanmakuSettings: _showDanmakuSettings,
             onShowSettingSheet: _showSettingSheet,
             onShowSpeed: _showSpeed,
@@ -410,6 +602,8 @@ class _ShortDramaContentState extends State<_ShortDramaContent> {
 /// 短剧 UI 覆盖层
 class _ShortDramaOverlay extends StatelessWidget {
   final DetailController detailController;
+  final int currentIndex;
+  final int totalEpisodes;
   final VoidCallback onShowDanmakuSettings;
   final VoidCallback onShowSettingSheet;
   final VoidCallback onShowSpeed;
@@ -418,6 +612,8 @@ class _ShortDramaOverlay extends StatelessWidget {
 
   const _ShortDramaOverlay({
     required this.detailController,
+    required this.currentIndex,
+    required this.totalEpisodes,
     required this.onShowDanmakuSettings,
     required this.onShowSettingSheet,
     required this.onShowSpeed,
@@ -438,7 +634,12 @@ class _ShortDramaOverlay extends StatelessWidget {
           top: 0,
           left: 0,
           right: 0,
-          child: _TopBar(detailController: dc, topPadding: padding.top),
+          child: _TopBar(
+            detailController: dc,
+            topPadding: padding.top,
+            currentIndex: currentIndex,
+            totalEpisodes: totalEpisodes,
+          ),
         ),
         // 右侧按钮（合并成一列）
         Positioned(
@@ -492,12 +693,18 @@ class _ShortDramaOverlay extends StatelessWidget {
 class _TopBar extends StatelessWidget {
   final DetailController detailController;
   final double topPadding;
+  final int currentIndex;
+  final int totalEpisodes;
 
-  const _TopBar({required this.detailController, required this.topPadding});
+  const _TopBar({
+    required this.detailController,
+    required this.topPadding,
+    required this.currentIndex,
+    required this.totalEpisodes,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final ic = detailController.introController;
     return Container(
       padding: EdgeInsets.fromLTRB(4, topPadding + 4, 12, 8),
       decoration: const BoxDecoration(
@@ -515,11 +722,11 @@ class _TopBar extends StatelessWidget {
           ),
           Expanded(
             child: Obx(() {
-              final name = ic.videoDetail.value?.vodName ?? '';
-              final idx = ic.currentEpisodeIndex.value + 1;
-              final total = ic.displayEpisodes.length;
+              final name =
+                  detailController.introController.videoDetail.value?.vodName ??
+                      '';
               return Text(
-                '$name · 第 $idx 集 / 共 $total 集',
+                '$name · 第 ${currentIndex + 1} 集 / 共 $totalEpisodes 集',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(color: Colors.white, fontSize: 15),
@@ -545,12 +752,19 @@ class _BottomBar extends StatelessWidget {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        // 进度条（复用 PlPlayerController 的滑块回调）
+        // 进度条
+        // 关键修复：原实现读 pc.sliderPosition（普通 Duration，非 Rx），
+        // 拖拽时 Obx 不会重建，滑块位置永远不动（视频画面会跳，但滑块不动）。
+        // 改为读两个 Rx 字段：
+        // - 拖拽中（isSliderMoving == true）：sliderTempPosition（Rx<Duration>，毫秒级，平滑跟随手指）
+        // - 非拖拽中：sliderPositionSeconds（RxInt，秒级，跟随播放进度）
         Obx(() {
           final dur = pc.duration.value;
           if (dur <= Duration.zero) return const SizedBox(height: 32);
           final max = dur.inMilliseconds.toDouble();
-          final pos = pc.sliderPosition.inMilliseconds.toDouble();
+          final pos = pc.isSliderMoving.value
+              ? pc.sliderTempPosition.value.inMilliseconds.toDouble()
+              : pc.sliderPositionSeconds.value * 1000.0;
           return SliderTheme(
             data: SliderTheme.of(context).copyWith(
               trackHeight: 3,
@@ -563,7 +777,10 @@ class _BottomBar extends StatelessWidget {
             child: Slider(
               value: pos.clamp(0.0, max),
               max: max,
-              onChangeStart: (_) => pc.onChangedSliderStart(),
+              // onChangeStart 传初始值：让 sliderTempPosition 从当前播放位置起步，
+              // 避免沿用上一次拖拽遗留的旧值导致第一次拖拽跳到错误位置
+              onChangeStart: (v) =>
+                  pc.onChangedSliderStart(Duration(milliseconds: v.round())),
               onChanged: (v) =>
                   pc.onUpdatedSliderProgress(Duration(milliseconds: v.round())),
               onChangeEnd: (v) {

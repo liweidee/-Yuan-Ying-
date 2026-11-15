@@ -127,6 +127,14 @@ class SettingPage extends StatelessWidget {
           const SizedBox(height: 8),
           _buildSettingItem(
             context: context,
+            icon: Icons.subtitles_outlined,
+            title: '字幕网站',
+            subtitle: '配置 SubHD、射手网、OpenSubtitles 字幕源',
+            onTap: () => Get.toNamed(AppPages.subtitleSite),
+          ),
+          const SizedBox(height: 8),
+          _buildSettingItem(
+            context: context,
             icon: Icons.movie_creation_outlined,
             title: 'TMDB 配置',
             subtitle: '配置 TMDB API 访问与代理',

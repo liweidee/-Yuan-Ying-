@@ -594,4 +594,41 @@ class PlayerPref {
       _box.get(SettingBoxKey.subTransAutoApply, defaultValue: true);
   static set subtitleTranslationAutoApply(bool value) =>
       _box.put(SettingBoxKey.subTransAutoApply, value);
+
+  /// 字幕网站
+  static bool get subhdEnabled =>
+      _box.get('subhdEnabled', defaultValue: true);
+  static set subhdEnabled(bool value) => _box.put('subhdEnabled', value);
+
+  static bool get assrtEnabled =>
+      _box.get('assrtEnabled', defaultValue: false);
+  static set assrtEnabled(bool value) => _box.put('assrtEnabled', value);
+
+  static String get assrtToken =>
+      _box.get('assrtToken', defaultValue: '');
+  static set assrtToken(String value) => _box.put('assrtToken', value);
+
+  static bool get openSubtitlesEnabled =>
+      _box.get('openSubtitlesEnabled', defaultValue: false);
+  static set openSubtitlesEnabled(bool value) =>
+      _box.put('openSubtitlesEnabled', value);
+
+  static String get openSubtitlesApiKey =>
+      _box.get('openSubtitlesApiKey', defaultValue: '');
+  static set openSubtitlesApiKey(String value) =>
+      _box.put('openSubtitlesApiKey', value);
+
+  static String get openSubtitlesUsername =>
+      _box.get('openSubtitlesUsername', defaultValue: '');
+  static set openSubtitlesUsername(String value) =>
+      _box.put('openSubtitlesUsername', value);
+
+  static String get openSubtitlesPassword =>
+      _box.get('openSubtitlesPassword', defaultValue: '');
+  static set openSubtitlesPassword(String value) =>
+      _box.put('openSubtitlesPassword', value);
+
+  static bool get xunleiEnabled =>
+      _box.get('xunleiEnabled', defaultValue: true);
+  static set xunleiEnabled(bool value) => _box.put('xunleiEnabled', value);
 }

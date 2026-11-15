@@ -634,13 +634,56 @@ class MediaKitEngine implements IPlayerEngine {
       extras['hwdec'] = hwdec!;
     }
 
-    final Map<String, String> httpHeaders = Map.from(dataSource.headers ?? {});
+    final Map<String, String> httpHeaders = _sanitizeHeaders(dataSource.headers);
     if (httpHeaders.isNotEmpty) {
       _cachedHeaders = Map.from(httpHeaders);
     }
 
     debugPrint('[media_kit] httpHeaders: $httpHeaders');
     debugPrint('[media_kit] videoSource: ${dataSource.videoSource}');
+
+    final String? audioUrl = dataSource.audioSource;
+
+    // ===== 每次 open 前清空 mpv 全局头，避免上一集残留污染本集 =====
+    // 背景：mpv 的 referrer/user-agent/http-header-fields 是全局属性，
+    // 一旦设置就持续生效。播放 DASH 源后切到非 DASH 源时，若不清理，
+    // 残留的 B 站 Referer 会导致新源 CDN 返回 403。
+    // 清理后：
+    //   - 非 DASH 源：仅 Media.httpHeaders 生效，与原逻辑完全等价
+    //   - DASH 源：referrer/user-agent 随后被重新设置（见下），供 audio-add 使用
+    if (player.platform is NativePlayer) {
+      final nativePlayer = player.platform as NativePlayer;
+      try {
+        await nativePlayer.setProperty('referrer', '');
+        await nativePlayer.setProperty('user-agent', '');
+        await nativePlayer.setProperty('http-header-fields', '');
+      } catch (e) {
+        debugPrint('[media_kit] 清理全局 headers 失败: $e');
+      }
+    }
+
+    // ===== 仅 DASH 时设置 referrer/user-agent（供 audio-add 命令复用）=====
+    // 注意：http-header-fields 不在这里设置！
+    // 主视频请求的请求头必须走 Media.httpHeaders（与原逻辑完全一致），
+    // audio-add 请求会复用 open 时设置的 http-header-fields，
+    // 因此这里只需补 referrer/user-agent 即可。
+    if (audioUrl != null &&
+        audioUrl.isNotEmpty &&
+        player.platform is NativePlayer) {
+      final nativePlayer = player.platform as NativePlayer;
+      try {
+        final referer = _findHeader(httpHeaders, 'Referer');
+        if (referer != null) {
+          await nativePlayer.setProperty('referrer', referer);
+        }
+        final ua = _findHeader(httpHeaders, 'User-Agent');
+        if (ua != null) {
+          await nativePlayer.setProperty('user-agent', ua);
+        }
+      } catch (e) {
+        debugPrint('[media_kit] 设置 referrer/user-agent 失败: $e');
+      }
+    }
 
     await player.open(
       Media(
@@ -652,8 +695,16 @@ class MediaKitEngine implements IPlayerEngine {
       play: false,
     );
 
-    // 若当前处于"听视频"状态，重新同步到 mpv
-    // （file-local-options 在切换文件后会被 mpv 重置为默认值）
+    // ===== 外挂音频挂载 =====
+    if (audioUrl != null && audioUrl.isNotEmpty) {
+      try {
+        await player.setAudioTrack(AudioTrack.uri(audioUrl));
+        debugPrint('[media_kit] AudioTrack.uri 挂载成功');
+      } catch (e) {
+        debugPrint('[media_kit] AudioTrack.uri 挂载失败: $e');
+      }
+    }
+
     if (onlyPlayAudio.value) {
       _applyOnlyPlayAudioToPlayer();
     }
@@ -663,6 +714,24 @@ class MediaKitEngine implements IPlayerEngine {
 
   // cache-speed 观察状态
   bool _isObservingCacheSpeed = false;
+
+  Map<String, String> _sanitizeHeaders(Map<String, String>? raw) {
+    if (raw == null) return {};
+    final cleaned = <String, String>{};
+    for (final e in raw.entries) {
+      final v = e.value.replaceAll(RegExp(r'[\x00-\x1F\x7F]'), '').trim();
+      if (v.isNotEmpty) cleaned[e.key] = v;
+    }
+    return cleaned;
+  }
+
+  String? _findHeader(Map<String, String> headers, String name) {
+    final lower = name.toLowerCase();
+    for (final e in headers.entries) {
+      if (e.key.toLowerCase() == lower) return e.value;
+    }
+    return null;
+  }
 
   void _initVideoFit() {
     if (_prefFit == VideoFitType.fill && _isVertical) {
@@ -1147,11 +1216,44 @@ class MediaKitEngine implements IPlayerEngine {
 
       Map<String, String> httpHeaders;
       if (_cachedHeaders != null && _cachedHeaders!.isNotEmpty) {
-        httpHeaders = Map.from(_cachedHeaders!);
+        httpHeaders = _sanitizeHeaders(_cachedHeaders);
         debugPrint('[media_kit] refreshPlayer 使用缓存的 headers: $httpHeaders');
       } else {
-        httpHeaders = Map.from(dataSource.headers ?? {});
+        httpHeaders = _sanitizeHeaders(dataSource.headers);
         debugPrint('[media_kit] refreshPlayer 使用 dataSource.headers: $httpHeaders');
+      }
+
+      final String? audioUrl = dataSource.audioSource;
+
+      // ===== 清空上一集残留的全局头 =====
+      if (player.platform is NativePlayer) {
+        final nativePlayer = player.platform as NativePlayer;
+        try {
+          await nativePlayer.setProperty('referrer', '');
+          await nativePlayer.setProperty('user-agent', '');
+          await nativePlayer.setProperty('http-header-fields', '');
+        } catch (e) {
+          debugPrint('[media_kit] refreshPlayer 清理全局 headers 失败: $e');
+        }
+      }
+
+      // ===== 仅 DASH 时设置 referrer/user-agent（供 audio-add 用）=====
+      if (audioUrl != null &&
+          audioUrl.isNotEmpty &&
+          player.platform is NativePlayer) {
+        final nativePlayer = player.platform as NativePlayer;
+        try {
+          final referer = _findHeader(httpHeaders, 'Referer');
+          if (referer != null) {
+            await nativePlayer.setProperty('referrer', referer);
+          }
+          final ua = _findHeader(httpHeaders, 'User-Agent');
+          if (ua != null) {
+            await nativePlayer.setProperty('user-agent', ua);
+          }
+        } catch (e) {
+          debugPrint('[media_kit] refreshPlayer 设置 referrer/user-agent 失败: $e');
+        }
       }
 
       await player.open(
@@ -1164,7 +1266,16 @@ class MediaKitEngine implements IPlayerEngine {
         play: true,
       );
 
-      // 若当前处于"听视频"状态，重新同步到 mpv
+      // ===== 外挂音频挂载 =====
+      if (audioUrl != null && audioUrl.isNotEmpty) {
+        try {
+          await player.setAudioTrack(AudioTrack.uri(audioUrl));
+          debugPrint('[media_kit] refreshPlayer AudioTrack.uri 挂载成功');
+        } catch (e) {
+          debugPrint('[media_kit] refreshPlayer AudioTrack.uri 挂载失败: $e');
+        }
+      }
+
       if (onlyPlayAudio.value) {
         _applyOnlyPlayAudioToPlayer();
       }
@@ -1778,7 +1889,7 @@ class MediaKitEngine implements IPlayerEngine {
   @override
   bool get supportsHardwareDecodingSetting => true;
   @override
-  bool get supportsExternalAudio => false;
+  bool get supportsExternalAudio => true;
 
   // ============================================================
   // 6. 附加方法

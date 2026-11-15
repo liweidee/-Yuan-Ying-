@@ -632,18 +632,39 @@ class _DetailPageState extends State<DetailPage>
           ),
         ];
       },
-      body: Scaffold(
-        backgroundColor: Colors.transparent,
-        resizeToAvoidBottomInset: false,
-        body: Column(
-          children: [
-            _buildTabBar(controller),
-            Expanded(
-              child: _buildTabBarView(controller),
+      // 全屏时 body 不渲染，避免内层滚动视图通过 NestedScrollView
+      // 协调机制触发 header 收缩（即"上滑视频区缩小、内容区露出"的问题）。
+      //
+      // 原因：
+      //   1. ExtendedNestedScrollView 的 physics 只控制外层 CustomScrollView，
+      //      不控制 body 内部各 tab 的滚动视图；
+      //   2. NestedScrollView 会把内层滚动偏移同步给外层，驱动
+      //      SliverPinnedDynamicHeader 从 maxExtent 收缩到 minExtent；
+      //   3. 所以只要 body 里的滚动视图还能滚动，header 就会被收缩、
+      //      视频区就会缩小，即使外层 physics 是 NeverScrollableScrollPhysics；
+      //   4. 锁屏时 _scaleGestureRecognizer 不注册，手势直接冒泡到内层
+      //      滚动视图，这就是"无论是否锁屏都能触发"的原因。
+      //
+      // 全屏时用 SizedBox.shrink() 替换 body：
+      //   - 没有内层滚动视图 → 无法触发 NestedScrollView 协调
+      //   - 只有外层 header 存在，外层 physics 是 NeverScrollable，
+      //     手势被 videoPlayer 内的 _scaleGestureRecognizer 消费或忽略，
+      //     不会触发滚动
+      //   - 视觉上：全屏时 header 高度 = 整屏，body 高度为 0，与原布局一致
+      body: isFullScreen
+          ? const SizedBox.shrink()
+          : Scaffold(
+              backgroundColor: Colors.transparent,
+              resizeToAvoidBottomInset: false,
+              body: Column(
+                children: [
+                  _buildTabBar(controller),
+                  Expanded(
+                    child: _buildTabBarView(controller),
+                  ),
+                ],
+              ),
             ),
-          ],
-        ),
-      ),
     );
 
     // 非全屏下，状态栏背景固定为黑色，需要把状态栏图标改成浅色，
