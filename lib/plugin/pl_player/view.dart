@@ -305,11 +305,17 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
             ? _onTapDown
             : null,
         onTapUp: _onTapUp,
-        onTapCancel: _removeDmAction,
+        onTapCancel: () {
+          _ignoreNextTapUp = false;
+          _removeDmAction();
+        },
       );
 
       _danmakuListener = plPlayerController.enableShowDanmaku.listen((value) {
-        if (!value) _removeDmAction();
+        if (!value) {
+          _removeDmAction();
+          _ignoreNextTapUp = false;
+        }
         _tapGestureRecognizer.onTapDown = value ? _onTapDown : null;
       });
     } else {
@@ -1028,13 +1034,19 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
   }
 
   void _onTapUp(TapUpDetails details) {
+    // 本次 down 已判定为"仅关闭浮窗" → 跳过默认行为，不再触发暂停/播放
+    if (_ignoreNextTapUp) {
+      _ignoreNextTapUp = false;
+      return;
+    }
+
     // 命中弹幕优先：桌面端也生效
     if (_suspendedDm != null) {
       _dmOffset.value = details.localPosition;
       return;
     }
 
-    // 未命中弹幕 → 原有行为
+    // 未命中弹幕 → 原有行为（保持不变）
     switch (details.kind) {
       case PointerDeviceKind.mouse when PlatformUtils.isDesktop:
         plPlayerController.onDoubleTapCenter();
@@ -1045,25 +1057,49 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
 
   /// 按下即命中判定并挂起
   void _onTapDown(TapDownDetails details) {
+    // 每次按下先重置跳过标志，保证状态干净
+    _ignoreNextTapUp = false;
+
     final ctr = plPlayerController.danmakuController;
-    if (ctr != null) {
-      final pos = details.localPosition;
-      final res = ctr.findSingleDanmaku(pos);
-      debugPrint('[DM] res=$res, extra=${res?.$2?.content?.extra}');
-      if (res != null) {
-        final (dy, item) = res;
-        if (item != _suspendedDm) {
-          _suspendedDm?.suspend = false;
-          if (item.content.extra == null) {
-            _dmOffset.value = null;
-            return;
-          }
-          _suspendedDm = item..suspend = true;
-          _dmDy = dy;
-        }
-      } else {
+    if (ctr == null) {
+      // 控制器不可用时，清掉可能悬空的浮窗（防御性）
+      if (_suspendedDm != null || _dmOffset.value != null) {
+        _removeDmAction();
+        _ignoreNextTapUp = true;
+      }
+      return;
+    }
+
+    final pos = details.localPosition;
+    final res = ctr.findSingleDanmaku(pos);
+    debugPrint('[DM] res=$res, extra=${res?.$2?.content?.extra}');
+
+    if (res != null) {
+      final (dy, item) = res;
+      if (item != _suspendedDm) {
         _suspendedDm?.suspend = false;
+
+        if (item.content.extra == null) {
+          // 点中无 extra 弹幕：若之前有浮窗，仅关闭浮窗，不触发播放/暂停
+          if (_suspendedDm != null || _dmOffset.value != null) {
+            _suspendedDm = null;
+            _dmOffset.value = null;
+            _ignoreNextTapUp = true;
+          }
+          // 若之前无浮窗，保持原行为（up 时走默认逻辑）
+          return;
+        }
+
+        _suspendedDm = item..suspend = true;
+        _dmDy = dy;
+      }
+    } else {
+      // 点空白：若之前有浮窗，仅关闭浮窗，不触发播放/暂停
+      if (_suspendedDm != null || _dmOffset.value != null) {
+        _suspendedDm?.suspend = false;
+        _suspendedDm = null;
         _dmOffset.value = null;
+        _ignoreNextTapUp = true;
       }
     }
   }
@@ -1177,6 +1213,9 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
   double _dmDy = 0;
   final Rxn<Offset> _dmOffset = Rxn<Offset>();
   StreamSubscription<bool>? _danmakuListener;
+
+  /// 标记下一次 up 是否需要跳过默认行为（用于"点击空白仅关闭浮窗"）
+  bool _ignoreNextTapUp = false;
 
   static const _kOffsetThreshold = 25.0;
 
