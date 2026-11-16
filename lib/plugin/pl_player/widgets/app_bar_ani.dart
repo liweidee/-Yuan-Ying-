@@ -32,7 +32,7 @@ class AppBarAni extends StatelessWidget {
     end: Alignment.topCenter,
     colors: <Color>[
       Colors.transparent,
-      Color(0x80000000),
+      Color(0xBF000000),
     ],
     tileMode: TileMode.mirror,
   );
@@ -47,7 +47,7 @@ class AppBarAni extends StatelessWidget {
     end: Alignment.bottomCenter,
     colors: <Color>[
       Colors.transparent,
-      Color(0x80000000),
+      Color(0xBF000000),
     ],
     tileMode: TileMode.mirror,
   );

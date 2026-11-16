@@ -660,11 +660,12 @@ class PlPlayerController {
   RxInt get bufferedSeconds => _ensureEngine().bufferedSeconds;
 
   // ============================================================
-  // 分辨率 / 网速
+  // 分辨率 / 网速 / 帧率
   // ============================================================
   RxInt get videoWidth => _ensureEngine().videoWidth;
   RxInt get videoHeight => _ensureEngine().videoHeight;
   RxDouble get downloadSpeed => _ensureEngine().downloadSpeed;
+  RxDouble get videoFps => _ensureEngine().videoFps;
 
   // ============================================================
   // 媒体详细信息（透传）

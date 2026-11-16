@@ -366,6 +366,8 @@ abstract class IPlayerEngine {
   RxInt get videoWidth;
   RxInt get videoHeight;
   RxDouble get downloadSpeed;
+  /// 视频帧率（fps）；0 表示未就绪 / 当前引擎不支持
+  RxDouble get videoFps;
 
   // ============================================================
   // 媒体详细信息（取不到返回 null；不支持则返回空列表）

@@ -55,6 +55,8 @@ import 'package:yuanying/utils/mobile_observer.dart';
 import 'package:yuanying/utils/platform_utils.dart';
 import 'package:yuanying/utils/theme_utils.dart';
 import 'package:yuanying/utils/utils.dart';
+import 'package:yuanying/modules/video/widgets/player_focus.dart'
+    show handlePlaybackShortcut;
 import 'package:yuanying/modules/video/controllers/video_controller.dart';
 import 'package:yuanying/plugin/pl_player/player_pref.dart';
 
@@ -62,6 +64,7 @@ import 'package:canvas_danmaku/canvas_danmaku.dart';
 import 'package:easy_debounce/easy_throttle.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:yuanying/utils/android_pip_helper.dart';
+import 'package:yuanying/modules/video/widgets/info_display_overlay.dart';
 
 /// 视频播放器主界面
 class PLVideoPlayer extends StatefulWidget {
@@ -1235,7 +1238,8 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
       final isSecondaryBtn = buttons == kSecondaryMouseButton;
       if (isSecondaryBtn || buttons == kMiddleMouseButton) {
         final isFullScreen = this.isFullScreen;
-        if (isFullScreen && plPlayerController.controlsLock.value) {
+        // 右键 / 中键 = 全屏切换，属强意图操作，入口处若锁屏则先解锁
+        if (plPlayerController.controlsLock.value) {
           plPlayerController
             ..controlsLock.value = false
             ..showControls.value = false;
@@ -1419,6 +1423,28 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
             }),
           ),
         ),
+
+        // ----- 全屏信息显示层 -----
+        // z-order：视频 / 弹幕 / 字幕之上，Toast / 控制栏 / 进度条 / 全屏按钮 之下。
+        // 控制栏显示时（前 3 秒）由控制栏覆盖，3 秒后控制栏隐藏，信息完整露出。
+        // 用 ViewSafeArea 避让刘海，与 removeSafeArea 配置联动。
+        Positioned.fill(
+          child: ViewSafeArea(
+            top: !plPlayerController.removeSafeArea,
+            bottom: !plPlayerController.removeSafeArea,
+            left: !plPlayerController.removeSafeArea,
+            right: !plPlayerController.removeSafeArea,
+            child: Obx(() {
+              if (!plPlayerController.isFullScreen.value) {
+                return const SizedBox.shrink();
+              }
+              return InfoDisplayOverlay(
+                playerController: plPlayerController,
+              );
+            }),
+          ),
+        ),
+
 
         // ----- 长按倍速 Toast -----
         IgnorePointer(
@@ -1867,43 +1893,6 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
               ),
             ),
 
-          // 电池电量按钮
-          if (isFullScreen && PlayerPref.showBatteryLevel)
-            ViewSafeArea(
-              left: false,
-              right: !plPlayerController.removeSafeArea,
-              child: Align(
-                alignment: Alignment.topRight,
-                child: FractionalTranslation(
-                  translation: const Offset(-0.1, 0.1),
-                  child: Obx(() {
-                    return Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withOpacity(0.4),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(
-                            Icons.battery_4_bar,
-                            size: 16,
-                            color: Colors.white,
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            plPlayerController.batteryLevel.value,
-                            style: const TextStyle(color: Colors.white, fontSize: 12),
-                          ),
-                        ],
-                      ),
-                    );
-                  }),
-                ),
-              ),
-            ),
-
           // 截图和旋转按钮
           if (plPlayerController.showFsScreenshotBtn)
             // 方向切换按钮 + 截图按钮 组合（右侧垂直排列）
@@ -2103,25 +2092,57 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
     );
 
     if (PlatformUtils.isDesktop) {
-      // 包裹 Focus，拦截 Esc 键，避免全屏时按下 Esc 直接 pop 路由
+      // 包裹 Focus：统一处理 ESC 拦截与播放器快捷键
+      //
+      // 焦点说明：
+      // - autofocus: true 让本节点取得焦点
+      // - Tab 键不在此处消费，保持焦点导航
+      // - 焦点在 TextField 时事件本不会到达此处（双保险再判断一次）
       return Focus(
         autofocus: true,
         onKeyEvent: (node, event) {
-          // 仅处理 Esc 键的按下事件
+          // 1) SmartDialog 打开时全部忽略，让弹窗优先处理
+          if (SmartDialog.checkExist()) {
+            return KeyEventResult.ignored;
+          }
+
+          // 2) ESC：全屏时退出全屏，避免 pop 详情页导致应用卡在全屏
           if (event is KeyDownEvent &&
               event.logicalKey == LogicalKeyboardKey.escape) {
-            // 如果存在 SmartDialog 弹窗，不拦截，让弹窗优先处理 Esc（关闭弹窗）
-            if (SmartDialog.checkExist()) {
-              return KeyEventResult.ignored;
-            }
-            final isFullScreen = plPlayerController.isFullScreen.value;
-            if (isFullScreen) {
-              // 全屏时 Esc 退出全屏，并阻止事件冒泡（避免触发路由 pop）
+            if (plPlayerController.isFullScreen.value) {
+              // 退出全屏前若仍锁定，同步解锁
+              if (plPlayerController.controlsLock.value) {
+                plPlayerController
+                  ..controlsLock.value = false
+                  ..showControls.value = false;
+              }
               plPlayerController.triggerFullScreen(status: false);
               return KeyEventResult.handled;
             }
+            return KeyEventResult.ignored;
           }
-          return KeyEventResult.ignored;
+
+          // 3) 快捷键总开关
+          if (!PlayerPref.keyboardControl) {
+            return KeyEventResult.ignored;
+          }
+
+          // 4) 输入框焦点保护：避免空格 / 方向键 / Enter 被吃
+          final primary = FocusManager.instance.primaryFocus;
+          final ctx = primary?.context;
+          if (ctx != null &&
+              (ctx.widget is EditableText ||
+                  ctx.findAncestorWidgetOfExactType<EditableText>() != null)) {
+            return KeyEventResult.ignored;
+          }
+
+          // 5) 委托给工具函数
+          final handled = handlePlaybackShortcut(
+            event,
+            controller: plPlayerController,
+            controllerTag: widget.controllerTag,
+          );
+          return handled ? KeyEventResult.handled : KeyEventResult.ignored;
         },
         child: Obx(
           () {

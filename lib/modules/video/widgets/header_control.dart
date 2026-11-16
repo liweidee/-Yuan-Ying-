@@ -94,13 +94,6 @@ class _HeaderControlState extends State<HeaderControl> {
       return Container(
         height: 68, // 固定高度，永不变化
         padding: const EdgeInsets.only(top: 4, left: 8, right: 8),
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Colors.black87, Colors.transparent],
-          ),
-        ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.start,
           children: [
@@ -330,7 +323,7 @@ class _HeaderControlState extends State<HeaderControl> {
                 alignment: Alignment.centerLeft,
                 child: Padding(
                   padding: const EdgeInsets.only(left: 8.0),
-                  child: info.isNotEmpty
+                  child: _shouldShowLegacyInfo(info)
                       ? Text(
                           info,
                           style: const TextStyle(
@@ -416,6 +409,16 @@ class _HeaderControlState extends State<HeaderControl> {
       backgroundColor: Colors.transparent,
       builder: (context) => DanmakuSettings(controller: controller),
     );
+  }
+
+  /// 全屏时，如果用户已通过「信息显示」把分辨率或网速放到角落，
+  /// 顶部第二行不再显示，避免重复。非全屏始终显示。
+  bool _shouldShowLegacyInfo(String info) {
+    if (info.isEmpty) return false;
+    if (!playerController.isFullScreen.value) return true;
+    final infoOverlayActive = PlayerPref.infoResolutionPosition != 0 ||
+        PlayerPref.infoSpeedPosition != 0;
+    return !infoOverlayActive;
   }
 
   /// 录制按钮（仅 FVP 内核）

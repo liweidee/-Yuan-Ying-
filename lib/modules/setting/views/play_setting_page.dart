@@ -200,16 +200,16 @@ class _PlaySettingPageState extends State<PlaySettingPage> {
           const SizedBox(height: 8),
 
           // ===== 6. 全屏电池电量 =====
-          _buildSwitchItem(
-            icon: Icons.battery_3_bar,
-            title: '全屏显示电池电量',
-            value: PlayerPref.showBatteryLevel,
-            onChanged: (value) {
-              PlayerPref.showBatteryLevel = value;
-              _refresh();
-            },
-          ),
-          const SizedBox(height: 8),
+          // _buildSwitchItem(
+          //   icon: Icons.battery_3_bar,
+          //   title: '全屏显示电池电量',
+          //   value: PlayerPref.showBatteryLevel,
+          //   onChanged: (value) {
+          //     PlayerPref.showBatteryLevel = value;
+          //     _refresh();
+          //   },
+          // ),
+          // const SizedBox(height: 8),
 
           // ===== 7. 双击快退/快进 =====
           _buildSwitchItem(

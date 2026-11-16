@@ -471,9 +471,71 @@ class PlayerPref {
   static int get pushMode => _box.get('pushMode', defaultValue: 0);
   static set pushMode(int value) => _box.put('pushMode', value);
 
-  // ===== 全屏电池电量 =====
-  static bool get showBatteryLevel => _box.get('showBatteryLevel', defaultValue: true);
-  static set showBatteryLevel(bool value) => _box.put('showBatteryLevel', value);
+    // ===== 全屏信息显示位置 =====
+  // 位置值：0=关 / 1=左上 / 2=右上 / 3=左下 / 4=右下
+
+  /// 电量位置。首次读取时自动从旧 showBatteryLevel 迁移：
+  ///   true  → 2（右上）
+  ///   false → 0（关）
+  /// 迁移后删除旧键，后续直接读新键。
+  static int get batteryPosition {
+    final v = _box.get(SettingBoxKey.batteryPosition);
+    if (v is int) return v;
+    final legacy = _box.get('showBatteryLevel');
+    final mapped = (legacy == true) ? 2 : 0;
+    _box.put(SettingBoxKey.batteryPosition, mapped);
+    _box.delete('showBatteryLevel');
+    return mapped;
+  }
+  static set batteryPosition(int value) =>
+      _box.put(SettingBoxKey.batteryPosition, value);
+
+  static int get infoTimePosition =>
+      _box.get(SettingBoxKey.infoTimePosition, defaultValue: 0);
+  static set infoTimePosition(int value) =>
+      _box.put(SettingBoxKey.infoTimePosition, value);
+
+  static int get infoFpsPosition =>
+      _box.get(SettingBoxKey.infoFpsPosition, defaultValue: 0);
+  static set infoFpsPosition(int value) =>
+      _box.put(SettingBoxKey.infoFpsPosition, value);
+
+  static int get infoResolutionPosition =>
+      _box.get(SettingBoxKey.infoResolutionPosition, defaultValue: 0);
+  static set infoResolutionPosition(int value) =>
+      _box.put(SettingBoxKey.infoResolutionPosition, value);
+
+  static int get infoProgressPosition =>
+      _box.get(SettingBoxKey.infoProgressPosition, defaultValue: 0);
+  static set infoProgressPosition(int value) =>
+      _box.put(SettingBoxKey.infoProgressPosition, value);
+
+  static int get infoSpeedPosition =>
+      _box.get(SettingBoxKey.infoSpeedPosition, defaultValue: 0);
+  static set infoSpeedPosition(int value) =>
+      _box.put(SettingBoxKey.infoSpeedPosition, value);
+
+  /// 信息徽标样式：
+  ///   0 = 无底 + 白字（依赖文字阴影，仅在暗画面可靠）
+  ///   1 = 黑底 + 白字（原样式）
+  ///   2 = 黑底 + 白字 + 阴影（推荐，亮/暗画面兼顾）
+  static int get infoBadgeStyle {
+    final v = _box.get(SettingBoxKey.infoBadgeStyle, defaultValue: 0);
+    return (v is int && v >= 0 && v <= 2) ? v : 0;
+  }
+  static set infoBadgeStyle(int value) {
+    final v = value.clamp(0, 2);
+    _box.put(SettingBoxKey.infoBadgeStyle, v);
+  }
+
+  // ---- 旧开关兼容层 ----
+  // 项目中仍有少量未改的调用点，保留 getter/setter 以零编译错误。
+  // 新代码请直接用 batteryPosition。
+  @Deprecated('Use batteryPosition instead')
+  static bool get showBatteryLevel => batteryPosition != 0;
+  @Deprecated('Use batteryPosition instead')
+  static set showBatteryLevel(bool value) =>
+      batteryPosition = value ? 2 : 0;
 
   // ===== 播放器多内核 =====
   static PlayerEngineType get playerEngine {

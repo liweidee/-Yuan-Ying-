@@ -100,6 +100,81 @@ class FvpEngine implements IPlayerEngine {
   /// 媒体详细信息（FVP 扩展 `getMediaInfo()`，类型为 mdk.MediaInfo）
   final Rxn<dynamic> mediaInfo = Rxn<dynamic>();
 
+  // ===== 视频帧率（周期拉取 getMediaInfo().video.first.codec.fps）=====
+  final RxDouble _videoFps = 0.0.obs;
+  Timer? _fpsPollTimer;
+
+  @override
+  RxDouble get videoFps => _videoFps;
+
+  /// 从 mdk.MediaInfo 提取视频帧率。
+  ///
+  /// mdk.MediaInfo.video 是 List<VideoStreamInfo>?（fvp 0.39.x 单数 video）
+  /// VideoStreamInfo.codec 是 VideoCodecParameters
+  /// VideoCodecParameters.fps 是 double?（真视频帧率）
+  ///
+  /// 跳过内嵌封面（png/jpeg 等），它们在 video 列表中 fps 畸高（如 90000）。
+  double? _extractFps(mdk.MediaInfo? info) {
+    if (info == null) return null;
+    final video = info.video;
+    if (video == null || video.isEmpty) return null;
+
+    for (final stream in video) {
+      final codec = stream.codec;
+      if (codec == null) continue;
+
+      // 跳过封面图/缩略图（png/jpeg等），它们的帧率会异常高（如90000）
+      final codecName = (codec.codec ?? '').toLowerCase();
+      if (codecName.contains('png') ||
+          codecName.contains('jpeg') ||
+          codecName.contains('mjpeg') ||
+          codecName.contains('bmp') ||
+          codecName.contains('gif')) {
+        continue;
+      }
+
+      // fvp 0.39.1 中，VideoCodecParameters 的帧率属性名是 frameRate
+      final fps = codec.frameRate;
+      if (fps != null && fps > 0 && fps < 1000) return fps;
+    }
+    return null;
+  }
+
+  /// 拉一次最新 fps。同步方法，无网络开销。
+  void _syncFps() {
+    if (_isDisposed) return;
+    final c = _controller;
+    if (c == null || !_isInitialized) return;
+    try {
+      final info = c.getMediaInfo();
+      final fps = _extractFps(info);
+      final newValue = fps ?? 0.0;
+      if (_videoFps.value != newValue) {
+        _videoFps.value = newValue;
+      }
+    } catch (e) {
+      debugPrint('[FvpEngine] _syncFps error: $e');
+    }
+  }
+
+  void _startFpsPolling() {
+    _stopFpsPolling();
+    if (_isDisposed) return;
+    _syncFps(); // 立即拉一次，避免首秒空白
+    _fpsPollTimer = Timer.periodic(
+      const Duration(seconds: 1),
+      (_) => _syncFps(),
+    );
+  }
+
+  void _stopFpsPolling() {
+    _fpsPollTimer?.cancel();
+    _fpsPollTimer = null;
+    if (_videoFps.value != 0) {
+      _videoFps.value = 0;
+    }
+  }
+
   /// 当前字幕文本（FVP 扩展 `onSubtitleText()`）
   final Rxn<String> currentSubtitleText = Rxn<String>();
 
@@ -343,6 +418,7 @@ class FvpEngine implements IPlayerEngine {
     if (_isDisposed) return;
     _isDisposed = true;
 
+    _stopFpsPolling();
     _stopBatteryListener(); // 统一清理订阅 + 定时器，避免内存泄漏
 
     _batterySubscription?.cancel();
@@ -426,6 +502,7 @@ class FvpEngine implements IPlayerEngine {
     mediaInfo.value = null;
     currentSubtitleText.value = null;
     isLive.value = false;
+    _stopFpsPolling();
 
     _removeListeners();
     await _controller?.dispose();
@@ -568,6 +645,8 @@ class FvpEngine implements IPlayerEngine {
       }
 
       onInit?.call();
+
+      _startFpsPolling();
 
       if (autoFullScreenFlag && autoEnterFullScreen) {
         triggerFullScreen(status: true);

@@ -13,7 +13,6 @@ import 'package:yuanying/modules/video/widgets/header_control.dart';
 import 'package:yuanying/modules/video/widgets/introduction/intro_view.dart';
 import 'package:yuanying/plugin/pl_player/view.dart';
 import 'package:yuanying/plugin/pl_player/models/data_status.dart';
-import 'package:yuanying/modules/video/widgets/player_focus.dart';
 import 'package:yuanying/modules/push/views/push_dialog.dart';
 import 'package:yuanying/common/widgets/route_aware_mixin.dart';
 import 'package:yuanying/modules/setting/models/setting_pref.dart';
@@ -182,6 +181,17 @@ class _DetailPageState extends State<DetailPage>
 
   @override
   void dispose() {
+      // ===== 兜底：退出详情页时如果仍处于全屏，强制退出 =====
+      // 对应"全屏时 ESC 不退出详情页"的原始诉求。
+      // 即使 Focus 和 popScope 都失效（极端场景），退出时也保证状态干净，
+      // 防止后续路由沿用全屏状态。
+      try {
+        final pc = controller.playerController;
+        if (pc.isFullScreen.value) {
+          pc.triggerFullScreen(status: false);
+        }
+      } catch (_) {}
+      
       // 手动清理详情页控制器
       //
       // DetailController 与 IntroController 是通过 Get.put 手动注册的
@@ -574,9 +584,31 @@ class _DetailPageState extends State<DetailPage>
     // Sliver 头部总高度 = 视频高度 + 顶部安全区域（非全屏时）
     final double headerHeight = isFullScreen ? size.height : videoHeight + topPadding;
 
+    // ===== 全屏：完全绕过 ExtendedNestedScrollView =====
+    //
+    // 关键修复：
+    //   竖屏全屏时 ExtendedNestedScrollView 的 header 会被垂直拖动手势
+    //   驱动收缩（即使 physics = NeverScrollableScrollPhysics）。
+    //   现象："按住底部上滑 → 视频区缩小 → body 从下方露出"，
+    //   且锁屏与否都能触发（锁屏时 _scaleGestureRecognizer 未注册，
+    //   pan 事件直接冒泡到 outer Scrollable）。
+    //
+    //   横屏走 _buildLandscapeLayout，用的是简单 Row + SizedBox，
+    //   不涉及 NestedScrollView，所以没这个问题。
+    //
+    //   全屏时 body 本来就不可见，没必要用 NestedScrollView；
+    //   直接返回全屏尺寸的 videoPlayer 即可彻底规避。
+    if (isFullScreen) {
+      return SizedBox(
+        width: size.width,
+        height: size.height,
+        child: videoPlayer(width: size.width, height: size.height),
+      );
+    }
+
+    // ===== 非全屏：保持原逻辑不变 =====
     final Widget layout = ExtendedNestedScrollView(
       key: _scrollKey,
-      physics: isFullScreen ? const NeverScrollableScrollPhysics() : null,
       onlyOneScrollInBody: true,
       pinnedHeaderSliverHeightBuilder: () => headerHeight,
       headerSliverBuilder: (context, innerBoxIsScrolled) {
@@ -585,106 +617,56 @@ class _DetailPageState extends State<DetailPage>
             key: const Key('sliver_header'),
             minExtent: kToolbarHeight,
             maxExtent: headerHeight,
-            child: isFullScreen
-                ? SizedBox(
-                    width: size.width,
-                    height: headerHeight,
-                    child: videoPlayer(width: size.width, height: headerHeight,),
-                  )
-                // 用 Stack + 黑色背景，保证「状态栏区域」和「视频区」
-                // 在非全屏下始终是黑色，不受明暗主题切换影响（对齐 PiliPlus）。
-                //
-                // 原实现：Padding(top: topPadding) + SizedBox(height: videoHeight)
-                //   → 状态栏区域的背景色来自 Scaffold.backgroundColor，跟随主题，
-                //     浅色主题下这块是浅色，与视频区的黑色形成割裂感。
-                //
-                // 新实现：SizedBox(height: headerHeight) + Stack
-                //   → 用 Positioned.fill(ColoredBox(Colors.black)) 铺满整个
-                //     headerHeight（含状态栏区域），视频从状态栏下方开始。
-                //   → 总高度与原来一致（headerHeight = videoHeight + topPadding），
-                //     不影响 SliverPinnedDynamicHeader 的收缩逻辑。
-                : SizedBox(
-                    width: size.width,
-                    height: headerHeight,
-                    child: Stack(
-                      children: [
-                        // 覆盖整个头部区域的黑色背景（包含状态栏区域）
-                        const Positioned.fill(
-                          child: ColoredBox(color: Colors.black),
-                        ),
-                        // 视频从状态栏下方开始
-                        Positioned(
-                          top: topPadding,
-                          left: 0,
-                          right: 0,
-                          child: SizedBox(
-                            width: size.width,
-                            height: videoHeight,
-                            child: videoPlayer(
-                              width: size.width,
-                              height: videoHeight,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-          ),
-        ];
-      },
-      // 全屏时 body 不渲染，避免内层滚动视图通过 NestedScrollView
-      // 协调机制触发 header 收缩（即"上滑视频区缩小、内容区露出"的问题）。
-      //
-      // 原因：
-      //   1. ExtendedNestedScrollView 的 physics 只控制外层 CustomScrollView，
-      //      不控制 body 内部各 tab 的滚动视图；
-      //   2. NestedScrollView 会把内层滚动偏移同步给外层，驱动
-      //      SliverPinnedDynamicHeader 从 maxExtent 收缩到 minExtent；
-      //   3. 所以只要 body 里的滚动视图还能滚动，header 就会被收缩、
-      //      视频区就会缩小，即使外层 physics 是 NeverScrollableScrollPhysics；
-      //   4. 锁屏时 _scaleGestureRecognizer 不注册，手势直接冒泡到内层
-      //      滚动视图，这就是"无论是否锁屏都能触发"的原因。
-      //
-      // 全屏时用 SizedBox.shrink() 替换 body：
-      //   - 没有内层滚动视图 → 无法触发 NestedScrollView 协调
-      //   - 只有外层 header 存在，外层 physics 是 NeverScrollable，
-      //     手势被 videoPlayer 内的 _scaleGestureRecognizer 消费或忽略，
-      //     不会触发滚动
-      //   - 视觉上：全屏时 header 高度 = 整屏，body 高度为 0，与原布局一致
-      body: isFullScreen
-          ? const SizedBox.shrink()
-          : Scaffold(
-              backgroundColor: Colors.transparent,
-              resizeToAvoidBottomInset: false,
-              body: Column(
+            child: SizedBox(
+              width: size.width,
+              height: headerHeight,
+              child: Stack(
                 children: [
-                  _buildTabBar(controller),
-                  Expanded(
-                    child: _buildTabBarView(controller),
+                  const Positioned.fill(
+                    child: ColoredBox(color: Colors.black),
+                  ),
+                  Positioned(
+                    top: topPadding,
+                    left: 0,
+                    right: 0,
+                    child: SizedBox(
+                      width: size.width,
+                      height: videoHeight,
+                      child: videoPlayer(
+                        width: size.width,
+                        height: videoHeight,
+                      ),
+                    ),
                   ),
                 ],
               ),
             ),
+          ),
+        ];
+      },
+      body: Scaffold(
+        backgroundColor: Colors.transparent,
+        resizeToAvoidBottomInset: false,
+        body: Column(
+          children: [
+            _buildTabBar(controller),
+            Expanded(
+              child: _buildTabBarView(controller),
+            ),
+          ],
+        ),
+      ),
     );
 
-    // 非全屏下，状态栏背景固定为黑色，需要把状态栏图标改成浅色，
-    // 否则浅色主题下系统默认图标是深色，压在黑色背景上会看不清。
-    // 全屏时状态栏是隐藏的（initState 里的 hideSystemBar），无需设置。
-    if (!isFullScreen) {
-      return AnnotatedRegion<SystemUiOverlayStyle>(
-        value: const SystemUiOverlayStyle(
-          // 状态栏保持透明，让下方 ColoredBox 的黑色显示出来
-          statusBarColor: Colors.transparent,
-          // Android：白色图标（压在黑色背景上）
-          statusBarIconBrightness: Brightness.light,
-          // iOS：白色图标（Brightness.dark 在 iOS 上语义是"状态栏文字为浅色"）
-          statusBarBrightness: Brightness.dark,
-        ),
-        child: layout,
-      );
-    }
-
-    return layout;
+    // 非全屏下状态栏背景为黑色，需要浅色图标
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: const SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.light,
+        statusBarBrightness: Brightness.dark,
+      ),
+      child: layout,
+    );
   }
 
   // ---- 宽屏布局 ----

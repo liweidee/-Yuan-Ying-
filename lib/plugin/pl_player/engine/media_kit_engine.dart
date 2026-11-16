@@ -128,7 +128,7 @@ class MediaKitEngine implements IPlayerEngine {
   /// 电池图标只在 UI 层 `isFullScreen && PlayerPref.showBatteryLevel`
   /// 为真时展示，因此监听与轮询也只在该条件下运行，避免无谓开销。
   void _syncBatteryListener() {
-    final shouldRun = isFullScreen.value && PlayerPref.showBatteryLevel;
+    final shouldRun = isFullScreen.value && PlayerPref.batteryPosition != 0;
     if (shouldRun) {
       _startBatteryListener();
     } else {
@@ -181,9 +181,13 @@ class MediaKitEngine implements IPlayerEngine {
   int? _width;
   int? _height;
 
-  // 新增响应式宽高
+  // 响应式宽高
   final RxInt _videoWidth = 0.obs;
   final RxInt _videoHeight = 0.obs;
+
+  // 帧率（mpv estimated-vf-fps）
+  final RxDouble _videoFps = 0.0.obs;
+  bool _isObservingFps = false;
 
   // 下载速度
   final RxDouble _downloadSpeed = 0.0.obs;
@@ -199,6 +203,9 @@ class MediaKitEngine implements IPlayerEngine {
 
   @override
   RxDouble get downloadSpeed => _downloadSpeed;
+
+  @override
+  RxDouble get videoFps => _videoFps;
 
   // ============================================================
   // 媒体详细信息（media_kit 1.2.6）
@@ -831,6 +838,7 @@ class MediaKitEngine implements IPlayerEngine {
     // 本地文件无需网速
     if (dataSource is! NetworkSource) {
       _downloadSpeed.value = 0;
+      _startFpsObserver();
       return;
     }
 
@@ -840,6 +848,7 @@ class MediaKitEngine implements IPlayerEngine {
       // 观察失败 → 回退到 buffered 估算
       _startFallbackSpeedMonitor();
     }
+    _startFpsObserver();
   }
 
   /// 尝试通过 NativePlayer.observeProperty('cache-speed') 获取精确网速。
@@ -896,6 +905,8 @@ class MediaKitEngine implements IPlayerEngine {
     // 停止兜底计时器
     _speedTimer?.cancel();
     _speedTimer = null;
+
+    _stopFpsObserver();
   }
 
   /// 兜底方案：基于 buffered 增量的估算（仅在 cache-speed 不可用时使用）
@@ -915,6 +926,42 @@ class MediaKitEngine implements IPlayerEngine {
       _lastBuffered = buffered.value;
       _lastSpeedTime = now;
     });
+  }
+
+  /// 启动 fps 观察（mpv estimated-vf-fps，media_kit 1.2.6 无直接 fps 字段）
+  void _startFpsObserver() {
+    final player = _videoPlayerController;
+    if (player == null) return;
+    if (player.platform is! NativePlayer) return;
+    if (_isObservingFps) return;
+
+    try {
+      final nativePlayer = player.platform as NativePlayer;
+      nativePlayer.observeProperty('estimated-vf-fps', (value) async {
+        if (_isDisposed) return;
+        final fps = double.tryParse(value) ?? 0.0;
+        if (fps > 0 && fps < 1000) {
+          _videoFps.value = fps;
+        }
+      });
+      _isObservingFps = true;
+      debugPrint('[MediaKitEngine] fps 观察已启动');
+    } catch (e) {
+      debugPrint('[MediaKitEngine] fps 观察失败: $e');
+    }
+  }
+
+  /// 停止 fps 观察
+  void _stopFpsObserver() {
+    if (!_isObservingFps) return;
+    final player = _videoPlayerController;
+    if (player != null && player.platform is NativePlayer) {
+      try {
+        (player.platform as NativePlayer).unobserveProperty('estimated-vf-fps');
+      } catch (_) {}
+    }
+    _isObservingFps = false;
+    _videoFps.value = 0;
   }
 
   bool _isValidSubtitleTrack(SubtitleTrack track) {

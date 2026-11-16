@@ -33,6 +33,7 @@ import 'package:yuanying/utils/storage_manager.dart';
 import 'package:yuanying/core/constants/storage_keys.dart';
 import 'package:yuanying/modules/video/widgets/danmaku_search_dialog.dart';
 import 'package:yuanying/modules/subtitle_site/views/subtitle_search_dialog.dart';
+import 'package:yuanying/modules/video/widgets/info_display_dialog.dart';
 
 // ===== 播放地址信息卡片数据模型 =====
 class _AddressInfoItem {
@@ -391,6 +392,14 @@ class _SettingSheetState extends State<SettingSheet> {
         title: '定时关闭',
         subtitle: '设置播放定时关闭',
         onTap: _showScheduleExitDialog,
+      ),
+
+      // ===== 信息显示（仅全屏生效）=====
+      _buildSettingItem(
+        icon: Icons.dashboard_customize_outlined,
+        title: '信息显示',
+        subtitle: '全屏时在画面角落常驻显示',
+        onTap: _showInfoDisplayDialog,
       ),
 
       // ===== 播放信息 =====
@@ -2214,6 +2223,20 @@ class _SettingSheetState extends State<SettingSheet> {
     // }
 
     controller.saveCover();
+  }
+
+  // ===== 信息显示弹窗（全屏角落信息配置）=====
+  void _showInfoDisplayDialog() {
+    Navigator.pop(context);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctx = Get.context;
+      if (ctx == null) return;
+      showDialog(
+        context: ctx,
+        barrierColor: Colors.black54,
+        builder: (_) => const InfoDisplayDialog(),
+      );
+    });
   }
 
   // ===== 播放信息 =====
