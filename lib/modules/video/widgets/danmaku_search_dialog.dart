@@ -288,6 +288,9 @@ class _DanmakuSearchDialogState extends State<DanmakuSearchDialog> {
     final cs = Theme.of(context).colorScheme;
     final screenHeight = MediaQuery.sizeOf(context).height;
     final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+    // 键盘弹起时（bottomInset > 0）键盘已覆盖 Home Indicator 区域，不再叠加安全距离
+    final bottomSafe =
+        bottomInset > 0 ? 0.0 : MediaQuery.viewPaddingOf(context).bottom;
 
     return Padding(
       padding: EdgeInsets.only(bottom: bottomInset),
@@ -396,9 +399,9 @@ class _DanmakuSearchDialogState extends State<DanmakuSearchDialog> {
             // ===== 结果区 =====
             Expanded(child: _buildResultBody(cs)),
 
-            // ===== 底部提示 =====
+            // ===== 底部提示（加 Home Indicator 安全距离）=====
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+              padding: EdgeInsets.fromLTRB(20, 8, 20, 12 + bottomSafe),
               child: Text(
                 '提示：仅对当前集生效，切换剧集后恢复自动匹配',
                 style: TextStyle(fontSize: 11, color: cs.outline),

@@ -162,7 +162,6 @@ class _SubtitleSearchDialogState extends State<SubtitleSearchDialog>
   // ============================================================
 
   Future<void> _onTapResult(SubtitleSearchResult item) async {
-    // SubHD 且有 groupId：先拉作品全部字幕让用户选
     if (item.site == SubtitleSiteType.subhd && item.groupId != null) {
       await _handleSubhdGroup(item);
       return;
@@ -170,7 +169,6 @@ class _SubtitleSearchDialogState extends State<SubtitleSearchDialog>
     await _doDownload(item);
   }
 
-  /// SubHD：先拉 /d/{groupId} 拿全部字幕，弹二级选择
   Future<void> _handleSubhdGroup(SubtitleSearchResult item) async {
     SmartDialog.showLoading(msg: '加载字幕列表...');
     List<SubtitleSearchResult>? list;
@@ -182,17 +180,14 @@ class _SubtitleSearchDialogState extends State<SubtitleSearchDialog>
     if (!mounted) return;
     SmartDialog.dismiss();
 
-    // 拉不到 → 降级直接下载原条目
     if (list == null || list.isEmpty) {
       await _doDownload(item);
       return;
     }
-    // 只有一条 → 直接下载
     if (list.length == 1) {
       await _doDownload(list.first);
       return;
     }
-    // 多条 → 弹选择
     final picked = await _pickFromList(
       list,
       '${item.title} · 共 ${list.length} 条字幕',
@@ -227,7 +222,7 @@ class _SubtitleSearchDialogState extends State<SubtitleSearchDialog>
   }
 
   // ============================================================
-  // 二级选择对话框（选一条字幕）
+  // 二级选择对话框
   // ============================================================
 
   Future<SubtitleSearchResult?> _pickFromList(
@@ -354,7 +349,7 @@ class _SubtitleSearchDialogState extends State<SubtitleSearchDialog>
   }
 
   // ============================================================
-  // 多文件选择对话框（下载后有多文件时）
+  // 多文件选择对话框
   // ============================================================
 
   Future<void> _pickAndMount(List<SubtitleFile> files) async {
@@ -501,6 +496,7 @@ class _SubtitleSearchDialogState extends State<SubtitleSearchDialog>
   }
 
   Widget _buildEmpty(ColorScheme cs) {
+    final bottomSafe = MediaQuery.viewPaddingOf(context).bottom;
     return Column(
       children: [
         Center(
@@ -517,7 +513,7 @@ class _SubtitleSearchDialogState extends State<SubtitleSearchDialog>
         Expanded(
           child: Center(
             child: Padding(
-              padding: const EdgeInsets.all(24),
+              padding: EdgeInsets.fromLTRB(24, 24, 24, 24 + bottomSafe),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -550,6 +546,11 @@ class _SubtitleSearchDialogState extends State<SubtitleSearchDialog>
 
   Widget _buildContent(ColorScheme cs) {
     final ctrl = _tabCtrl!;
+    // 键盘弹起时（bottomInset > 0）键盘已覆盖 Home Indicator 区域，不再叠加安全距离
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+    final bottomSafe =
+        bottomInset > 0 ? 0.0 : MediaQuery.viewPaddingOf(context).bottom;
+
     return Column(
       children: [
         Center(
@@ -618,9 +619,12 @@ class _SubtitleSearchDialogState extends State<SubtitleSearchDialog>
             ],
           ),
         ),
+        // ===== TabBar：水平可滚动，避免 4 个站点在移动端溢出 =====
         TabBar(
           controller: ctrl,
           tabs: _sites.map((s) => Tab(text: s.type.displayName)).toList(),
+          isScrollable: true,
+          tabAlignment: TabAlignment.start,
           dividerColor: Colors.transparent,
           indicatorSize: TabBarIndicatorSize.label,
         ),
@@ -631,8 +635,9 @@ class _SubtitleSearchDialogState extends State<SubtitleSearchDialog>
             children: _sites.map((s) => _buildTab(cs, s.type)).toList(),
           ),
         ),
+        // ===== 底部提示：加 Home Indicator 安全距离 =====
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+          padding: EdgeInsets.fromLTRB(20, 8, 20, 12 + bottomSafe),
           child: Text(
             '提示：点击字幕直接下载并挂载，仅对当前视频生效',
             style: TextStyle(fontSize: 11, color: cs.outline),
@@ -777,7 +782,6 @@ class _SubtitleSearchDialogState extends State<SubtitleSearchDialog>
       chips.add(_chip(r.format!, cs));
     }
 
-    // SubHD 有 groupId 时显示"查看全部"提示
     final hasGroup =
         r.site == SubtitleSiteType.subhd && r.groupId != null;
 
