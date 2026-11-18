@@ -150,11 +150,16 @@ class _EpisodeNavButton extends StatelessWidget {
             color: canAction ? Colors.white : Colors.white54,
           ),
           onTap: canAction
-              ? () {
-                  if (type == _EpisodeNavType.prev) {
-                    detailController.playPrev();
-                  } else {
-                    detailController.playNext();
+              ? () async {
+                  final success = type == _EpisodeNavType.prev
+                      ? await detailController.playPrev()
+                      : await detailController.playNext();
+                  if (!success && !detailController.playFailed.value) {
+                    SmartDialog.showToast(
+                      type == _EpisodeNavType.prev
+                          ? '无法切换到上一集'
+                          : '无法切换到下一集',
+                    );
                   }
                 }
               : null,
@@ -416,6 +421,113 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
     super.dispose();
   }
 
+  /// 片头/片尾标记按钮
+  ///
+  /// - 未标记：白色文字，tooltip = "点击标记X，长按删除"
+  /// - 已标记：主题色高亮，tooltip = "已标记 xx:xx，长按删除"
+  /// - 单击：合法则标记，非法则 toast 提示（由 onMark 返回的 String? 决定）
+  /// - 长按：清除标记
+  Widget _buildTipMarkButton({
+    required RxInt skipSeconds,
+    required Duration Function() position,
+    required bool isStart,
+    required double width,
+    required String? Function(Duration) onMark,
+    required VoidCallback onClear,
+  }) {
+    final label = isStart ? '片头' : '片尾';
+
+    return Obx(() {
+      // 与“更多设置-跳过片头片尾”共用同一份 Rx 值。
+      final markedSeconds = skipSeconds.value;
+      final isMarked = markedSeconds > 0;
+      final tooltip = isMarked
+          ? (isStart
+              ? '已标记 ${DurationUtils.formatDuration(markedSeconds)}，长按删除'
+              : '已标记末尾 ${DurationUtils.formatDuration(markedSeconds)}，长按删除')
+          : '点击标记$label，长按删除';
+
+      return Tooltip(
+        message: tooltip,
+        preferBelow: false,
+        waitDuration: const Duration(milliseconds: 400),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(4),
+          onTap: () {
+            // 底栏本身不会随播放位置重建；必须在点击时实时读取，
+            // 否则会把构建时捕获的旧位置传给 180 秒合法性校验。
+            final err = onMark(position());
+            if (err != null) {
+              SmartDialog.showToast(err);
+            } else {
+              SmartDialog.showToast('已标记$label');
+            }
+          },
+          onLongPress: isMarked
+              ? onClear
+              : () => SmartDialog.showToast('尚未标记$label'),
+          child: SizedBox(
+            width: width,
+            height: 30,
+            child: Center(
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: isMarked ? colorScheme.primary : Colors.white,
+                  fontWeight: isMarked ? FontWeight.w600 : FontWeight.w400,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    });
+  }
+
+  DetailController? _findDetailController() {
+    try {
+      return widget.controllerTag.isNotEmpty
+          ? Get.find<DetailController>(tag: widget.controllerTag)
+          : Get.find<DetailController>();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Widget _buildTipStartButton(double width) {
+    final detailController = _findDetailController();
+    if (detailController == null) return const SizedBox.shrink();
+    return _buildTipMarkButton(
+      skipSeconds: detailController.skipStartDuration,
+      position: () => plPlayerController.position,
+      isStart: true,
+      width: width,
+      onMark: detailController.markTipStart,
+      onClear: () {
+        detailController.clearTipStart();
+        SmartDialog.showToast('已删除片头标记');
+      },
+    );
+  }
+
+  Widget _buildTipEndButton(double width) {
+    final detailController = _findDetailController();
+    if (detailController == null) return const SizedBox.shrink();
+    return _buildTipMarkButton(
+      skipSeconds: detailController.skipEndDuration,
+      position: () => plPlayerController.position,
+      isStart: false,
+      width: width,
+      onMark: (pos) =>
+          detailController.markTipEnd(pos, plPlayerController.duration.value),
+      onClear: () {
+        detailController.clearTipEnd();
+        SmartDialog.showToast('已删除片尾标记');
+      },
+    );
+  }
+
   // ===== 底部控制条构建 =====
   Widget buildBottomControl(bool isLandscape) {
     final isFullScreen = this.isFullScreen;
@@ -450,6 +562,8 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
         controllerTag: controllerTag,
         plPlayerController: plPlayerController,
       ),
+      BottomControlType.tipStart => _buildTipStartButton(widgetWidth),
+      BottomControlType.tipEnd => _buildTipEndButton(widgetWidth),
       BottomControlType.parser => Obx(() {
         try {
           final detailController = controllerTag.isNotEmpty
@@ -803,6 +917,11 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
       BottomControlType.time,
       BottomControlType.prev,
       BottomControlType.next,
+      // 片头/片尾按钮空间占用较大，仅在全屏横屏时显示。
+      if (isFullScreen && isLandscape && _findDetailController() != null) ...[
+        BottomControlType.tipStart,
+        BottomControlType.tipEnd,
+      ],
     ];
 
     // 双内核统一：都显示字幕按钮

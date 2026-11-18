@@ -12,7 +12,13 @@ import 'package:yuanying/modules/danmaku/models/danmaku_model.dart';
 
 /// 弹幕加载服务 - 支持网络和本地（适配B站非标准压缩格式）
 class DanmakuLoader {
-  final Dio _dio = Dio();
+  // 超时与项目 HttpClientFactory（15s/30s）对齐。
+  // Dio 无全局默认配置，裸 Dio() 不继承任何全局设置，
+  // 不加超时会导致弹幕接口无响应时长时间挂起。
+  final Dio _dio = Dio(BaseOptions(
+    connectTimeout: const Duration(seconds: 15),
+    receiveTimeout: const Duration(seconds: 30),
+  ));
 
   /// 从网络 URL 加载弹幕
   Future<List<DanmakuItem>> fromUrl(

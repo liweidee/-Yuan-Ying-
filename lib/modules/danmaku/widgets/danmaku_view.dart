@@ -98,6 +98,8 @@ class _DanmakuViewState extends State<DanmakuView> {
     final items = widget.danmakuController.getAt(progress);
     if (items != null && items.isNotEmpty) {
       final colorMode = PlayerPref.danmakuColorMode;
+      // 每次 tick 读一次，避免循环里重复访问 Hive
+      final showTopBottom = PlayerPref.danmakuShowTopBottom;
       final randomPalette =
           colorMode == 1 ? PlayerPref.danmakuRandomColors : const <String>[];
       final gradientPalette =
@@ -112,7 +114,7 @@ class _DanmakuViewState extends State<DanmakuView> {
           textColor = _pickRandomColor(item, randomPalette);
         } else if (colorMode == 2) {
           final (start, end) = _pickGradientPair(item, gradientPalette);
-          textColor = start; // 兜底色，用于 count 部分等
+          textColor = start;
           gradStart = start;
           gradEnd = end;
         } else {
@@ -123,7 +125,7 @@ class _DanmakuViewState extends State<DanmakuView> {
           canvas.DanmakuContentItem(
             item.content,
             color: textColor,
-            type: _toDanmakuItemType(item.mode),
+            type: _toDanmakuItemType(item.mode, showTopBottom),
             gradientStartColor: gradStart,
             gradientEndColor: gradEnd,
             extra: item,
@@ -133,7 +135,19 @@ class _DanmakuViewState extends State<DanmakuView> {
     }
   }
 
-  canvas.DanmakuItemType _toDanmakuItemType(int mode) {
+  /// 将 XML 的 mode 字段转换为 canvas 弹幕类型。
+  ///
+  /// [showTopBottom] 来自用户设置：
+  /// - `false`（默认）：顶部/底部弹幕降级为滚动，实现"全部滚动"
+  /// - `true`：按原始类型显示（顶部固定、底部固定、滚动）
+  ///
+  /// 注意：高级弹幕（mode 7）当前代码原本就走 default → scroll，
+  /// 本方法不改变这一行为，避免额外引入变化。
+  canvas.DanmakuItemType _toDanmakuItemType(int mode, bool showTopBottom) {
+    // 关闭"顶部/底部弹幕"时，将 mode 4/5 降级为滚动
+    if (!showTopBottom && (mode == 4 || mode == 5)) {
+      return canvas.DanmakuItemType.scroll;
+    }
     switch (mode) {
       case 4:
         return canvas.DanmakuItemType.bottom;

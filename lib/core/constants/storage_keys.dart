@@ -47,6 +47,7 @@ abstract final class SettingBoxKey {
   static const String danmakuLineHeight = 'danmakuLineHeight';
   static const String danmakuMassiveMode = 'danmakuMassiveMode';
   static const String danmakuStatic2Scroll = 'danmakuStatic2Scroll';
+  static const String danmakuShowTopBottom = 'danmakuShowTopBottom';
   static const String danmakuFixedV = 'danmakuFixedV';
   static const String danmakuWeight = 'danmakuWeight';
   static const String danmakuOpacity = 'danmakuOpacity';

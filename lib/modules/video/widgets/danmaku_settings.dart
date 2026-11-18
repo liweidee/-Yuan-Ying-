@@ -39,6 +39,7 @@ class _DanmakuSettingsState extends State<DanmakuSettings> {
   late final RxBool danmakuStatic2Scroll;
   late final RxBool danmakuFixedV;
   late final RxInt danmakuColorMode;
+  late final RxBool danmakuShowTopBottom;
 
   @override
   void initState() {
@@ -60,6 +61,7 @@ class _DanmakuSettingsState extends State<DanmakuSettings> {
     danmakuStatic2Scroll = PlayerPref.danmakuStatic2Scroll.obs;
     danmakuFixedV = PlayerPref.danmakuFixedV.obs;
     danmakuColorMode = PlayerPref.danmakuColorMode.obs;
+    danmakuShowTopBottom = PlayerPref.danmakuShowTopBottom.obs;
   }
 
   /// 保存所有设置并立即应用到弹幕渲染控制器（与 PiliPlus 实现一致）
@@ -77,6 +79,7 @@ class _DanmakuSettingsState extends State<DanmakuSettings> {
     PlayerPref.danmakuStatic2Scroll = danmakuStatic2Scroll.value;
     PlayerPref.danmakuFixedV = danmakuFixedV.value;
     PlayerPref.danmakuColorMode = danmakuColorMode.value;
+    PlayerPref.danmakuShowTopBottom = danmakuShowTopBottom.value;
 
     // 2. 直接更新弹幕渲染控制器的 Option（与 PiliPlus 完全一致）
     final danmakuCtrl = playerController.danmakuController;
@@ -176,6 +179,18 @@ class _DanmakuSettingsState extends State<DanmakuSettings> {
                     value: enableShowDanmaku.value,
                     onChanged: (value) {
                       controller.toggleDanmaku(); // 此方法会切换 enableShowDanmaku 并保存
+                      setState(() {});
+                    },
+                  ),
+                  const SizedBox(height: 6),
+
+                  // ===== 顶部/底部弹幕开关 =====
+                  _buildSwitchItem(
+                    title: '显示顶部/底部弹幕',
+                    value: danmakuShowTopBottom.value,
+                    onChanged: (value) {
+                      danmakuShowTopBottom.value = value;
+                      _saveAll();
                       setState(() {});
                     },
                   ),

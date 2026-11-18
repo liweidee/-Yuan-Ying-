@@ -279,6 +279,16 @@ class PlayerPref {
   static bool get danmakuStatic2Scroll => _box.get('danmakuStatic2Scroll', defaultValue: false);
   static set danmakuStatic2Scroll(bool value) => _box.put('danmakuStatic2Scroll', value);
 
+  /// 是否显示顶部/底部固定弹幕
+  ///
+  /// - `true`（默认）：按弹幕原始类型显示（顶部固定、底部固定、滚动）
+  /// - `false`：所有弹幕（含顶部/底部）一律滚动显示
+  ///
+  /// 关闭时，`danmakuStatic2Scroll` 会自然失效（因为它只对顶部/底部类型生效），
+  /// 无需额外处理。
+  static bool get danmakuShowTopBottom => _box.get('danmakuShowTopBottom', defaultValue: true);
+  static set danmakuShowTopBottom(bool value) => _box.put('danmakuShowTopBottom', value);
+
   static bool get danmakuFixedV => _box.get('danmakuFixedV', defaultValue: false);
   static set danmakuFixedV(bool value) => _box.put('danmakuFixedV', value);
 

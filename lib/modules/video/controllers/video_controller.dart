@@ -111,6 +111,13 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
   /// null = 接口未指定；1 = DASH；0 = 非 DASH
   int? _currentPlayUrlIsDash;
 
+  /// 当前播放源的 DASH 外挂音频直链（非 DASH 源为 null）
+  ///
+  /// `_startPlay` / `switchQuality` 解析 MPD 后写入；
+  /// `playerInit`（路由返回恢复播放 / 切换解码格式）重载数据源时复用，
+  /// 避免重载后只剩视频流（无声）。
+  String? _currentAudioUrl;
+
   final RxBool isPlaying = false.obs;
   bool _isDirectPushMode = false;
 
@@ -294,6 +301,13 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
   final RxInt skipStartDuration = 0.obs; // 片头跳过秒数
   final RxInt skipEndDuration = 0.obs;   // 片尾跳过秒数
 
+  // ===== 片头/片尾快捷标记 =====
+  //
+  // 标记按钮与“更多设置-跳过片头片尾”共用 skipStartDuration/skipEndDuration，
+  // 不维护第二套标记状态，避免两边数值不同步或互相覆盖。
+  /// 片头/片尾标记的容差范围（秒）
+  static const int tipMarkToleranceSeconds = 180;
+
   // ===== 设定字幕轨道（外部加载） =====
   Future<void> setSubtitle(int index) async {
     if (index <= 0) {
@@ -361,7 +375,12 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     try {
       final response = await Dio().get(
         subtitle.subtitleUrl!,
-        options: Options(responseType: ResponseType.bytes),
+        options: Options(
+          responseType: ResponseType.bytes,
+          // 字幕源无响应时快速失败，避免 loading 长时间转圈
+          connectTimeout: const Duration(seconds: 15),
+          receiveTimeout: const Duration(seconds: 30),
+        ),
       );
       if (response.statusCode == 200) {
         final content = utf8.decode(response.data as List<int>);
@@ -432,7 +451,12 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
         try {
           final response = await Dio().get(
             id,
-            options: Options(responseType: ResponseType.plain),
+            options: Options(
+              responseType: ResponseType.plain,
+              // 字幕源无响应时快速失败，避免翻译流程长时间挂起
+              connectTimeout: const Duration(seconds: 15),
+              receiveTimeout: const Duration(seconds: 30),
+            ),
           );
           content = (response.data ?? '').toString();
         } catch (e) {
@@ -853,10 +877,15 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
       vodId = args['vodId'] ?? args['id'] ?? args['videoId'] ?? '';
       pwd = args['pwd'] ?? 'tinydust';
       introController.setOriginalVodId(vodId);
-      final currentSite = Get.find<SourceManager>().currentSite.value;
-      if (currentSite != null) {
-        final apiUrl = currentSite['api']?.toString() ?? '';
-        introController.setCurrentApiUrl(apiUrl);
+      // ---- 收藏基线：以本详情页实际生效的站点为准 ----
+      // 独立站点页（args['site'] != null）时 _currentSiteConfig 是独立站点，
+      // 不能沿用全局 currentSite，否则收藏记录的 api_url / site_key 全错，
+      // 收藏恢复时会跳到错误的源。
+      final effectiveSiteConfig = _currentSiteConfig;
+      if (effectiveSiteConfig != null) {
+        introController.setCurrentApiUrl(
+            effectiveSiteConfig['api']?.toString() ?? '');
+        introController.setSiteConfig(effectiveSiteConfig);
       }
 
       // ===== 解析从历史恢复的播放信息 =====
@@ -1097,10 +1126,12 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     vodId = args['vodId']?.toString() ?? '';
     pwd = args['pwd']?.toString() ?? 'tinydust';
     introController.setOriginalVodId(vodId);
-    final currentSiteForApi = Get.find<SourceManager>().currentSite.value;
-    if (currentSiteForApi != null) {
+    // 与标准路径一致：收藏基线用本详情页实际生效的站点（可能为独立站点）
+    final mergeEffectiveSite = _currentSiteConfig;
+    if (mergeEffectiveSite != null) {
       introController.setCurrentApiUrl(
-          currentSiteForApi['api']?.toString() ?? '');
+          mergeEffectiveSite['api']?.toString() ?? '');
+      introController.setSiteConfig(mergeEffectiveSite);
     }
 
     // ---- 3. 加载解析源 ----
@@ -1822,7 +1853,9 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
       }
 
       _handlePlayFailure('未知的播放类型');
-    } catch (e) {
+    } catch (e, stackTrace) {
+      // 保留原用户提示，仅补充日志便于排查（此前异常信息被完全吞掉）
+      debugPrint('[DetailController] _playEpisode 异常: $e\n$stackTrace');
       _handlePlayFailure('获取播放地址失败');
     }
   }
@@ -1999,6 +2032,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     currentQualities.value = playUrl.qualities;
     currentHeaders.value = headers;
     _currentPlayUrlIsDash = playUrl.isDash;
+    _currentAudioUrl = resolvedAudioUrl;
 
     // currentQuality 按 label 匹配保留用户选择；匹配不上时重置为第一个
     if (playUrl.qualities.isNotEmpty) {
@@ -2025,6 +2059,11 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
       audioSource: resolvedAudioUrl,
       headers: headers,
     );
+
+    // 跳过窗口属于当前详情页状态，每次设置新数据源前同步到当前引擎。
+    // 这样切集、重载以及切换播放内核后仍延续片头/片尾标记。
+    playerController.skipStartDuration.value = skipStartDuration.value;
+    playerController.skipEndDuration.value = skipEndDuration.value;
 
     final effectiveSeek = seekTo ?? Duration.zero;
     await playerController.setDataSource(
@@ -2125,6 +2164,9 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
         case PlayRepeat.listOrder:
           final success = await playNext();
           if (!success) {
+            // 地址解析或播放失败时已由 _handlePlayFailure 给出具体提示，
+            // 不能再误报为“已经是最后一集”。
+            if (playFailed.value) return;
             await playerController.pause();
             SmartDialog.showToast('已经是最后一集');
             // 确实无法继续播放时，按 autoExitFullscreen 退出全屏
@@ -2532,6 +2574,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     // 记录选中项与实际播放 URL（两者分离）
     currentQuality.value = quality;
     currentPlayUrl.value = videoUrl;
+    _currentAudioUrl = audioUrl;
 
     try {
       playerController.skipStartDuration.value = skipStartDuration.value;
@@ -2629,7 +2672,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
       sourceIndex: introController.currentSourceIndex.value,
       episodeIndex: newIndex,
     );
-    return true;
+    return !playFailed.value;
   }
 
   Future<bool> playNext() async {
@@ -2655,11 +2698,55 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
       sourceIndex: introController.currentSourceIndex.value,
       episodeIndex: newIndex,
     );
-    return true;
+    return !playFailed.value;
   }
 
   void toggleDanmaku() {
     playerController.toggleDanmaku();
+  }
+
+  /// 标记片头：当前播放位置在开头 180 秒内合法
+  /// 返回 null 表示成功，返回 String 表示失败原因（用于 toast）
+  String? markTipStart(Duration position) {
+    if (position.inSeconds <= 0) {
+      return '当前位置已在视频开头，无需标记片头';
+    }
+    if (position > Duration(seconds: tipMarkToleranceSeconds)) {
+      return '片头仅支持 ${tipMarkToleranceSeconds} 秒内标记';
+    }
+    skipStartDuration.value = position.inSeconds;
+    playerController.skipStartDuration.value = position.inSeconds;
+    return null;
+  }
+
+  /// 标记片尾：当前播放位置在末尾 180 秒内合法
+  /// 总时长未知或标记剩余不足 1 秒时无法生效，直接拒绝
+  String? markTipEnd(Duration position, Duration total) {
+    if (total <= Duration.zero) {
+      return '视频总时长未知，暂不能标记片尾';
+    }
+    if (position < total - Duration(seconds: tipMarkToleranceSeconds)) {
+      return '片尾仅支持最后 ${tipMarkToleranceSeconds} 秒内标记';
+    }
+    final remaining = total > position ? total - position : Duration.zero;
+    if (remaining.inSeconds <= 0) {
+      return '当前位置已在视频末尾，无需标记片尾';
+    }
+    skipEndDuration.value = remaining.inSeconds;
+    playerController.skipEndDuration.value = remaining.inSeconds;
+    return null;
+  }
+
+  /// 清除片头标记
+  void clearTipStart() {
+    skipStartDuration.value = 0;
+    playerController.skipStartDuration.value = 0;
+  }
+
+  /// 清除片尾标记
+  void clearTipEnd() {
+    skipEndDuration.value = 0;
+    playerController.skipEndDuration.value = 0;
   }
 
   void onCast() {
@@ -2977,7 +3064,9 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
         await playerController.setDataSource(
           NetworkSource(
             videoSource: proxyUrl,
-            audioSource: null,
+            // 复用 _startPlay 解析出的 DASH 外挂音频直链（非 DASH 源为 null），
+            // 避免重载后只剩视频流（无声）
+            audioSource: _currentAudioUrl,
             headers: currentHeaders.value.isNotEmpty ? currentHeaders.value : null,
           ),
           autoplay: true,
@@ -3312,6 +3401,8 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     SmartDialog.showLoading(msg: '切换内核中...');
 
     try {
+      final wasFullScreen = playerController.isFullScreen.value;
+
       // 切换前抓取播放进度
       // 抓取时机：pause() 之前，此时 position 已稳定在用户看到的最后一帧
       final savedPosition = playerController.position;
@@ -3332,7 +3423,11 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
 
       // 只切换引擎，不恢复数据源
       // 切换完成后由下方 reloadCurrentEpisode 完整重载
-      await playerController.switchEngine(newType, restoreData: false);
+      await playerController.switchEngine(
+        newType,
+        restoreData: false,
+        restoreFullScreen: false,
+      );
 
       // 关闭「切换内核中」loading，让后续重载的 loading 露出来
       SmartDialog.dismiss();
@@ -3346,6 +3441,18 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
       // 通知详情页 Obx 重新收集 isFullScreen 依赖
       // （新引擎的 isFullScreen 默认值可能与旧引擎不同）
       engineSwitchNotifier.value++;
+
+      // 数据源和页面均已使用新引擎重建，再恢复切换前的全屏状态。
+      // 播放失败时不强行进入全屏，保留普通错误视图便于用户处理。
+      if (wasFullScreen && !playFailed.value) {
+        await WidgetsBinding.instance.endOfFrame;
+        if (!isClosed) {
+          await playerController.triggerFullScreen(
+            status: true,
+            isManualFS: false,
+          );
+        }
+      }
 
       SmartDialog.showToast(
         '已切换到 ${newType == PlayerEngineType.fvp ? 'MDK' : 'MPV'} 内核',
@@ -3370,6 +3477,8 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
   Future<void> _playDirect(String url) async {
     currentPlayUrl.value = url;
     currentQualities.value = [PlayQuality(label: '直链', url: url)];
+    // 直链模式无 DASH 外挂音频概念，清掉上一个源可能残留的音频直链
+    _currentAudioUrl = null;
 
     // 应用请求头
     final headers = _initHeaders ?? <String, String>{};
@@ -3471,6 +3580,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     currentQualities.clear();
     currentQuality.value = null;
     _currentPlayUrlIsDash = null;
+    _currentAudioUrl = null;
     // 重置数据状态
     playerController.dataStatus.value = DataStatus.none;
   }
@@ -3777,6 +3887,9 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
           },
+          // 弹幕 API 无响应时快速失败，避免 loading 长时间转圈
+          connectTimeout: const Duration(seconds: 15),
+          receiveTimeout: const Duration(seconds: 30),
         ),
       );
       if (response.statusCode != 200) {
@@ -3944,6 +4057,9 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
                 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
           },
           responseType: ResponseType.plain,
+          // 弹幕 API 无响应时快速失败，避免 loading 长时间转圈
+          connectTimeout: const Duration(seconds: 15),
+          receiveTimeout: const Duration(seconds: 30),
         ),
       );
 

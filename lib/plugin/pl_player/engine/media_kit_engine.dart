@@ -1176,6 +1176,12 @@ class MediaKitEngine implements IPlayerEngine {
     // 切换源前先停止旧的网速监控
     _stopSpeedMonitor();
 
+    // 取消挂起的"延迟 seek"订阅：duration 未就绪时 seekTo 会记下目标并挂一个
+    // duration 监听，等元数据到达后补 seek。若切源时不取消，旧源迟到的
+    // duration 事件（或新源刚到达的首个 duration 事件）会把旧的 seek 目标
+    // 错误地应用在新源上，导致切集后起始位置错乱。
+    _cancelSubForSeek();
+
     try {
       _processing = true;
       this._width = width;

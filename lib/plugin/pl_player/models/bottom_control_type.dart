@@ -3,6 +3,8 @@ enum BottomControlType {
   prev,
   next,
   time,
+  tipStart,
+  tipEnd,
   episode,
   parser,
   fit,

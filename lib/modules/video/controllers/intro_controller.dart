@@ -21,6 +21,14 @@ class IntroController extends GetxController {
   // 新增：当前源的完整 API URL
   String? currentApiUrl;
 
+  // 本详情页实际生效的站点配置（独立站点页为 args['site']，常规页为全局 currentSite）
+  //
+  // 由 DetailController 在 onInit / _initMergeListMode 中注入。
+  // 收藏写入时必须用它而不是全局 currentSite，否则独立站点页的收藏记录
+  // api_url / site_key 全错，恢复时会跳到错误的源。
+  // null 时（推送模式等）回退全局 currentSite，保持旧行为。
+  Map<String, dynamic>? siteConfig;
+
   // setter 方法
   void setOriginalVodId(String id) {
     originalVodId = id;
@@ -28,6 +36,10 @@ class IntroController extends GetxController {
 
   void setCurrentApiUrl(String url) {
     currentApiUrl = url;
+  }
+
+  void setSiteConfig(Map<String, dynamic>? site) {
+    siteConfig = site;
   }
 
   void setVideoDetail(VideoDetail detail) {
@@ -75,7 +87,8 @@ class IntroController extends GetxController {
       return;
     }
 
-    final site = Get.find<SourceManager>().currentSite.value;
+    // 优先用本详情页实际生效的站点（独立站点页），null 时回退全局（保持旧行为）
+    final site = siteConfig ?? Get.find<SourceManager>().currentSite.value;
     final sourceName = site?['name']?.toString() ?? (detail.typeName ?? '');
     final apiUrl = currentApiUrl ?? site?['api']?.toString() ?? '';
     final siteKey = site?['key']?.toString() ?? '';
@@ -179,6 +192,7 @@ class IntroController extends GetxController {
   @override
   void onClose() {
     videoDetail.value = null;
+    siteConfig = null;
     super.onClose();
   }
 }

@@ -298,15 +298,11 @@ class FavoriteController extends GetxController {
         targetSite = null;
       }
     }
+    // 站点已不在当前配置中（换配置包/源被移除）时不再尝试跳转：
+    // 旧实现传 'apiUrl' 参数，但 DetailController 只读 'site'，
+    // 静默回退到全局源会打开错误的视频。
+    // 与 novel/manga/music 分支行为对齐：统一提示失效。
     if (targetSite == null) {
-      final apiUrl = _apiUrlMap[key];
-      if (apiUrl != null && apiUrl.isNotEmpty) {
-        Get.toNamed('/detail', arguments: {
-          'vodId': item.vodId,
-          'apiUrl': apiUrl,
-        });
-        return;
-      }
       SmartDialog.showToast('该收藏已失效，请重新收藏');
       return;
     }

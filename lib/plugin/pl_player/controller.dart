@@ -157,6 +157,10 @@ class PlPlayerController {
     /// - false：用于播放页切换内核——调用方会自行 reloadCurrentEpisode，
     ///          这里恢复反而会导致 loading 显示两次。
     bool restoreData = true,
+    /// 是否在切换完成后恢复旧引擎的全屏状态。
+    /// - true（默认）：适用于调用方已在本方法内恢复完整播放状态。
+    /// - false：详情页会在 reloadCurrentEpisode 和 UI 重建完成后再恢复。
+    bool restoreFullScreen = true,
   }) async {
     // 如果当前引擎不存在，直接创建新引擎并更新配置
     if (_engine == null) {
@@ -170,19 +174,15 @@ class PlPlayerController {
     if (PlayerPref.playerEngine == newType) return;
 
     final oldEngine = _engine!;
+    final wasFullScreen = oldEngine.isFullScreen.value;
 
     // 切换前强制退出旧引擎全屏，避免 isFullScreen 状态污染
     // 旧引擎的 isFullScreen 可能为 true，新引擎初始化为 false，
     // 若不强制退出，UI 层可能在状态不一致的间隙读取到错误值，
     // 导致全屏按钮的 onTap 计算出错误的 status 参数，触发 return 而不执行。
-    if (oldEngine.isFullScreen.value) {
+    if (wasFullScreen) {
       await oldEngine.triggerFullScreen(status: false);
     }
-
-    // 切换后不自动恢复全屏
-    // 用户在全屏状态下切换内核，期望的是回到普通状态重新操作，
-    // 而不是自动恢复全屏（可能导致布局和控件状态混乱）。
-    final wasFullScreen = false;
 
     // 捕获当前状态
     final dataSource = _lastParams?.dataSource;
@@ -204,6 +204,10 @@ class PlPlayerController {
     _engine = _createEngine(newType);
     await _engine!.init();
 
+    // 播放模式属于播放器会话状态，不依赖是否恢复数据源。
+    // 特别用于视频页 restoreData=false 时，避免切到 FVP 后丢失自动连播模式。
+    _engine!.setPlayRepeat(repeat);
+
     // 如果有数据源，且调用方要求恢复，则恢复状态
     if (restoreData && dataSource != null && params != null) {
       // 恢复播放（不自动播放，之后手动控制）
@@ -222,13 +226,11 @@ class PlPlayerController {
       );
       // 恢复音量（不显示音量指示器，避免切换内核时闪出"音量 100%"提示）
       await _engine!.setVolume(volume, showIndicator: false);
-      // 恢复循环模式（setPlayRepeat 是 void，直接调用）
-      _engine!.setPlayRepeat(repeat);
-
-      // 如果之前是全屏，在新引擎上恢复全屏（触发横屏）
-      if (wasFullScreen) {
+      // 如果调用方要求由门面恢复，且切换前处于全屏，则在播放器数据源
+      // 恢复完成后回到全屏。详情页会禁用此分支并在页面重建后自行恢复。
+      if (restoreFullScreen && wasFullScreen) {
         await Future.delayed(const Duration(milliseconds: 50));
-        await _engine!.triggerFullScreen(status: true);
+        await _engine!.triggerFullScreen(status: true, isManualFS: false);
       }
     
       // 恢复播放状态

@@ -393,16 +393,9 @@ class HistoryController extends GetxController {
         targetSite = null;
       }
     }
+    // 与收藏恢复一致：站点已不在当前配置中时提示失效，不再传 'apiUrl' 跳转——
+    // DetailController 只读 'site'，旧实现会静默回退到全局源打开错误的视频。
     if (targetSite == null) {
-      final apiUrl = _apiUrlMap[key];
-      if (apiUrl != null && apiUrl.isNotEmpty) {
-        Get.toNamed('/detail', arguments: {
-          'vodId': item.vodId,
-          'apiUrl': apiUrl,
-          ..._buildResumeArgs(item),
-        });
-        return;
-      }
       SmartDialog.showToast('该历史记录已失效，请重新播放生成新记录');
       return;
     }
