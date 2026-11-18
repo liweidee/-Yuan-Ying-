@@ -762,6 +762,30 @@ class InstallManager {
     }
     await _safeDeleteFile(tempPath);
 
+    // ===== format:2 制品提取 =====
+    // 只在包内 manifest 明确声明 format=2 时启用，旧包继续走原有分支。
+    final format2Manifest = await _findFormat2Manifest(tmpDir.path);
+    if (format2Manifest != null) {
+      try {
+        await _installFormat2Package(
+          manifestFile: format2Manifest.file,
+          manifest: format2Manifest.json,
+          tmpDir: tmpDir,
+          entry: entry,
+          marketName: marketName,
+          root: root,
+          finalDir: finalDir,
+          onRegistering: () => emit(InstallStage.registering),
+        );
+      } catch (e) {
+        await _safeDeleteDir(tmpDir.path);
+        emit(InstallStage.failed);
+        throw Exception('Format2 提取失败：$e');
+      }
+      emit(InstallStage.done);
+      return;
+    }
+
     // ===== 解压型 APK：按 kind 提取 =====
     if (isApkContainer) {
       final apkPluginJson =
@@ -1217,6 +1241,328 @@ class InstallManager {
       await outFile.parent.create(recursive: true);
       await entity.copy(outFile.path);
     }
+  }
+
+  /// 查找 format:2 manifest。根目录优先，其次兼容 APK/旧打包目录中的
+  /// assets/plugin.json。解析失败或不是 format:2 时返回 null，由旧逻辑接手。
+  Future<({File file, Map<String, dynamic> json})?> _findFormat2Manifest(
+    String tmpDir,
+  ) async {
+    final candidates = [
+      File(p.join(tmpDir, 'plugin.json')),
+      File(p.join(tmpDir, 'assets', 'plugin.json')),
+    ];
+    for (final file in candidates) {
+      if (!file.existsSync()) continue;
+      try {
+        final decoded = jsonDecode(await file.readAsString());
+        if (decoded is! Map) continue;
+        final json = Map<String, dynamic>.from(decoded);
+        final format = json['format'];
+        if (format == 2 || format?.toString() == '2') {
+          return (file: file, json: json);
+        }
+      } catch (_) {
+        // manifest 无法解析时不应改变旧包的安装行为。
+      }
+    }
+    return null;
+  }
+
+  /// format:2 提取入口。
+  ///
+  /// 只提取 manifest、native.libs、dex.modules 和 dex.libs，使用 staging
+  /// 目录完成校验后再替换正式目录。provides 等业务字段本阶段不消费。
+  Future<void> _installFormat2Package({
+    required File manifestFile,
+    required Map<String, dynamic> manifest,
+    required Directory tmpDir,
+    required MarketEntry entry,
+    required String marketName,
+    required Directory root,
+    required String finalDir,
+    required void Function() onRegistering,
+  }) async {
+    final platformKey = Platform.isWindows
+        ? 'win32'
+        : Platform.isAndroid
+            ? 'android'
+            : '';
+    if (platformKey.isEmpty) {
+      throw Exception('format:2 仅支持 Android / Windows');
+    }
+
+    final platforms = _format2StringList(manifest['platforms']);
+    if (!platforms.contains(platformKey)) {
+      throw Exception('format:2 包不支持当前平台：$platformKey');
+    }
+
+    final abi = Platform.isAndroid ? _currentAndroidAbiName() : null;
+    final artifacts = _format2Map(manifest['artifacts']);
+    if (artifacts == null) {
+      throw Exception('format:2 包缺少 artifacts');
+    }
+
+    final stamp = DateTime.now().millisecondsSinceEpoch;
+    final staging = Directory(
+      p.join(root.path, '.format2-stage-${entry.id}-$stamp'),
+    );
+    final backup = Directory(
+      p.join(root.path, '.format2-backup-${entry.id}-$stamp'),
+    );
+    final usedTargets = <String>{};
+    bool oldMoved = false;
+    bool newMoved = false;
+
+    try {
+      await staging.create(recursive: true);
+      final manifestSourceRel = p
+          .relative(manifestFile.path, from: tmpDir.path)
+          .replaceAll('\\', '/');
+      await _copyFormat2Artifact(
+        sourceRoot: tmpDir.path,
+        sourceRel: manifestSourceRel,
+        targetRoot: staging.path,
+        targetRel: 'plugin.json',
+        usedTargets: usedTargets,
+      );
+
+      var extractedCount = 0;
+
+      final native = _format2Map(artifacts['native']);
+      final nativeLibs = _format2Map(native?['libs']);
+      if (nativeLibs != null) {
+        final sources = _selectFormat2Sources(
+          nativeLibs,
+          platformKey: platformKey,
+          abi: abi,
+        );
+        if (sources.isEmpty &&
+            _hasFormat2PlatformOrAbiKey(
+              nativeLibs,
+              platformKey: platformKey,
+              abi: abi,
+            )) {
+          throw Exception('format:2 包缺少当前 ABI 的 native 制品');
+        }
+        for (final source in sources) {
+          final sourceRel = _resolveFormat2AbiPath(source, abi);
+          await _copyFormat2Artifact(
+            sourceRoot: tmpDir.path,
+            sourceRel: sourceRel,
+            targetRoot: staging.path,
+            targetRel: p.basename(sourceRel),
+            usedTargets: usedTargets,
+          );
+          extractedCount++;
+        }
+      }
+
+      final dex = _format2Map(artifacts['dex']);
+      if (dex != null) {
+        final modules = _format2StringList(dex['modules']);
+        for (final source in modules) {
+          final sourceRel = _resolveFormat2AbiPath(source, abi);
+          await _copyFormat2Artifact(
+            sourceRoot: tmpDir.path,
+            sourceRel: sourceRel,
+            targetRoot: staging.path,
+            targetRel: p.basename(sourceRel),
+            usedTargets: usedTargets,
+          );
+          extractedCount++;
+        }
+
+        final dexLibs = _format2Map(dex['libs']);
+        if (dexLibs != null) {
+          final sources = _selectFormat2Sources(
+            dexLibs,
+            platformKey: platformKey,
+            abi: abi,
+          );
+          if (sources.isEmpty &&
+              _hasFormat2PlatformOrAbiKey(
+                dexLibs,
+                platformKey: platformKey,
+                abi: abi,
+              )) {
+            throw Exception('format:2 包缺少当前 ABI 的 dex 依赖库');
+          }
+          for (final source in sources) {
+            final sourceRel = _resolveFormat2AbiPath(source, abi);
+            await _copyFormat2Artifact(
+              sourceRoot: tmpDir.path,
+              sourceRel: sourceRel,
+              targetRoot: staging.path,
+              targetRel: p.join('libs', p.basename(sourceRel)),
+              usedTargets: usedTargets,
+            );
+            extractedCount++;
+          }
+        }
+      }
+
+      if (extractedCount == 0) {
+        throw Exception('format:2 包没有可提取的已知制品');
+      }
+
+      final finalDirObj = Directory(finalDir);
+      if (finalDirObj.existsSync()) {
+        if (backup.existsSync()) await backup.delete(recursive: true);
+        await finalDirObj.rename(backup.path);
+        oldMoved = true;
+      }
+
+      await staging.rename(finalDir);
+      newMoved = true;
+      onRegistering();
+
+      final kind = manifest['kind']?.toString() ?? '';
+      await register(
+        InstalledPlugin(
+          id: entry.id,
+          version: entry.version,
+          source: marketName,
+          installPath: finalDir,
+          enabled: true,
+          pinned: false,
+          installedAtMs: DateTime.now().millisecondsSinceEpoch,
+          type: entry.type,
+          desc: entry.desc,
+          changelog: entry.changelog,
+          icon: entry.icon,
+          extras: {
+            'platform': platformKey,
+            'installMode': 'import',
+            if (kind.isNotEmpty) 'kind': kind,
+          },
+        ),
+      );
+
+      if (backup.existsSync()) {
+        await _safeDeleteDir(backup.path);
+      }
+    } catch (e) {
+      if (newMoved) {
+        await _safeDeleteDir(finalDir);
+      }
+      if (oldMoved && backup.existsSync()) {
+        try {
+          await backup.rename(finalDir);
+        } catch (restoreError) {
+          debugPrint(
+            '[InstallManager] format:2 rollback restore failed: $restoreError',
+          );
+        }
+      }
+      rethrow;
+    } finally {
+      await _safeDeleteDir(staging.path);
+      await _safeDeleteDir(tmpDir.path);
+    }
+  }
+
+  String? _currentAndroidAbiName() {
+    final abi = Abi.current();
+    if (abi == Abi.androidArm64) return 'arm64-v8a';
+    if (abi == Abi.androidArm) return 'armeabi-v7a';
+    if (abi == Abi.androidX64) return 'x86_64';
+    if (abi == Abi.androidIA32) return 'x86';
+    return null;
+  }
+
+  Map<String, dynamic>? _format2Map(dynamic value) {
+    if (value is! Map) return null;
+    return value.map((key, item) => MapEntry(key.toString(), item));
+  }
+
+  List<String> _format2StringList(dynamic value) {
+    if (value is String) {
+      return value.trim().isEmpty ? const [] : [value];
+    }
+    if (value is List) {
+      return value
+          .map((item) => item.toString())
+          .where((item) => item.trim().isNotEmpty)
+          .toList();
+    }
+    return const [];
+  }
+
+  List<String> _selectFormat2Sources(
+    dynamic node, {
+    required String platformKey,
+    required String? abi,
+  }) {
+    if (node is Map) {
+      final map = _format2Map(node)!;
+      if (map.containsKey(platformKey)) {
+        return _selectFormat2Sources(
+          map[platformKey],
+          platformKey: platformKey,
+          abi: abi,
+        );
+      }
+      if (abi != null && map.containsKey(abi)) {
+        return _format2StringList(map[abi]);
+      }
+      if (abi != null && map.containsKey('*')) {
+        return _format2StringList(map['*']);
+      }
+      return const [];
+    }
+    return _format2StringList(node);
+  }
+
+  bool _hasFormat2PlatformOrAbiKey(
+    Map<String, dynamic> map, {
+    required String platformKey,
+    required String? abi,
+  }) {
+    if (map.containsKey(platformKey)) return true;
+    if (abi != null && (map.containsKey(abi) || map.containsKey('*'))) {
+      return true;
+    }
+    return false;
+  }
+
+  String _resolveFormat2AbiPath(String source, String? abi) {
+    final normalized = source.replaceAll('\\', '/');
+    if (!normalized.contains('<abi>')) return normalized;
+    if (abi == null || abi.isEmpty) {
+      throw Exception('format:2 制品需要 ABI，但无法识别当前宿主 ABI');
+    }
+    return normalized.replaceAll('<abi>', abi);
+  }
+
+  Future<void> _copyFormat2Artifact({
+    required String sourceRoot,
+    required String sourceRel,
+    required String targetRoot,
+    required String targetRel,
+    required Set<String> usedTargets,
+  }) async {
+    if (!_isSafeArchivePath(sourceRoot, sourceRel)) {
+      throw Exception('format:2 非法制品路径：$sourceRel');
+    }
+    if (!_isSafeArchivePath(targetRoot, targetRel)) {
+      throw Exception('format:2 非法目标路径：$targetRel');
+    }
+    final normalizedTarget = p.normalize(targetRel);
+    if (normalizedTarget == '.' || p.isAbsolute(normalizedTarget)) {
+      throw Exception('format:2 非法目标路径：$targetRel');
+    }
+    if (!usedTargets.add(normalizedTarget)) {
+      throw Exception('format:2 制品目标冲突：$normalizedTarget');
+    }
+
+    final source = File(p.join(sourceRoot, sourceRel));
+    if (!source.existsSync()) {
+      throw Exception('format:2 制品不存在：$sourceRel');
+    }
+    final target = File(p.join(targetRoot, normalizedTarget));
+    await target.parent.create(recursive: true);
+    await source.copy(target.path);
   }
 
   Future<void> _writeArchiveFile(

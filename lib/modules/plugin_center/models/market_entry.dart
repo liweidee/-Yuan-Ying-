@@ -117,8 +117,10 @@ class MarketEntry {
                     ? 'x86'
                     : '';
     if (abiName.isEmpty) return true;
-    final declaredAbis = abis.isEmpty ? ['arm64-v8a'] : abis;
-    return declaredAbis.contains(abiName);
+    // 缺省 abis 在 fromJson 中已归一为 arm64-v8a；显式空数组表示不限 ABI。
+    // 例如 format:2 的 jar 包会声明 abis=[]，但 artifacts 内携带全部 ABI。
+    if (abis.isEmpty) return true;
+    return abis.contains(abiName);
   }
 
   /// 展示用大小
