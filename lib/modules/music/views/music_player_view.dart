@@ -44,8 +44,8 @@ class MusicPlayerView extends StatelessWidget {
         return const SizedBox.shrink();
       }
 
-      final isFirst = controller.currentIndex.value == 0;
-      final isLast = controller.currentIndex.value == controller.playlist.length - 1;
+      final isFirst = !controller.canPlayPrevious;
+      final isLast = !controller.canPlayNext;
 
       // ===== 构建播放条主体 Widget =====
       Widget buildBarContent() {
@@ -441,18 +441,17 @@ class MusicPlayerView extends StatelessWidget {
         return const SizedBox.shrink();
       }
 
-      final apiUrl = Get.find<SourceManager>()
-          .currentSite
-          .value?['api']
-          ?.toString() ??
-      '';
+      final apiUrl =
+          controller.currentPlaybackSite?['api']?.toString() ?? '';
+      final episodeUrl = controller.currentEpisode?.url ?? '';
 
       bool isFav = false;
-      if (vodId != null && vodId.isNotEmpty) {
-        final favorites = GStorage.getFavorites();
-        isFav = favorites.any((item) =>
-            item['vod_id'] == vodId &&
-            (item['api_url']?.toString() ?? '') == apiUrl);
+      if (vodId != null && vodId.isNotEmpty && episodeUrl.isNotEmpty) {
+        isFav = GStorage.isAudioFavorite(
+          vodId: vodId,
+          apiUrl: apiUrl,
+          episodeUrl: episodeUrl,
+        );
       }
       return IconButton(
         iconSize: 22,
@@ -461,21 +460,25 @@ class MusicPlayerView extends StatelessWidget {
         color: isFav ? colorScheme.primary : colorScheme.outline.withOpacity(0.6),
         icon: Icon(isFav ? Icons.favorite : Icons.favorite_border, size: 20),
         onPressed: () async {
-          if (vodId == null || vodId.isEmpty) {
-            ToastUtils.show('无法获取歌曲ID');
+          final episode = controller.currentEpisode;
+          if (vodId == null || vodId.isEmpty || episode == null || episode.url.isEmpty) {
+            ToastUtils.show('无法获取当前歌曲信息');
             return;
           }
           final sourceManager = Get.find<SourceManager>();
-          final site = sourceManager.currentSite.value;
+          final site = controller.currentPlaybackSite;
           final sourceName = site?['name']?.toString() ?? '音乐';
           final siteKey = site?['key']?.toString() ?? '';
           final configKey = sourceManager.currentConfigKey.value;
           const detailType = DetailType.audio;
-          final songName = controller.currentSongName;
           final cover = controller.coverUrl.value;
 
           if (isFav) {
-            GStorage.removeFavorite(vodId, apiUrl);
+            GStorage.removeAudioFavorite(
+              vodId: vodId,
+              apiUrl: apiUrl,
+              episodeUrl: episode.url,
+            );
             ToastUtils.show('已取消收藏');
           } else {
             final typeLabel = SourceManager.sourceTypeLabel(site);
@@ -485,15 +488,19 @@ class MusicPlayerView extends StatelessWidget {
           
             final item = {
               'vod_id': vodId,
-              'vod_name': songName,
+              'vod_name': episode.name,
               'vod_pic': cover,
-              'vod_remarks': '',
+              'vod_remarks': controller.albumName.value,
               'vod_tag': '',
               'type_name': typeName,
               'api_url': apiUrl,
               'site_key': siteKey,
               'config_key': configKey,
               'detail_type': detailType,
+              'episode_url': episode.url,
+              'episode_name': episode.name,
+              'episode_index': controller.currentIndex.value,
+              'episode_source_name': controller.currentSourceName ?? '',
             };
             GStorage.addFavorite(item);
             ToastUtils.show('已收藏');

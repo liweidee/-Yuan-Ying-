@@ -13,7 +13,6 @@ import 'package:yuanying/t4/models/play_url.dart';
 import 'package:yuanying/t4/services/source_manager.dart';
 import 'package:yuanying/services/resource_sniffer.dart';
 import 'package:yuanying/services/parser_service.dart';
-import 'package:yuanying/modules/music/services/music_player.dart';
 import 'package:yuanying/modules/music/services/audio_player_handler.dart';
 import 'package:yuanying/utils/storage_manager.dart';
 import 'package:yuanying/core/constants/storage_keys.dart';
@@ -23,7 +22,17 @@ import 'package:yuanying/core/constants/app_constants.dart';
 import 'package:yuanying/services/silence_keeper.dart';
 
 // ===== 音频文件后缀列表 =====
-const List<String> _audioExtensions = ['.mp3', '.m4a', '.aac', '.flac', '.wav', '.ogg', '.opus', '.wma', '.alac'];
+const List<String> _audioExtensions = [
+  '.mp3',
+  '.m4a',
+  '.aac',
+  '.flac',
+  '.wav',
+  '.ogg',
+  '.opus',
+  '.wma',
+  '.alac',
+];
 
 enum MusicPlayMode {
   signalLoop(1, '单曲循环', Icons.repeat_one),
@@ -59,6 +68,8 @@ class MusicPlayerController extends GetxController {
   final RxString albumName = ''.obs;
   final RxString lyric = ''.obs;
   final RxString currentPlayUrl = ''.obs;
+  bool _lastPlaybackSucceeded = false;
+  bool get lastPlaybackSucceeded => _lastPlaybackSucceeded;
 
   // ===== 播放模式 =====
   final Rx<MusicPlayMode> playMode = MusicPlayMode.listLoop.obs;
@@ -86,6 +97,40 @@ class MusicPlayerController extends GetxController {
 
   /// 当前线路名（PlaySource.name），供历史记录使用
   String? _currentSourceName;
+  String? get currentSourceName => _currentSourceName;
+
+  /// 当前播放列表实际使用的站点配置。
+  ///
+  /// 通用音频可能从独立站点打开，不能始终回退到全局 currentSite，
+  /// 否则收藏和历史的 api_url/site_key 会指向错误来源。
+  Map<String, dynamic>? _currentPlaybackSite;
+
+  Map<String, dynamic>? get currentPlaybackSite =>
+      _currentPlaybackSite ?? _sourceManager.currentSite.value;
+
+  void setPlaybackSite(Map<String, dynamic>? site) {
+    _currentPlaybackSite = site;
+  }
+
+  /// 当前单曲标识。
+  ///
+  /// 洛雪队列的 Episode.url 保存的是单曲 ID，而 _currentVodId 保存的是
+  /// lx_<第一首歌曲ID> 这种播放上下文 ID，不能用于收藏、下载等单曲操作。
+  String? get currentTrackId => isLxChannel ? currentEpisode?.url : _currentVodId;
+
+  /// 当前播放项的唯一上下文标识，用于过滤过期的异步歌词结果。
+  String? get currentEpisodeKey => episodeKeyAt(currentIndex.value);
+
+  String? episodeKeyAt(int index) {
+    if (index < 0 || index >= playlist.length) return null;
+    return '${_currentVodId ?? ''}::$index::${playlist[index].url}';
+  }
+
+  bool setLyricForEpisode(String? episodeKey, String lrcText) {
+    if (episodeKey == null || episodeKey != currentEpisodeKey) return false;
+    lyric.value = lrcText;
+    return true;
+  }
 
   // ===== 定时器相关 =====
   final RxInt timerMinutes = 0.obs;
@@ -105,6 +150,7 @@ class MusicPlayerController extends GetxController {
   // ===== 跳过片头片尾 =====
   final RxInt skipStartDuration = 0.obs;
   final RxInt skipEndDuration = 0.obs;
+  bool _skipEndTriggered = false;
 
   Episode? get currentEpisode {
     if (playlist.isEmpty || currentIndex.value >= playlist.length) return null;
@@ -184,13 +230,17 @@ class MusicPlayerController extends GetxController {
     List<Episode> episodes, {
     int initialIndex = 0,
     String? vodId,
-    String? sourceName,           // 当前线路名
-    int? resumeEpisodeIndex,      // 历史恢复曲目索引
-    String? resumeEpisodeName,    // 历史恢复曲目名称（名称匹配优先）
+    String? sourceName, // 当前线路名
+    int? resumeEpisodeIndex, // 历史恢复曲目索引
+    String? resumeEpisodeName, // 历史恢复曲目名称（名称匹配优先）
     Future<PlayUrl?> Function(Episode episode)? urlFetcher,
+    String channel = 't4',
+    Map<String, dynamic>? playbackSite,
   }) {
     if (episodes.isEmpty) return;
 
+    setChannel(channel);
+    _currentPlaybackSite = playbackSite;
     _urlFetcher = urlFetcher;
     _currentSourceName = sourceName;
 
@@ -203,13 +253,10 @@ class MusicPlayerController extends GetxController {
     int savedIndex = initialIndex;
 
     // 优先级 1：历史记录传入的 resume 索引（名称优先匹配，防索引错位）
-    if (resumeEpisodeIndex != null &&
-        resumeEpisodeIndex >= 0 &&
-        resumeEpisodeIndex < episodes.length) {
+    if (resumeEpisodeIndex != null && resumeEpisodeIndex >= 0 && resumeEpisodeIndex < episodes.length) {
       savedIndex = resumeEpisodeIndex;
       if (resumeEpisodeName != null && resumeEpisodeName.isNotEmpty) {
-        final found =
-            episodes.indexWhere((e) => e.name == resumeEpisodeName);
+        final found = episodes.indexWhere((e) => e.name == resumeEpisodeName);
         if (found >= 0) savedIndex = found;
       }
     } else if (vodId != null && vodId.isNotEmpty) {
@@ -235,10 +282,6 @@ class MusicPlayerController extends GetxController {
     );
   }
 
-  void setLyric(String lrcText) {
-    lyric.value = lrcText;
-  }
-
   void notifyFavoriteChanged() {
     favoriteVersion.value++;
   }
@@ -251,7 +294,7 @@ class MusicPlayerController extends GetxController {
     if (isLxChannel) return;
 
     final sourceManager = Get.find<SourceManager>();
-    final site = sourceManager.currentSite.value;
+    final site = currentPlaybackSite;
     final apiUrl = site?['api']?.toString() ?? '';
     if (apiUrl.isEmpty) return;
 
@@ -263,9 +306,7 @@ class MusicPlayerController extends GetxController {
     // ===== 拼装带源类型标签的显示名 =====
     final baseName = site?['name']?.toString() ?? '音乐';
     final typeLabel = SourceManager.sourceTypeLabel(site);
-    final typeName = typeLabel.isEmpty
-        ? baseName
-        : '$baseName ($typeLabel)';
+    final typeName = typeLabel.isEmpty ? baseName : '$baseName ($typeLabel)';
 
     final historyItem = {
       'vod_id': _currentVodId,
@@ -316,7 +357,9 @@ class MusicPlayerController extends GetxController {
     }
 
     isLoading.value = true;
+    _lastPlaybackSucceeded = false;
     currentIndex.value = targetIndex;
+    _skipEndTriggered = false;
     final episode = playlist[targetIndex];
 
     if (_currentVodId != null && _currentVodId!.isNotEmpty) {
@@ -372,20 +415,23 @@ class MusicPlayerController extends GetxController {
         url: url,
         headers: playUrl.headers,
       );
+      _lastPlaybackSucceeded = true;
       _addToHistory();
       _handler.current = episode;
       await _handler.player.audio.setSpeed(speed.value);
     } catch (e) {
+      _lastPlaybackSucceeded = false;
       if (e.toString().contains('PlayerInterruptedException')) {
         return;
       }
+      currentPlayUrl.value = '';
       rethrow;
     }
   }
 
   // ===== 嗅探播放 =====
   Future<void> _handleSniff(PlayUrl playUrl, Episode episode) async {
-    final site = _sourceManager.currentSite.value;
+    final site = currentPlaybackSite;
     String? sniffUrl = playUrl.defaultUrl;
 
     if (sniffUrl == null || sniffUrl.isEmpty) {
@@ -467,20 +513,23 @@ class MusicPlayerController extends GetxController {
 
   // ===== 歌词处理 =====
   void _handleLyric(PlayUrl playUrl) {
+    final episodeKey = currentEpisodeKey;
     if (playUrl.lrc != null && playUrl.lrc!.isNotEmpty) {
-      _loadLyricFromUrl(playUrl.lrc!);
+      _loadLyricFromUrl(playUrl.lrc!, episodeKey);
     } else if (playUrl.danmaku != null && playUrl.danmaku!.isNotEmpty) {
-      lyric.value = playUrl.danmaku!;
-    } else {
-      lyric.value = '';
+      setLyricForEpisode(episodeKey, playUrl.danmaku!);
+    } else if (!isLxChannel) {
+      // 洛雪歌词由 LxLyricApiService 异步获取。这里若立即清空，
+      // 会把异步歌词结果覆盖掉，导致切歌后一直显示暂无歌词。
+      setLyricForEpisode(episodeKey, '');
     }
   }
 
-  Future<void> _loadLyricFromUrl(String url) async {
+  Future<void> _loadLyricFromUrl(String url, String? episodeKey) async {
     try {
       final response = await http.get(Uri.parse(url));
       if (response.statusCode == 200) {
-        lyric.value = response.body;
+        setLyricForEpisode(episodeKey, response.body);
       }
     } catch (e) {}
   }
@@ -489,10 +538,7 @@ class MusicPlayerController extends GetxController {
   void _loadParsers() {
     final parseList = _sourceManager.parses;
     if (parseList.isNotEmpty) {
-      final sources = parseList
-          .map((e) => ParserSource.fromJson(e))
-          .where((e) => e.url.isNotEmpty)
-          .toList();
+      final sources = parseList.map((e) => ParserSource.fromJson(e)).where((e) => e.url.isNotEmpty).toList();
       parserSources.value = sources;
     }
   }
@@ -518,7 +564,10 @@ class MusicPlayerController extends GetxController {
     return null;
   }
 
-  Future<PlayUrl?> _processWithParser(PlayUrl playUrl, ParserSource parser) async {
+  Future<PlayUrl?> _processWithParser(
+    PlayUrl playUrl,
+    ParserSource parser,
+  ) async {
     try {
       final fullUrl = '${parser.url}${Uri.encodeComponent(playUrl.defaultUrl ?? '')}';
 
@@ -533,9 +582,7 @@ class MusicPlayerController extends GetxController {
         );
         final data = response.data;
         if (data is Map) {
-          final url = data['url']?.toString() ??
-              data['playUrl']?.toString() ??
-              data['play_url']?.toString();
+          final url = data['url']?.toString() ?? data['playUrl']?.toString() ?? data['play_url']?.toString();
           if (url != null && url.startsWith('http')) {
             return PlayUrl(
               parse: 0,
@@ -584,10 +631,16 @@ class MusicPlayerController extends GetxController {
             const SizedBox(
               width: 36,
               height: 36,
-              child: CircularProgressIndicator(strokeWidth: 3, color: Colors.white),
+              child: CircularProgressIndicator(
+                strokeWidth: 3,
+                color: Colors.white,
+              ),
             ),
             const SizedBox(height: 14),
-            const Text('正在嗅探播放地址...', style: TextStyle(color: Colors.white, fontSize: 14)),
+            const Text(
+              '正在嗅探播放地址...',
+              style: TextStyle(color: Colors.white, fontSize: 14),
+            ),
           ],
         ),
       ),
@@ -610,10 +663,16 @@ class MusicPlayerController extends GetxController {
             const SizedBox(
               width: 36,
               height: 36,
-              child: CircularProgressIndicator(strokeWidth: 3, color: Colors.white),
+              child: CircularProgressIndicator(
+                strokeWidth: 3,
+                color: Colors.white,
+              ),
             ),
             const SizedBox(height: 14),
-            const Text('正在解析中...', style: TextStyle(color: Colors.white, fontSize: 14)),
+            const Text(
+              '正在解析中...',
+              style: TextStyle(color: Colors.white, fontSize: 14),
+            ),
           ],
         ),
       ),
@@ -627,10 +686,14 @@ class MusicPlayerController extends GetxController {
   }
 
   Future<void> togglePlay() async {
-    if (_handler.player.isPlaying) {
-      await _handler.pause();
-    } else {
-      await _handler.play();
+    try {
+      if (_handler.player.isPlaying) {
+        await _handler.pause();
+      } else {
+        await _handler.play();
+      }
+    } catch (e) {
+      ToastUtils.show('播放失败: $e');
     }
   }
 
@@ -650,6 +713,58 @@ class MusicPlayerController extends GetxController {
       return;
     }
     await _playIndexWithFetcher(prevIndex);
+  }
+
+  /// 播放队列中的指定歌曲。
+  ///
+  /// 队列 UI 不再直接修改 currentIndex 后调用详情页回调，避免详情页关闭后
+  /// 只更新 UI 索引但不真正播放。
+  Future<void> playIndex(int index) => _playIndexWithFetcher(index);
+
+  /// 从当前队列移除指定位置的单曲。
+  ///
+  /// expectedTrackId 用于防止页面和控制器队列已经错位时误删其他歌曲。
+  Future<bool> removeTrackAt(
+    int removedIndex, {
+    String? expectedTrackId,
+  }) async {
+    if (removedIndex < 0 || removedIndex >= playlist.length) return false;
+    if (expectedTrackId != null && playlist[removedIndex].url != expectedTrackId) {
+      return false;
+    }
+
+    final previousIndex = currentIndex.value;
+    final removingCurrent = removedIndex == previousIndex;
+
+    if (removingCurrent) {
+      try {
+        await _handler.player.stop();
+      } catch (_) {}
+      playing.value = false;
+      lyric.value = '';
+      currentPlayUrl.value = '';
+    }
+
+    playlist.removeAt(removedIndex);
+
+    if (playlist.isEmpty) {
+      currentIndex.value = 0;
+      _handler.current = null;
+    } else if (removedIndex < previousIndex) {
+      currentIndex.value = previousIndex - 1;
+    } else if (removingCurrent) {
+      currentIndex.value = removedIndex >= playlist.length ? playlist.length - 1 : removedIndex;
+    }
+
+    if (_currentVodId != null && _currentVodId!.isNotEmpty) {
+      _saveCurrentIndex(_currentVodId!, currentIndex.value);
+    }
+    _handler.notifyStateChanged();
+
+    if (removingCurrent && playlist.isNotEmpty) {
+      unawaited(playIndex(currentIndex.value));
+    }
+    return true;
   }
 
   /// 用户主动关闭播放条
@@ -733,6 +848,22 @@ class MusicPlayerController extends GetxController {
     ToastUtils.show('切换到 ${playMode.value.name}');
   }
 
+  bool get canPlayPrevious {
+    if (playlist.isEmpty) return false;
+    if (playMode.value == MusicPlayMode.listOrder) {
+      return currentIndex.value > 0;
+    }
+    return true;
+  }
+
+  bool get canPlayNext {
+    if (playlist.isEmpty) return false;
+    if (playMode.value == MusicPlayMode.listOrder) {
+      return currentIndex.value < playlist.length - 1;
+    }
+    return true;
+  }
+
   // ===== 倍速方法 =====
   Future<void> setSpeed(double newSpeed) async {
     speed.value = newSpeed;
@@ -760,9 +891,28 @@ class MusicPlayerController extends GetxController {
 
     if (end > 0 && duration.inSeconds > end) {
       final target = duration.inSeconds - end;
-      if (position.inSeconds >= target && position.inSeconds < target + 1) {
-        _handler.seek(Duration(seconds: target));
+      if (position.inSeconds < target || _skipEndTriggered) return;
+      _skipEndTriggered = true;
+      unawaited(_handleSkipEnd());
+    }
+  }
+
+  Future<void> _handleSkipEnd() async {
+    try {
+      if (stopAfterCurrent.value) {
+        stopAfterCurrent.value = false;
+        timerMinutes.value = 0;
+        await _handler.pause();
+        return;
       }
+
+      final nextIndex = _getNextIndex();
+      await _handler.pause();
+      if (nextIndex >= 0) {
+        await _playIndexWithFetcher(nextIndex);
+      }
+    } catch (e) {
+      ToastUtils.show('跳过片尾失败: $e');
     }
   }
 

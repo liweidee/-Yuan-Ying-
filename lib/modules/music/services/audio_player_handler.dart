@@ -17,6 +17,7 @@ class AudioPlayerHandler extends BaseAudioHandler {
   String? _coverUrl;
   String? _artist;
   String? _album;
+  DateTime _lastPositionBroadcast = DateTime.fromMillisecondsSinceEpoch(0);
 
   /// 是否正在切歌
   ///
@@ -43,10 +44,18 @@ class AudioPlayerHandler extends BaseAudioHandler {
     _subscriptions.add(player.audio.playingStream.listen((isPlaying) {
       _broadcastState();
     }));
+    _subscriptions.add(player.audio.processingStateStream.listen((_) {
+      _broadcastState();
+    }));
     
     _updateMediaItem();
-    _subscriptions.add(player.audio.positionStream.listen((position) {
+    _subscriptions.add(player.audio.positionStream.listen((_) {
       _updatePosition();
+      final now = DateTime.now();
+      if (now.difference(_lastPositionBroadcast) >= const Duration(seconds: 1)) {
+        _lastPositionBroadcast = now;
+        _broadcastState();
+      }
     }));
     _subscriptions.add(player.audio.durationStream.listen((duration) {
       if (mediaItem.value != null && duration != null) {
@@ -92,25 +101,38 @@ class AudioPlayerHandler extends BaseAudioHandler {
         // 先设置 current 并刷新 mediaItem，再启动播放。
         // 避免 playingStream 先触发广播时 mediaItem 仍为 null，
         // 导致 Android MediaSession 收到 "playing=true + 无元数据" 而拒绝创建通知。
+        final previous = player.current;
         player.current = music;
         _updateMediaItem();
 
-        await player.play(music: music, url: url, headers: headers);
+        try {
+          await player.play(music: music, url: url, headers: headers);
+        } catch (_) {
+          player.current = previous;
+          _updateMediaItem();
+          rethrow;
+        }
       } else {
         if (player.current == null) return;
         await player.audio.play();
       }
       _updatePosition();
+      _broadcastState();
   }
 
   @override
   Future<void> pause() async {
     await player.audio.pause();
     _updatePosition();
+    _broadcastState();
   }
 
   @override
-  Future<void> seek(Duration position) => player.audio.seek(position);
+  Future<void> seek(Duration position) async {
+    await player.audio.seek(position);
+    _updatePosition();
+    _broadcastState();
+  }
 
   @override
   Future<void> skipToPrevious() async {
@@ -192,7 +214,7 @@ class AudioPlayerHandler extends BaseAudioHandler {
         updatePosition: player.audio.position,
         bufferedPosition: player.audio.bufferedPosition,
         speed: _speed,
-        queueIndex: _audioEvent.currentIndex,
+        queueIndex: player.audio.currentIndex ?? _audioEvent.currentIndex,
     ));
   }
 }

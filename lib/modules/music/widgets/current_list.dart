@@ -30,13 +30,15 @@ class CurrentList extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 10),
-                Obx(() => Text(
-                  '${controller.playlist.length} 首歌曲',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: colorScheme.outline,
+                Obx(
+                  () => Text(
+                    '${controller.playlist.length} 首歌曲',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: colorScheme.outline,
+                    ),
                   ),
-                )),
+                ),
               ],
             ),
           ),
@@ -51,13 +53,14 @@ class CurrentList extends StatelessWidget {
                   ),
                 );
               }
+              final isPlayingNow = controller.playing.value;
               return ListView.builder(
                 padding: const EdgeInsets.only(bottom: 20),
                 itemCount: controller.playlist.length,
                 itemBuilder: (context, index) {
                   final episode = controller.playlist[index];
                   final isCurrent = controller.currentIndex.value == index;
-                  final isPlaying = isCurrent && controller.isPlaying;
+                  final isPlaying = isCurrent && isPlayingNow;
 
                   return MusicListTile(
                     episode: episode,
@@ -66,10 +69,7 @@ class CurrentList extends StatelessWidget {
                     isCurrent: isCurrent,
                     onTap: () {
                       Navigator.pop(context);
-                      controller.currentIndex.value = index;
-                      if (controller.onPlayCompleted != null) {
-                        controller.onPlayCompleted!();
-                      }
+                      controller.playIndex(index);
                     },
                     onMore: () {},
                   );

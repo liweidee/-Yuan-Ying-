@@ -26,8 +26,11 @@ class FavoriteController extends GetxController {
   // 复合 key 工具
   // ==========================================================================
 
-  static String _makeKey(String vodId, String apiUrl) =>
-      apiUrl.isEmpty ? vodId : '$vodId|$apiUrl';
+  static String _makeKey(String vodId, String apiUrl, [String? episodeUrl]) {
+    final base = apiUrl.isEmpty ? vodId : '$vodId|$apiUrl';
+    final track = episodeUrl?.trim() ?? '';
+    return track.isEmpty ? base : '$base|episode:$track';
+  }
 
   String _keyOf(VideoItem item) {
     final idx = videoList.indexOf(item);
@@ -77,7 +80,7 @@ class FavoriteController extends GetxController {
       for (final item in data) {
         final v = VideoItem.fromJson(item);
         final apiUrl = item['api_url']?.toString() ?? '';
-        final key = _makeKey(v.vodId, apiUrl);
+        final key = _makeKey(v.vodId, apiUrl, v.episodeUrl);
 
         list.add(v);
         keys.add(key);
@@ -129,7 +132,17 @@ class FavoriteController extends GetxController {
   Future<void> removeFavorite(VideoItem item) async {
     final key = _keyOf(item);
     final apiUrl = _apiUrlMap[key] ?? '';
-    await GStorage.removeFavorite(item.vodId, apiUrl);
+    final type = _detailTypeMap[key];
+    final episodeUrl = item.episodeUrl?.trim() ?? '';
+    if (type == DetailType.audio && episodeUrl.isNotEmpty) {
+      await GStorage.removeAudioFavorite(
+        vodId: item.vodId,
+        apiUrl: apiUrl,
+        episodeUrl: episodeUrl,
+      );
+    } else {
+      await GStorage.removeFavorite(item.vodId, apiUrl);
+    }
 
     final idx = videoList.indexOf(item);
     if (idx >= 0) {
@@ -270,6 +283,10 @@ class FavoriteController extends GetxController {
         'vodId': item.vodId,
         'pwd': pwd,
         'site': targetSite,
+        if (item.episodeIndex != null)
+          'resumeEpisodeIndex': item.episodeIndex,
+        if (item.episodeName != null && item.episodeName!.isNotEmpty)
+          'resumeEpisodeName': item.episodeName,
       });
       return;
     }

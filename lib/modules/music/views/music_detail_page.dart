@@ -5,7 +5,6 @@ import 'package:yuanying/utils/storage.dart';
 import 'package:yuanying/core/constants/app_constants.dart';
 import 'package:yuanying/t4/models/video_detail.dart';
 import 'package:yuanying/t4/services/source_manager.dart';
-import 'package:yuanying/t4/services/i_spider_service.dart';
 import 'package:yuanying/modules/music/controllers/music_player_controller.dart';
 import 'package:yuanying/modules/music/widgets/music_list_tile.dart';
 import 'package:yuanying/modules/music/views/music_player_view.dart';
@@ -60,6 +59,8 @@ class _MusicDetailPageState extends State<MusicDetailPage> {
     _resumeEpisodeName = args?['resumeEpisodeName']?.toString();
 
     _controller = Get.find<MusicPlayerController>();
+    // 通用音频入口必须显式清除可能残留的洛雪渠道标记。
+    _controller.setChannel('t4');
     _controller.onPlayCompleted = _onPlayCompleted;
     _loadDetail();
   }
@@ -75,6 +76,7 @@ class _MusicDetailPageState extends State<MusicDetailPage> {
       final sourceManager = Get.find<SourceManager>();
       final currentSite = sourceManager.currentSite.value;
       _currentSiteName = currentSite?['name']?.toString() ?? '未知源';
+      _controller.setPlaybackSite(_site ?? currentSite);
 
       if (_controller.currentVodId == _vodId && _controller.playlist.isNotEmpty) {
         final api = _site != null
@@ -94,6 +96,22 @@ class _MusicDetailPageState extends State<MusicDetailPage> {
             album: detail.vodName,
           );
           _loadFavoriteStatus();
+
+          if (_resumeEpisodeIndex != null ||
+              (_resumeEpisodeName != null &&
+                  _resumeEpisodeName!.isNotEmpty)) {
+            final episodes = _controller.playlist;
+            var targetIndex = _resumeEpisodeIndex ?? -1;
+            if (_resumeEpisodeName != null &&
+                _resumeEpisodeName!.isNotEmpty) {
+              final namedIndex =
+                  episodes.indexWhere((e) => e.name == _resumeEpisodeName);
+              if (namedIndex >= 0) targetIndex = namedIndex;
+            }
+            if (targetIndex >= 0 && targetIndex < episodes.length) {
+              await _playSong(targetIndex);
+            }
+          }
         } else {
           setState(() {
             _error = '未获取到歌曲列表';
@@ -130,6 +148,8 @@ class _MusicDetailPageState extends State<MusicDetailPage> {
           sourceName: _playSourceName,
           resumeEpisodeIndex: _resumeEpisodeIndex,
           resumeEpisodeName: _resumeEpisodeName,
+          channel: 't4',
+          playbackSite: _site ?? currentSite,
           urlFetcher: (episode) async {
             final api = site != null
                 ? Get.find<SourceManager>().createIndependentService(site)
@@ -174,6 +194,9 @@ class _MusicDetailPageState extends State<MusicDetailPage> {
     final episodes = _controller.playlist;
     if (_detail == null || episodes.isEmpty || index >= episodes.length) return;
 
+    // 在开始网络请求前切换渠道，避免请求期间短暂按洛雪逻辑收藏。
+    _controller.setChannel('t4');
+
     final api = _site != null
         ? Get.find<SourceManager>().createIndependentService(_site!)
         : Get.find<SourceManager>().currentApiService;
@@ -189,13 +212,6 @@ class _MusicDetailPageState extends State<MusicDetailPage> {
         ToastUtils.show('获取播放地址失败');
         return;
       }
-
-      // 显式标记为通用渠道
-      // 之前在洛雪渠道播放过时 channel 会残留 'lx'，导致：
-      // 1. 通用音乐播放被误标记为洛雪渠道
-      // 2. 洛雪页面的底部播放条错误显示通用歌曲
-      // 显式设置 't4' 让渠道状态正确切换。
-      _controller.setChannel('t4');
 
       await _controller.playWithUrl(playUrl, index: index);
     } catch (e) {
@@ -228,6 +244,11 @@ class _MusicDetailPageState extends State<MusicDetailPage> {
       return;
     }
     final detail = _detail!;
+    final episode = _controller.currentEpisode;
+    if (episode == null || episode.url.isEmpty) {
+      ToastUtils.show('无法获取当前歌曲信息');
+      return;
+    }
     final sourceManager = Get.find<SourceManager>();
     final site = _site ?? sourceManager.currentSite.value;
     final sourceName = site?['name']?.toString() ?? (detail.typeName ?? '音乐');
@@ -236,27 +257,35 @@ class _MusicDetailPageState extends State<MusicDetailPage> {
     final configKey = sourceManager.currentConfigKey.value;
     const detailType = DetailType.audio;
 
-    // 先读取当前状态
-    final favorites = GStorage.getFavorites();
-    final isFav = favorites.any((item) =>
-        item['vod_id'] == _vodId &&
-        (item['api_url']?.toString() ?? '') == apiUrl);
+    final isFav = GStorage.isAudioFavorite(
+      vodId: _vodId,
+      apiUrl: apiUrl,
+      episodeUrl: episode.url,
+    );
 
     if (isFav) {
-      GStorage.removeFavorite(_vodId, apiUrl);
+      GStorage.removeAudioFavorite(
+        vodId: _vodId,
+        apiUrl: apiUrl,
+        episodeUrl: episode.url,
+      );
       ToastUtils.show('已取消收藏');
     } else {
       final item = {
         'vod_id': _vodId,
-        'vod_name': detail.vodName,
+        'vod_name': episode.name,
         'vod_pic': detail.vodPic,
-        'vod_remarks': detail.vodRemarks ?? '',
+        'vod_remarks': detail.vodName,
         'vod_tag': detail.vodTag ?? '',
         'type_name': sourceName,
         'api_url': apiUrl,
         'site_key': siteKey,
         'config_key': configKey,
         'detail_type': detailType,
+        'episode_url': episode.url,
+        'episode_name': episode.name,
+        'episode_index': _controller.currentIndex.value,
+        'episode_source_name': _playSourceName,
       };
       GStorage.addFavorite(item);
       ToastUtils.show('已收藏');
@@ -343,17 +372,23 @@ class _MusicDetailPageState extends State<MusicDetailPage> {
         foregroundColor: colorScheme.onSurface,
         actions: [
           Obx(() {
-              // 依赖版本号触发重建
-              final _ = _controller.favoriteVersion.value;
-              final favorites = GStorage.getFavorites();
-              final site = _site ?? Get.find<SourceManager>().currentSite.value;
-              final apiUrl = site?['api']?.toString() ?? '';
-              final isFav = favorites.any((item) =>
-                  item['vod_id'] == _vodId &&
-                  (item['api_url']?.toString() ?? '') == apiUrl);
-              return IconButton(
+            // 依赖版本号触发重建
+            final _ = _controller.favoriteVersion.value;
+            final site = _site ?? Get.find<SourceManager>().currentSite.value;
+            final apiUrl = site?['api']?.toString() ?? '';
+            final sameDetail = _controller.currentVodId == _vodId;
+            final episodeUrl = sameDetail
+                ? _controller.currentEpisode?.url ?? ''
+                : '';
+            final isFav = episodeUrl.isNotEmpty &&
+                GStorage.isAudioFavorite(
+                  vodId: _vodId,
+                  apiUrl: apiUrl,
+                  episodeUrl: episodeUrl,
+                );
+            return IconButton(
               icon: Icon(
-                isFav ? Icons.star : Icons.star_border,
+                isFav ? Icons.favorite : Icons.favorite_border,
                 color: isFav ? colorScheme.primary : colorScheme.outline,
               ),
               onPressed: _toggleFavorite,

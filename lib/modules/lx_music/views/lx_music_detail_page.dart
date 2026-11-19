@@ -3,10 +3,8 @@ import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:get/get.dart';
 
 import '../../../t4/models/play_url.dart';
-import '../../../t4/models/video_detail.dart';
 import '../../music/controllers/music_player_controller.dart';
 import '../../music/views/music_player_view.dart';
-import '../../music/widgets/music_list_tile.dart';
 import '../models/lx_music_model.dart';
 import '../services/lx_lyric_api_service.dart';
 import '../services/lx_music_url_service.dart';
@@ -131,10 +129,15 @@ class _LxMusicDetailPageState extends State<LxMusicDetailPage> {
       qualities: [PlayQuality(label: '洛雪', url: url)],
     );
 
-    _fetchLyric(music);
+    final episodeKey = _controller.episodeKeyAt(index);
+    _controller.setLyricForEpisode(episodeKey, '');
+    _fetchLyric(music, episodeKey);
 
     await _controller.playWithUrl(playUrl, index: index);
-    _saveToLxHistory(music);
+    if (_controller.currentTrackId == music.id &&
+        _controller.lastPlaybackSucceeded) {
+      _saveToLxHistory(music);
+    }
   }
 
   Future<String?> _fetchUrl(LxMusic music) async {
@@ -150,14 +153,17 @@ class _LxMusicDetailPageState extends State<LxMusicDetailPage> {
     }
   }
 
-  void _fetchLyric(LxMusic music) {
-    LxLyricApiService.instance.getLyric(music).then((lyricData) {
-      if (lyricData == null) return;
-      final lrc = lyricData['lyric'];
-      if (lrc != null && lrc.isNotEmpty) {
-        _controller.setLyric(lrc);
-      }
-    }).catchError((_) {});
+  void _fetchLyric(LxMusic music, String? episodeKey) {
+    LxLyricApiService.instance
+        .getLyric(music)
+        .then((lyricData) {
+          if (lyricData == null) return;
+          final lrc = lyricData['lyric'];
+          if (lrc != null && lrc.isNotEmpty) {
+            _controller.setLyricForEpisode(episodeKey, lrc);
+          }
+        })
+        .catchError((_) {});
   }
 
   Future<void> _saveToLxHistory(LxMusic music) async {
@@ -190,23 +196,26 @@ class _LxMusicDetailPageState extends State<LxMusicDetailPage> {
   }
 
   Future<void> _toggleFavorite() async {
-    final vodId = _controller.currentVodId;
-    if (vodId == null || vodId.isEmpty) {
+    final trackId = _controller.currentTrackId;
+    if (trackId == null || trackId.isEmpty) {
       SmartDialog.showToast('无法获取歌曲ID');
       return;
     }
 
     try {
       final list = await LxStorage.instance.getFavorites();
-      final idx = list.indexWhere((item) => item['id'] == vodId);
+      final idx = list.indexWhere((item) => item['id'] == trackId);
 
       if (idx >= 0) {
         list.removeAt(idx);
         await LxStorage.instance.saveFavorites(list);
         SmartDialog.showToast('已取消收藏');
       } else {
-        final music = LxPlayerHelper.currentLxMusic;
-        if (music == null) {
+        final currentIndex = _controller.currentIndex.value;
+        final music = currentIndex >= 0 && currentIndex < _musics.length
+            ? _musics[currentIndex]
+            : LxPlayerHelper.currentLxMusic;
+        if (music == null || music.id != trackId) {
           SmartDialog.showToast('无法获取歌曲信息');
           return;
         }
@@ -243,7 +252,7 @@ class _LxMusicDetailPageState extends State<LxMusicDetailPage> {
         _downloadSong(music);
         break;
       case 'remove':
-        _removeFromList(music);
+        _removeFromList(music, index);
         break;
     }
   }
@@ -270,8 +279,10 @@ class _LxMusicDetailPageState extends State<LxMusicDetailPage> {
   Future<void> _downloadSong(LxMusic music) async {
     try {
       SmartDialog.showToast('正在获取下载地址...');
-      final url =
-          await LxMusicUrlService.instance.getMusicUrl(music: music);
+      final url = await LxMusicUrlService.instance.getMusicUrl(
+        music: music,
+        preferLocal: false,
+      );
       if (url == null || url.isEmpty) {
         SmartDialog.showToast('无法获取下载地址');
         return;
@@ -288,7 +299,7 @@ class _LxMusicDetailPageState extends State<LxMusicDetailPage> {
     }
   }
 
-  Future<void> _removeFromList(LxMusic music) async {
+  Future<void> _removeFromList(LxMusic music, int originalIndex) async {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) {
@@ -304,17 +315,31 @@ class _LxMusicDetailPageState extends State<LxMusicDetailPage> {
             ),
             TextButton(
               onPressed: () => Navigator.pop(ctx, true),
-              child: Text('移除',
-                  style: TextStyle(color: colorScheme.error)),
+              child: Text('移除', style: TextStyle(color: colorScheme.error)),
             ),
           ],
         );
       },
     );
     if (confirm != true) return;
+
+    final removed = await _controller.removeTrackAt(
+      originalIndex,
+      expectedTrackId: music.id,
+    );
+    if (!removed) {
+      SmartDialog.showToast('当前播放队列已变化，请重新进入');
+      return;
+    }
+
     setState(() {
-      _musics.removeWhere((m) => m.id == music.id);
+      final localIndex = originalIndex < _musics.length && _musics[originalIndex].id == music.id
+          ? originalIndex
+          : _musics.indexWhere((m) => m.id == music.id);
+      if (localIndex >= 0) _musics.removeAt(localIndex);
     });
+    final currentIndex = _controller.currentIndex.value;
+    LxPlayerHelper.currentLxMusic = currentIndex >= 0 && currentIndex < _musics.length ? _musics[currentIndex] : null;
     SmartDialog.showToast('已移除');
   }
 
@@ -328,13 +353,11 @@ class _LxMusicDetailPageState extends State<LxMusicDetailPage> {
         actions: [
           Obx(() {
             final _ = _controller.favoriteVersion.value;
-            final vodId = _controller.currentVodId;
-            final isFav = vodId != null &&
-                vodId.isNotEmpty &&
-                _favCache.contains(vodId);
+            final trackId = _controller.currentTrackId;
+            final isFav = trackId != null && trackId.isNotEmpty && _favCache.contains(trackId);
             return IconButton(
               icon: Icon(
-                isFav ? Icons.star : Icons.star_border,
+                isFav ? Icons.favorite : Icons.favorite_border,
                 color: isFav ? colorScheme.primary : colorScheme.outline,
               ),
               onPressed: _toggleFavorite,
@@ -366,8 +389,7 @@ class _LxMusicDetailPageState extends State<LxMusicDetailPage> {
   Widget _buildHeader(ColorScheme colorScheme) {
     return Obx(() {
       final idx = _controller.currentIndex.value;
-      final music =
-          (idx >= 0 && idx < _musics.length) ? _musics[idx] : null;
+      final music = (idx >= 0 && idx < _musics.length) ? _musics[idx] : null;
       if (music == null) return const SizedBox.shrink();
 
       return Padding(
@@ -383,8 +405,7 @@ class _LxMusicDetailPageState extends State<LxMusicDetailPage> {
                       width: 80,
                       height: 80,
                       fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) =>
-                          _coverPlaceholder(colorScheme),
+                      errorBuilder: (_, __, ___) => _coverPlaceholder(colorScheme),
                     )
                   : _coverPlaceholder(colorScheme),
             ),
@@ -427,7 +448,9 @@ class _LxMusicDetailPageState extends State<LxMusicDetailPage> {
                   const SizedBox(height: 6),
                   Container(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 2),
+                      horizontal: 8,
+                      vertical: 2,
+                    ),
                     decoration: BoxDecoration(
                       color: colorScheme.primaryContainer,
                       borderRadius: BorderRadius.circular(10),
@@ -488,8 +511,7 @@ class _LxMusicDetailPageState extends State<LxMusicDetailPage> {
               ),
               const SizedBox(width: 8),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                 decoration: BoxDecoration(
                   color: colorScheme.primary.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(10),
@@ -509,17 +531,13 @@ class _LxMusicDetailPageState extends State<LxMusicDetailPage> {
             mainAxisSize: MainAxisSize.min,
             children: [
               _CatalogIconButton(
-                icon: _desc
-                    ? Icons.vertical_align_top
-                    : Icons.vertical_align_bottom,
+                icon: _desc ? Icons.vertical_align_top : Icons.vertical_align_bottom,
                 tooltip: _desc ? '正序' : '倒序',
                 isActive: _desc,
                 onTap: () => setState(() => _desc = !_desc),
               ),
               _CatalogIconButton(
-                icon: _isGrid
-                    ? Icons.grid_view_rounded
-                    : Icons.view_list_rounded,
+                icon: _isGrid ? Icons.grid_view_rounded : Icons.view_list_rounded,
                 tooltip: _isGrid ? '网格' : '列表',
                 isActive: _isGrid,
                 onTap: () => setState(() => _isGrid = !_isGrid),
@@ -569,12 +587,11 @@ class _LxMusicDetailPageState extends State<LxMusicDetailPage> {
                 decoration: BoxDecoration(
                   color: isCurrent
                       ? colorScheme.primaryContainer
-                      : colorScheme.surfaceContainerHighest
-                          .withValues(alpha: 0.5),
+                      : colorScheme.surfaceContainerHighest.withValues(
+                          alpha: 0.5,
+                        ),
                   borderRadius: BorderRadius.circular(8),
-                  border: isCurrent
-                      ? Border.all(color: colorScheme.primary, width: 1.5)
-                      : null,
+                  border: isCurrent ? Border.all(color: colorScheme.primary, width: 1.5) : null,
                 ),
                 child: Text(
                   '${i + 1}. ${music.name}',
@@ -582,11 +599,8 @@ class _LxMusicDetailPageState extends State<LxMusicDetailPage> {
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     fontSize: 11,
-                    color: isCurrent
-                        ? colorScheme.primary
-                        : colorScheme.onSurface,
-                    fontWeight:
-                        isCurrent ? FontWeight.w600 : FontWeight.normal,
+                    color: isCurrent ? colorScheme.primary : colorScheme.onSurface,
+                    fontWeight: isCurrent ? FontWeight.w600 : FontWeight.normal,
                   ),
                 ),
               ),
@@ -608,16 +622,16 @@ class _LxMusicDetailPageState extends State<LxMusicDetailPage> {
           return Padding(
             padding: const EdgeInsets.only(bottom: 6),
             child: Material(
-              color: isCurrent
-                  ? colorScheme.primaryContainer.withValues(alpha: 0.3)
-                  : colorScheme.surfaceContainerLow,
+              color: isCurrent ? colorScheme.primaryContainer.withValues(alpha: 0.3) : colorScheme.surfaceContainerLow,
               borderRadius: BorderRadius.circular(12),
               clipBehavior: Clip.antiAlias,
               child: InkWell(
                 onTap: () => _playSong(originalIndex),
                 child: Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 6,
+                  ),
                   child: Row(
                     children: [
                       SizedBox(
@@ -625,9 +639,7 @@ class _LxMusicDetailPageState extends State<LxMusicDetailPage> {
                         child: Center(
                           child: isCurrent
                               ? Icon(
-                                  isPlaying
-                                      ? Icons.equalizer_rounded
-                                      : Icons.pause_rounded,
+                                  isPlaying ? Icons.equalizer_rounded : Icons.pause_rounded,
                                   color: colorScheme.primary,
                                   size: 18,
                                 )
@@ -650,13 +662,9 @@ class _LxMusicDetailPageState extends State<LxMusicDetailPage> {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
-                                color: isCurrent
-                                    ? colorScheme.primary
-                                    : colorScheme.onSurface,
+                                color: isCurrent ? colorScheme.primary : colorScheme.onSurface,
                                 fontSize: 14,
-                                fontWeight: isCurrent
-                                    ? FontWeight.w600
-                                    : FontWeight.normal,
+                                fontWeight: isCurrent ? FontWeight.w600 : FontWeight.normal,
                               ),
                             ),
                             const SizedBox(height: 2),
@@ -673,25 +681,32 @@ class _LxMusicDetailPageState extends State<LxMusicDetailPage> {
                         ),
                       ),
                       PopupMenuButton<String>(
-                        icon: Icon(Icons.more_vert_rounded,
-                            color: colorScheme.outline, size: 20),
+                        icon: Icon(
+                          Icons.more_vert_rounded,
+                          color: colorScheme.outline,
+                          size: 20,
+                        ),
                         tooltip: '',
-                        onSelected: (v) =>
-                            _handleSongMenu(v, music, originalIndex),
+                        onSelected: (v) => _handleSongMenu(v, music, originalIndex),
                         itemBuilder: (context) => [
+                          const PopupMenuItem(value: 'play', child: Text('播放')),
                           const PopupMenuItem(
-                              value: 'play', child: Text('播放')),
+                            value: 'next',
+                            child: Text('下一首播放'),
+                          ),
                           const PopupMenuItem(
-                              value: 'next', child: Text('下一首播放')),
+                            value: 'add',
+                            child: Text('添加到歌单'),
+                          ),
+                          const PopupMenuItem(value: 'fav', child: Text('我喜欢')),
                           const PopupMenuItem(
-                              value: 'add', child: Text('添加到歌单')),
+                            value: 'download',
+                            child: Text('下载'),
+                          ),
                           const PopupMenuItem(
-                              value: 'fav', child: Text('我喜欢')),
-                          const PopupMenuItem(
-                              value: 'download', child: Text('下载')),
-                          const PopupMenuItem(
-                              value: 'remove',
-                              child: Text('从列表移除')),
+                            value: 'remove',
+                            child: Text('从列表移除'),
+                          ),
                         ],
                       ),
                     ],
@@ -732,17 +747,13 @@ class _CatalogIconButton extends StatelessWidget {
           padding: const EdgeInsets.all(6),
           margin: const EdgeInsets.only(right: 4),
           decoration: BoxDecoration(
-            color: isActive
-                ? colorScheme.primary.withValues(alpha: 0.12)
-                : Colors.transparent,
+            color: isActive ? colorScheme.primary.withValues(alpha: 0.12) : Colors.transparent,
             borderRadius: BorderRadius.circular(8),
           ),
           child: Icon(
             icon,
             size: 20,
-            color: isActive
-                ? colorScheme.primary
-                : colorScheme.onSurface.withValues(alpha: 0.6),
+            color: isActive ? colorScheme.primary : colorScheme.onSurface.withValues(alpha: 0.6),
           ),
         ),
       ),
@@ -783,16 +794,18 @@ class _CatalogGroupButton extends StatelessWidget {
       final start = g * _kGroupSize + 1;
       final end = ((g + 1) * _kGroupSize).clamp(0, total);
       final isSel = selectedGroup == g;
-      items.add(PopupMenuItem<int?>(
-        value: g,
-        child: Text(
-          '$start-$end',
-          style: TextStyle(
-            fontSize: 13,
-            color: isSel ? colorScheme.primary : null,
+      items.add(
+        PopupMenuItem<int?>(
+          value: g,
+          child: Text(
+            '$start-$end',
+            style: TextStyle(
+              fontSize: 13,
+              color: isSel ? colorScheme.primary : null,
+            ),
           ),
         ),
-      ));
+      );
     }
     return items;
   }
@@ -804,21 +817,18 @@ class _CatalogGroupButton extends StatelessWidget {
       message: '分组',
       child: InkWell(
         onTap: () async {
-          final RenderBox button =
-              context.findRenderObject() as RenderBox;
-          final RenderBox overlay = Overlay.of(context)
-              .context
-              .findRenderObject() as RenderBox;
+          final RenderBox button = context.findRenderObject() as RenderBox;
+          final RenderBox overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
           final Rect rect = Rect.fromPoints(
             button.localToGlobal(Offset.zero, ancestor: overlay),
             button.localToGlobal(
-                button.size.bottomRight(Offset.zero),
-                ancestor: overlay),
+              button.size.bottomRight(Offset.zero),
+              ancestor: overlay,
+            ),
           );
           final result = await showMenu<int?>(
             context: context,
-            position:
-                RelativeRect.fromRect(rect, Offset.zero & overlay.size),
+            position: RelativeRect.fromRect(rect, Offset.zero & overlay.size),
             items: _buildMenuItems(context),
             color: colorScheme.surfaceContainerLow,
           );
@@ -828,17 +838,13 @@ class _CatalogGroupButton extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.all(6),
           decoration: BoxDecoration(
-            color: selectedGroup != null
-                ? colorScheme.primary.withValues(alpha: 0.12)
-                : Colors.transparent,
+            color: selectedGroup != null ? colorScheme.primary.withValues(alpha: 0.12) : Colors.transparent,
             borderRadius: BorderRadius.circular(8),
           ),
           child: Icon(
             Icons.segment_rounded,
             size: 20,
-            color: selectedGroup != null
-                ? colorScheme.primary
-                : colorScheme.onSurface.withValues(alpha: 0.6),
+            color: selectedGroup != null ? colorScheme.primary : colorScheme.onSurface.withValues(alpha: 0.6),
           ),
         ),
       ),

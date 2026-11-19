@@ -1,7 +1,6 @@
 // lib/modules/music/widgets/player_card.dart
 import 'dart:ui';
 import 'package:flutter/material.dart';
-import 'package:flutter/cupertino.dart';
 import 'package:get/get.dart';
 import 'package:yuanying/modules/music/controllers/music_player_controller.dart';
 import 'package:yuanying/modules/music/widgets/vinyl_record.dart';
@@ -16,7 +15,6 @@ import 'package:yuanying/modules/lx_music/storage/lx_storage.dart';
 
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:yuanying/modules/lx_music/controllers/lx_download_controller.dart';
-import 'package:yuanying/modules/lx_music/models/lx_music_model.dart';
 import 'package:yuanying/modules/lx_music/services/lx_music_url_service.dart';
 import 'package:yuanying/modules/lx_music/utils/lx_player_helper.dart';
 import 'package:yuanying/modules/lx_music/utils/lx_playlist_helper.dart';
@@ -28,8 +26,7 @@ class PlayerCard extends StatefulWidget {
   State<PlayerCard> createState() => PlayerCardState();
 }
 
-class PlayerCardState extends State<PlayerCard>
-    with SingleTickerProviderStateMixin {
+class PlayerCardState extends State<PlayerCard> with SingleTickerProviderStateMixin {
   late PageController _pageController;
   final RxInt _currentPage = 0.obs;
   final RxBool _isLike = false.obs;
@@ -50,28 +47,32 @@ class PlayerCardState extends State<PlayerCard>
 
   void _loadFavoriteStatus() {
     final controller = Get.find<MusicPlayerController>();
-    final vodId = controller.currentVodId;
-    if (vodId == null || vodId.isEmpty) return;
 
     if (controller.isLxChannel) {
-      _loadLxFavoriteStatus(vodId);
+      final trackId = controller.currentTrackId;
+      if (trackId == null || trackId.isEmpty) return;
+      _loadLxFavoriteStatus(trackId);
     } else {
-      final favorites = GStorage.getFavorites();
-      final apiUrl = Get.find<SourceManager>()
-              .currentSite
-              .value?['api']
-              ?.toString() ??
-          '';
-      _isLike.value = favorites.any((item) =>
-          item['vod_id'] == vodId &&
-          (item['api_url']?.toString() ?? '') == apiUrl);
+      final vodId = controller.currentVodId;
+      final episodeUrl = controller.currentEpisode?.url ?? '';
+      if (vodId == null || vodId.isEmpty || episodeUrl.isEmpty) {
+        _isLike.value = false;
+        return;
+      }
+      final apiUrl = controller.currentPlaybackSite?['api']?.toString() ?? '';
+      _isLike.value = GStorage.isAudioFavorite(
+        vodId: vodId,
+        apiUrl: apiUrl,
+        episodeUrl: episodeUrl,
+      );
     }
   }
 
   Future<void> _loadLxFavoriteStatus(String vodId) async {
     try {
       final list = await LxStorage.instance.getFavorites();
-      if (!mounted) return;
+      final controller = Get.find<MusicPlayerController>();
+      if (!mounted || controller.currentTrackId != vodId) return;
       _isLike.value = list.any((item) => item['id'] == vodId);
     } catch (_) {}
   }
@@ -84,48 +85,59 @@ class PlayerCardState extends State<PlayerCard>
 
   void _toggleLike() async {
     final controller = Get.find<MusicPlayerController>();
-    final vodId = controller.currentVodId;
-    if (vodId == null || vodId.isEmpty) {
+    final trackId = controller.currentTrackId;
+    if (trackId == null || trackId.isEmpty) {
       ToastUtils.show('无法获取歌曲ID');
       return;
     }
 
     if (controller.isLxChannel) {
-      await _toggleLxLike(vodId, controller);
+      await _toggleLxLike(trackId, controller);
       return;
     }
 
+    final vodId = controller.currentVodId;
+    final episode = controller.currentEpisode;
+    if (vodId == null || vodId.isEmpty || episode == null || episode.url.isEmpty) {
+      ToastUtils.show('无法获取当前歌曲信息');
+      return;
+    }
     final sourceManager = Get.find<SourceManager>();
-    final site = sourceManager.currentSite.value;
+    final site = controller.currentPlaybackSite;
     final sourceName = site?['name']?.toString() ?? '音乐';
     final apiUrl = site?['api']?.toString() ?? '';
     final siteKey = site?['key']?.toString() ?? '';
     final configKey = sourceManager.currentConfigKey.value;
     const detailType = DetailType.audio;
-    final songName = controller.currentSongName;
     final cover = controller.coverUrl.value;
 
     if (_isLike.value) {
-      GStorage.removeFavorite(vodId, apiUrl);
+      GStorage.removeAudioFavorite(
+        vodId: vodId,
+        apiUrl: apiUrl,
+        episodeUrl: episode.url,
+      );
       _isLike.value = false;
       ToastUtils.show('已取消收藏');
     } else {
       final typeLabel = SourceManager.sourceTypeLabel(site);
-      final typeName = typeLabel.isEmpty
-          ? sourceName
-          : '$sourceName ($typeLabel)';
-                
+      final typeName = typeLabel.isEmpty ? sourceName : '$sourceName ($typeLabel)';
+
       final item = {
         'vod_id': vodId,
-        'vod_name': songName,
+        'vod_name': episode.name,
         'vod_pic': cover,
-        'vod_remarks': '',
+        'vod_remarks': controller.albumName.value,
         'vod_tag': '',
         'type_name': typeName,
         'api_url': apiUrl,
         'site_key': siteKey,
         'config_key': configKey,
         'detail_type': detailType,
+        'episode_url': episode.url,
+        'episode_name': episode.name,
+        'episode_index': controller.currentIndex.value,
+        'episode_source_name': controller.currentSourceName ?? '',
       };
       GStorage.addFavorite(item);
       _isLike.value = true;
@@ -135,7 +147,9 @@ class PlayerCardState extends State<PlayerCard>
   }
 
   Future<void> _toggleLxLike(
-      String vodId, MusicPlayerController controller) async {
+    String vodId,
+    MusicPlayerController controller,
+  ) async {
     try {
       final list = await LxStorage.instance.getFavorites();
       final idx = list.indexWhere((item) => item['id'] == vodId);
@@ -146,15 +160,14 @@ class PlayerCardState extends State<PlayerCard>
         _isLike.value = false;
         ToastUtils.show('已取消收藏');
       } else {
-        final episode = controller.currentEpisode;
+        final music = LxPlayerHelper.currentLxMusic;
+        if (music == null || music.id != vodId) {
+          ToastUtils.show('当前歌曲信息未同步');
+          return;
+        }
         list.insert(0, {
-          'id': vodId,
-          'name': episode?.name ?? '',
-          'singer': controller.author.value,
-          'album': controller.albumName.value,
-          'imgUrl': controller.coverUrl.value,
-          'source': 'lx',
-          'addTime': DateTime.now().millisecondsSinceEpoch,
+          ...music.toJson(),
+          'addTime': DateTime.now().toIso8601String(),
         });
         await LxStorage.instance.saveFavorites(list);
         _isLike.value = true;
@@ -184,7 +197,10 @@ class PlayerCardState extends State<PlayerCard>
 
     try {
       SmartDialog.showToast('正在获取下载地址...');
-      final url = await LxMusicUrlService.instance.getMusicUrl(music: music);
+      final url = await LxMusicUrlService.instance.getMusicUrl(
+        music: music,
+        preferLocal: false,
+      );
       if (url == null || url.isEmpty) {
         SmartDialog.showToast('无法获取下载地址');
         return;
@@ -225,28 +241,25 @@ class PlayerCardState extends State<PlayerCard>
           spacing: 8,
           runSpacing: 8,
           children: speeds.map((speed) {
-            final isSelected =
-                (controller.speed.value - speed).abs() < 0.01;
+            final isSelected = (controller.speed.value - speed).abs() < 0.01;
             return GestureDetector(
               onTap: () {
                 controller.setSpeed(speed);
                 Navigator.pop(context);
               },
               child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
                 decoration: BoxDecoration(
-                  color: isSelected
-                      ? colorScheme.primary
-                      : colorScheme.surfaceContainerHighest,
+                  color: isSelected ? colorScheme.primary : colorScheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
                   '${speed}x',
                   style: TextStyle(
-                    color: isSelected
-                        ? colorScheme.onPrimary
-                        : colorScheme.onSurface,
+                    color: isSelected ? colorScheme.onPrimary : colorScheme.onSurface,
                   ),
                 ),
               ),
@@ -281,50 +294,50 @@ class PlayerCardState extends State<PlayerCard>
       builder: (context) {
         return Material(
           color: colorScheme.surface,
-          borderRadius:
-              const BorderRadius.vertical(top: Radius.circular(16)),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
           clipBehavior: Clip.antiAlias,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               const SizedBox(height: 8),
               const Center(
-                child: Text('定时关闭',
-                    style: TextStyle(
-                        fontSize: 16, fontWeight: FontWeight.w500)),
+                child: Text(
+                  '定时关闭',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+                ),
               ),
               const SizedBox(height: 4),
               ...presetOptions.map(
                 (option) => ListTile(
                   dense: true,
-                  leading: Icon(option['icon'] as IconData,
-                      size: 20, color: colorScheme.primary),
+                  leading: Icon(
+                    option['icon'] as IconData,
+                    size: 20,
+                    color: colorScheme.primary,
+                  ),
                   onTap: () {
                     Navigator.pop(context);
                     controller.setTimer(option['value'] as int);
                   },
-                  title: Text(option['label'] as String,
-                      style: const TextStyle(fontSize: 14)),
+                  title: Text(
+                    option['label'] as String,
+                    style: const TextStyle(fontSize: 14),
+                  ),
                   trailing: Obx(() {
                     final current = controller.timerMinutes.value;
                     final selected = (current == option['value']);
-                    return selected
-                        ? Icon(Icons.done,
-                            size: 20, color: colorScheme.primary)
-                        : const SizedBox.shrink();
+                    return selected ? Icon(Icons.done, size: 20, color: colorScheme.primary) : const SizedBox.shrink();
                   }),
                 ),
               ),
               ListTile(
                 dense: true,
-                leading: Icon(Icons.edit,
-                    size: 20, color: colorScheme.primary),
+                leading: Icon(Icons.edit, size: 20, color: colorScheme.primary),
                 onTap: () {
                   Navigator.pop(context);
                   _showCustomTimerPicker(context);
                 },
-                title:
-                    const Text('自定义', style: TextStyle(fontSize: 14)),
+                title: const Text('自定义', style: TextStyle(fontSize: 14)),
               ),
               const SizedBox(height: 4),
             ],
@@ -347,8 +360,7 @@ class PlayerCardState extends State<PlayerCard>
       initialEntryMode: TimePickerEntryMode.inputOnly,
       initialTime: TimeOfDay(hour: hour, minute: minute),
       builder: (context, child) => MediaQuery(
-        data: MediaQuery.of(context)
-            .copyWith(alwaysUse24HourFormat: true),
+        data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: true),
         child: child!,
       ),
     ).then((time) {
@@ -386,8 +398,7 @@ class PlayerCardState extends State<PlayerCard>
             }
 
             return Dialog(
-              insetPadding:
-                  const EdgeInsets.symmetric(horizontal: 20),
+              insetPadding: const EdgeInsets.symmetric(horizontal: 20),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
@@ -419,20 +430,20 @@ class PlayerCardState extends State<PlayerCard>
                     Row(
                       children: [
                         const SizedBox(
-                            width: 44,
-                            child: Text('片头:',
-                                style: TextStyle(fontSize: 14))),
+                          width: 44,
+                          child: Text('片头:', style: TextStyle(fontSize: 14)),
+                        ),
                         Expanded(
                           child: Slider(
                             min: 0,
                             max: 300,
                             divisions: 60,
                             value: localStart.toDouble(),
-                            onChanged: (val) =>
-                                updateStart(val.round()),
+                            onChanged: (val) => updateStart(val.round()),
                             activeColor: colorScheme.primary,
-                            inactiveColor: colorScheme.onSurface
-                                .withOpacity(0.1),
+                            inactiveColor: colorScheme.onSurface.withOpacity(
+                              0.1,
+                            ),
                           ),
                         ),
                         SizedBox(
@@ -449,9 +460,9 @@ class PlayerCardState extends State<PlayerCard>
                     Row(
                       children: [
                         const SizedBox(
-                            width: 44,
-                            child: Text('片尾:',
-                                style: TextStyle(fontSize: 14))),
+                          width: 44,
+                          child: Text('片尾:', style: TextStyle(fontSize: 14)),
+                        ),
                         Expanded(
                           child: Slider(
                             min: 0,
@@ -460,8 +471,9 @@ class PlayerCardState extends State<PlayerCard>
                             value: localEnd.toDouble(),
                             onChanged: (val) => updateEnd(val.round()),
                             activeColor: colorScheme.primary,
-                            inactiveColor: colorScheme.onSurface
-                                .withOpacity(0.1),
+                            inactiveColor: colorScheme.onSurface.withOpacity(
+                              0.1,
+                            ),
                           ),
                         ),
                         SizedBox(
@@ -481,17 +493,35 @@ class PlayerCardState extends State<PlayerCard>
                       alignment: WrapAlignment.center,
                       children: [
                         _buildPresetButton(
-                            '片头30s', () => updateStart(30), colorScheme),
+                          '片头30s',
+                          () => updateStart(30),
+                          colorScheme,
+                        ),
                         _buildPresetButton(
-                            '片头60s', () => updateStart(60), colorScheme),
+                          '片头60s',
+                          () => updateStart(60),
+                          colorScheme,
+                        ),
                         _buildPresetButton(
-                            '片头90s', () => updateStart(90), colorScheme),
+                          '片头90s',
+                          () => updateStart(90),
+                          colorScheme,
+                        ),
                         _buildPresetButton(
-                            '片尾30s', () => updateEnd(30), colorScheme),
+                          '片尾30s',
+                          () => updateEnd(30),
+                          colorScheme,
+                        ),
                         _buildPresetButton(
-                            '片尾60s', () => updateEnd(60), colorScheme),
+                          '片尾60s',
+                          () => updateEnd(60),
+                          colorScheme,
+                        ),
                         _buildPresetButton(
-                            '片尾90s', () => updateEnd(90), colorScheme),
+                          '片尾90s',
+                          () => updateEnd(90),
+                          colorScheme,
+                        ),
                       ],
                     ),
                     const SizedBox(height: 16),
@@ -505,28 +535,25 @@ class PlayerCardState extends State<PlayerCard>
                               localEnd = 0;
                             });
                           },
-                          child: Text('清除',
-                              style: TextStyle(
-                                  color: colorScheme.primary)),
+                          child: Text(
+                            '清除',
+                            style: TextStyle(color: colorScheme.primary),
+                          ),
                         ),
                         TextButton(
-                          onPressed: () =>
-                              Navigator.of(dialogContext).pop(),
-                          child: Text('取消',
-                              style: TextStyle(
-                                  color: colorScheme.primary)),
+                          onPressed: () => Navigator.of(dialogContext).pop(),
+                          child: Text(
+                            '取消',
+                            style: TextStyle(color: colorScheme.primary),
+                          ),
                         ),
                         TextButton(
                           onPressed: () {
-                            controller.skipStartDuration.value =
-                                localStart;
-                            controller.skipEndDuration.value =
-                                localEnd;
+                            controller.skipStartDuration.value = localStart;
+                            controller.skipEndDuration.value = localEnd;
                             final pos = controller.position;
-                            if (localStart > 0 &&
-                                pos.inSeconds < localStart) {
-                              controller.seek(
-                                  Duration(seconds: localStart));
+                            if (localStart > 0 && pos.inSeconds < localStart) {
+                              controller.seek(Duration(seconds: localStart));
                             }
                             Navigator.of(dialogContext).pop();
                           },
@@ -551,14 +578,16 @@ class PlayerCardState extends State<PlayerCard>
   }
 
   Widget _buildPresetButton(
-      String label, VoidCallback onTap, ColorScheme colorScheme) {
+    String label,
+    VoidCallback onTap,
+    ColorScheme colorScheme,
+  ) {
     return OutlinedButton(
       onPressed: onTap,
       style: OutlinedButton.styleFrom(
         padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
         side: BorderSide(color: colorScheme.outline.withOpacity(0.3)),
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       ),
       child: Text(
         label,
@@ -607,8 +636,7 @@ class PlayerCardState extends State<PlayerCard>
                   ),
                 );
               }
-              return Container(
-                  color: colorScheme.surfaceContainerHighest);
+              return Container(color: colorScheme.surfaceContainerHighest);
             },
           ),
           Positioned.fill(
@@ -623,8 +651,7 @@ class PlayerCardState extends State<PlayerCard>
                 Expanded(
                   child: PageView(
                     controller: _pageController,
-                    onPageChanged: (index) =>
-                        _currentPage.value = index,
+                    onPageChanged: (index) => _currentPage.value = index,
                     children: const [
                       _VinylPage(),
                       LyricScroller(),
@@ -683,9 +710,7 @@ class PlayerCardState extends State<PlayerCard>
               margin: const EdgeInsets.symmetric(horizontal: 4),
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: index == _currentPage.value
-                    ? colorScheme.primary
-                    : Colors.white.withOpacity(0.3),
+                color: index == _currentPage.value ? colorScheme.primary : Colors.white.withOpacity(0.3),
               ),
             ),
           ),
@@ -704,6 +729,8 @@ class PlayerCardState extends State<PlayerCard>
   Widget _buildTopActions(BuildContext context, ColorScheme colorScheme) {
     return Obx(() {
       final controller = Get.find<MusicPlayerController>();
+      // 非洛雪收藏状态直接从 GStorage 读取，需要依赖版本号主动刷新。
+      final _ = controller.favoriteVersion.value;
 
       // 收集所有按钮（按使用频率排序）
       final allActions = _collectAllActions(context, controller);
@@ -761,88 +788,98 @@ class PlayerCardState extends State<PlayerCard>
     // 1. 歌词
     final hasLyric = controller.lyric.value.isNotEmpty;
     final isOnLyric = _currentPage.value == 1;
-    actions.add(_TopAction(
-      id: 'lyric',
-      icon: Icons.lyrics,
-      label: isOnLyric ? '返回封面' : '查看歌词',
-      active: hasLyric && isOnLyric,
-      onTap: hasLyric ? _toggleLyricPage : null,
-    ));
+    actions.add(
+      _TopAction(
+        id: 'lyric',
+        icon: Icons.lyrics,
+        label: isOnLyric ? '返回封面' : '查看歌词',
+        active: hasLyric && isOnLyric,
+        onTap: hasLyric ? _toggleLyricPage : null,
+      ),
+    );
 
     // 2. 倍速
-    actions.add(_TopAction(
-      id: 'speed',
-      icon: Icons.speed,
-      label: '倍速（${_formatSpeed(controller.speed.value)}）',
-      active: controller.speed.value != 1.0,
-      onTap: () => _showSpeedDialog(context),
-    ));
+    actions.add(
+      _TopAction(
+        id: 'speed',
+        icon: Icons.speed,
+        label: '倍速（${_formatSpeed(controller.speed.value)}）',
+        active: controller.speed.value != 1.0,
+        onTap: () => _showSpeedDialog(context),
+      ),
+    );
 
     // 3. 收藏
-    final vodId = controller.currentVodId;
+    final vodId = controller.currentTrackId;
     bool isFav = false;
     if (vodId != null && vodId.isNotEmpty) {
       if (controller.isLxChannel) {
         isFav = _isLike.value;
       } else {
-        final favorites = GStorage.getFavorites();
-        final apiUrl = Get.find<SourceManager>()
-                .currentSite
-                .value?['api']
-                ?.toString() ??
-            '';
-        isFav = favorites.any((item) =>
-            item['vod_id'] == vodId &&
-            (item['api_url']?.toString() ?? '') == apiUrl);
+        final episodeUrl = controller.currentEpisode?.url ?? '';
+        final apiUrl = controller.currentPlaybackSite?['api']?.toString() ?? '';
+        isFav = episodeUrl.isNotEmpty &&
+            GStorage.isAudioFavorite(
+              vodId: vodId,
+              apiUrl: apiUrl,
+              episodeUrl: episodeUrl,
+            );
       }
     }
-    actions.add(_TopAction(
-      id: 'fav',
-      icon: isFav ? Icons.favorite : Icons.favorite_border,
-      label: isFav ? '取消收藏' : '收藏',
-      active: isFav,
-      onTap: _toggleLike,
-    ));
+    actions.add(
+      _TopAction(
+        id: 'fav',
+        icon: isFav ? Icons.favorite : Icons.favorite_border,
+        label: isFav ? '取消收藏' : '收藏',
+        active: isFav,
+        onTap: _toggleLike,
+      ),
+    );
 
     // 4. 定时
     final isTimerActive = controller.timerMinutes.value != 0;
-    actions.add(_TopAction(
-      id: 'timer',
-      icon: isTimerActive ? Icons.timer : Icons.timer_outlined,
-      label: isTimerActive
-          ? '定时关闭（${_formatTimer(controller.timerMinutes.value)}）'
-          : '定时关闭',
-      active: isTimerActive,
-      onTap: () => _showTimerPicker(context),
-    ));
+    actions.add(
+      _TopAction(
+        id: 'timer',
+        icon: isTimerActive ? Icons.timer : Icons.timer_outlined,
+        label: isTimerActive ? '定时关闭（${_formatTimer(controller.timerMinutes.value)}）' : '定时关闭',
+        active: isTimerActive,
+        onTap: () => _showTimerPicker(context),
+      ),
+    );
 
     // 5. 跳过片头片尾（进「更多」）
-    final isSkipActive = controller.skipStartDuration.value > 0 ||
-        controller.skipEndDuration.value > 0;
-    actions.add(_TopAction(
-      id: 'skip',
-      icon: Icons.skip_next,
-      label: isSkipActive ? '跳过片头片尾（已启用）' : '跳过片头片尾',
-      active: isSkipActive,
-      onTap: () => _showSkipDialog(context),
-    ));
+    final isSkipActive = controller.skipStartDuration.value > 0 || controller.skipEndDuration.value > 0;
+    actions.add(
+      _TopAction(
+        id: 'skip',
+        icon: Icons.skip_next,
+        label: isSkipActive ? '跳过片头片尾（已启用）' : '跳过片头片尾',
+        active: isSkipActive,
+        onTap: () => _showSkipDialog(context),
+      ),
+    );
 
     // 6-7. 洛雪渠道专属（进「更多」）
     if (controller.isLxChannel) {
-      actions.add(_TopAction(
-        id: 'addToPlaylist',
-        icon: Icons.playlist_add_rounded,
-        label: '添加到歌单',
-        active: false,
-        onTap: _lxAddToPlaylist,
-      ));
-      actions.add(_TopAction(
-        id: 'download',
-        icon: Icons.download_rounded,
-        label: '下载',
-        active: false,
-        onTap: _lxDownload,
-      ));
+      actions.add(
+        _TopAction(
+          id: 'addToPlaylist',
+          icon: Icons.playlist_add_rounded,
+          label: '添加到歌单',
+          active: false,
+          onTap: _lxAddToPlaylist,
+        ),
+      );
+      actions.add(
+        _TopAction(
+          id: 'download',
+          icon: Icons.download_rounded,
+          label: '下载',
+          active: false,
+          onTap: _lxDownload,
+        ),
+      );
     }
 
     return actions;
@@ -854,9 +891,7 @@ class PlayerCardState extends State<PlayerCard>
   /// - 图标保持 24dp，视觉大小不变
   Widget _buildIconButton(_TopAction action, ColorScheme colorScheme) {
     final isEnabled = action.onTap != null;
-    final color = !isEnabled
-        ? Colors.white.withOpacity(0.3)
-        : (action.active ? colorScheme.primary : Colors.white);
+    final color = !isEnabled ? Colors.white.withOpacity(0.3) : (action.active ? colorScheme.primary : Colors.white);
 
     return IconButton(
       iconSize: 24,
@@ -917,23 +952,21 @@ class PlayerCardState extends State<PlayerCard>
               (action) => ListTile(
                 leading: Icon(
                   action.icon,
-                  color: action.active
-                      ? colorScheme.primary
-                      : colorScheme.onSurfaceVariant,
+                  color: action.active ? colorScheme.primary : colorScheme.onSurfaceVariant,
                 ),
                 title: Text(
                   action.label,
                   style: TextStyle(
-                    color: action.active
-                        ? colorScheme.primary
-                        : colorScheme.onSurface,
-                    fontWeight:
-                        action.active ? FontWeight.w600 : FontWeight.normal,
+                    color: action.active ? colorScheme.primary : colorScheme.onSurface,
+                    fontWeight: action.active ? FontWeight.w600 : FontWeight.normal,
                   ),
                 ),
                 trailing: action.active
-                    ? Icon(Icons.check_circle,
-                        color: colorScheme.primary, size: 20)
+                    ? Icon(
+                        Icons.check_circle,
+                        color: colorScheme.primary,
+                        size: 20,
+                      )
                     : null,
                 onTap: action.onTap == null
                     ? null
@@ -977,9 +1010,7 @@ class PlayerCardState extends State<PlayerCard>
         final position = snapshot.data ?? Duration.zero;
         final duration = controller.duration;
 
-        final progress = duration.inSeconds > 0
-            ? position.inSeconds / duration.inSeconds
-            : 0.0;
+        final progress = duration.inSeconds > 0 ? position.inSeconds / duration.inSeconds : 0.0;
 
         return Column(
           children: [
@@ -1012,13 +1043,11 @@ class PlayerCardState extends State<PlayerCard>
                 children: [
                   Text(
                     seconds2duration(position.inSeconds),
-                    style: const TextStyle(
-                        color: Colors.white70, fontSize: 11),
+                    style: const TextStyle(color: Colors.white70, fontSize: 11),
                   ),
                   Text(
                     seconds2duration(duration.inSeconds),
-                    style: const TextStyle(
-                        color: Colors.white70, fontSize: 11),
+                    style: const TextStyle(color: Colors.white70, fontSize: 11),
                   ),
                 ],
               ),
@@ -1048,16 +1077,16 @@ class PlayerCardState extends State<PlayerCard>
           icon: const Icon(Icons.skip_previous, color: Colors.white),
         ),
         const SizedBox(width: 20),
-        Obx(() => IconButton(
-              iconSize: 56,
-              onPressed: controller.togglePlay,
-              icon: Icon(
-                controller.playing.value
-                    ? Icons.pause_circle_filled
-                    : Icons.play_circle_filled,
-                color: colorScheme.primary,
-              ),
-            )),
+        Obx(
+          () => IconButton(
+            iconSize: 56,
+            onPressed: controller.togglePlay,
+            icon: Icon(
+              controller.playing.value ? Icons.pause_circle_filled : Icons.play_circle_filled,
+              color: colorScheme.primary,
+            ),
+          ),
+        ),
         const SizedBox(width: 20),
         IconButton(
           iconSize: 36,
@@ -1104,10 +1133,10 @@ class _VinylPage extends StatelessWidget {
       builder: (context, constraints) {
         final availableHeight = constraints.maxHeight;
         final availableWidth = constraints.maxWidth;
-        final maxSize = (availableHeight < availableWidth
-                ? availableHeight * 0.5
-                : availableWidth * 0.5)
-            .clamp(100.0, 300.0);
+        final maxSize = (availableHeight < availableWidth ? availableHeight * 0.5 : availableWidth * 0.5).clamp(
+          100.0,
+          300.0,
+        );
 
         final controller = Get.find<MusicPlayerController>();
 
@@ -1115,21 +1144,20 @@ class _VinylPage extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Obx(() => SizedBox(
-                  height: maxSize,
-                  child: VinylRecordWidget(
-                    coverUrl: controller.coverUrl.value,
-                    isPlaying: controller.playing.value,
-                  ),
-                )),
+            Obx(
+              () => SizedBox(
+                height: maxSize,
+                child: VinylRecordWidget(
+                  coverUrl: controller.coverUrl.value,
+                  isPlaying: controller.playing.value,
+                ),
+              ),
+            ),
             const SizedBox(height: 12),
             Obx(() {
               final episodes = controller.playlist;
               final index = controller.currentIndex.value;
-              final name =
-                  episodes.isNotEmpty && index < episodes.length
-                      ? episodes[index].name
-                      : '未选择歌曲';
+              final name = episodes.isNotEmpty && index < episodes.length ? episodes[index].name : '未选择歌曲';
               return Text(
                 name,
                 style: const TextStyle(
@@ -1143,17 +1171,17 @@ class _VinylPage extends StatelessWidget {
               );
             }),
             const SizedBox(height: 4),
-            Obx(() => Text(
-                  controller.author.value.isNotEmpty
-                      ? controller.author.value
-                      : controller.albumName.value,
-                  style: const TextStyle(
-                    fontSize: 11,
-                    color: Colors.white70,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                )),
+            Obx(
+              () => Text(
+                controller.author.value.isNotEmpty ? controller.author.value : controller.albumName.value,
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: Colors.white70,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
           ],
         );
       },
@@ -1168,14 +1196,16 @@ class _PlayModeButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final controller = Get.find<MusicPlayerController>();
-    return Obx(() => IconButton(
-          iconSize: 28,
-          onPressed: controller.togglePlayMode,
-          icon: Icon(
-            controller.playMode.value.icon,
-            color: Colors.white,
-          ),
-        ));
+    return Obx(
+      () => IconButton(
+        iconSize: 28,
+        onPressed: controller.togglePlayMode,
+        icon: Icon(
+          controller.playMode.value.icon,
+          color: Colors.white,
+        ),
+      ),
+    );
   }
 }
 

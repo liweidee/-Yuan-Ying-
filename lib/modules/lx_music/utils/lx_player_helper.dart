@@ -50,10 +50,15 @@ class LxPlayerHelper {
       episodes,
       initialIndex: index,
       vodId: vodId,
+      channel: 'lx',
       urlFetcher: (episode) async {
         // episode.url 存的是 LxMusic.id（见 LxEpisodeConverter.toEpisode）
         final music = musicMap[episode.url];
         if (music == null) return null;
+
+        // 自动切歌、系统控制栏切歌和队列点歌都会经过这里。
+        // PlayerCard 的收藏、添加歌单和下载依赖该静态变量，必须同步为当前曲目。
+        currentLxMusic = music;
 
         // 同步元数据（封面/歌手/专辑），让锁屏切歌时更新封面
         controller.updateSongInfo(
@@ -61,6 +66,12 @@ class LxPlayerHelper {
           author: music.singer,
           album: music.album,
         );
+
+        // 播放器内部的下一首/自动连播不会经过 playList 的首次加载路径，
+        // 必须在统一 urlFetcher 中为当前曲目重新请求歌词。
+        final episodeKey = controller.currentEpisodeKey;
+        controller.setLyricForEpisode(episodeKey, '');
+        _fetchLyric(music, controller, episodeKey);
 
         final quality = await LxSettingsStorage.instance.getQuality();
         final url = await LxMusicUrlService.instance.getMusicUrl(
@@ -75,6 +86,10 @@ class LxPlayerHelper {
         );
       },
     );
+
+    // 用户明确点击了某一首，优先使用该索引；setPlaylist 可能恢复上次索引。
+    // 提前同步索引也能确保首次歌词结果通过 episodeKey 的过期保护。
+    controller.currentIndex.value = index;
 
     final url = await _fetchUrl(music);
     if (url == null || url.isEmpty) {
@@ -93,11 +108,16 @@ class LxPlayerHelper {
       album: music.album,
     );
 
-    _fetchLyric(music, controller);
+    final episodeKey = controller.episodeKeyAt(index);
+    controller.setLyricForEpisode(episodeKey, '');
+    _fetchLyric(music, controller, episodeKey);
 
     await controller.playWithUrl(playUrl, index: index);
 
-    await _saveToLxHistory(music);
+    if (controller.currentTrackId == music.id &&
+        controller.lastPlaybackSucceeded) {
+      await _saveToLxHistory(music);
+    }
 
     _navigateToDetail(musics, index);
   }
@@ -115,17 +135,25 @@ class LxPlayerHelper {
     }
   }
 
-  static void _fetchLyric(LxMusic music, MusicPlayerController controller) {
-    LxLyricApiService.instance.getLyric(music).then((lyricData) {
-      if (lyricData == null) return;
-      final lrc = lyricData['lyric'];
-      if (lrc != null && lrc.isNotEmpty) {
-        controller.setLyric(lrc);
-        LxLogger.info('歌词已设置 (${lrc.length} 字符)');
-      }
-    }).catchError((e) {
-      LxLogger.warn('歌词获取失败: $e');
-    });
+  static void _fetchLyric(
+    LxMusic music,
+    MusicPlayerController controller,
+    String? episodeKey,
+  ) {
+    LxLyricApiService.instance
+        .getLyric(music)
+        .then((lyricData) {
+          if (lyricData == null) return;
+          final lrc = lyricData['lyric'];
+          if (lrc != null && lrc.isNotEmpty) {
+            if (controller.setLyricForEpisode(episodeKey, lrc)) {
+              LxLogger.info('歌词已设置 (${lrc.length} 字符)');
+            }
+          }
+        })
+        .catchError((e) {
+          LxLogger.warn('歌词获取失败: $e');
+        });
   }
 
   static Future<void> _saveToLxHistory(LxMusic music) async {
@@ -152,10 +180,13 @@ class LxPlayerHelper {
 
   static void _navigateToDetail(List<LxMusic> musics, int index) {
     Future.delayed(const Duration(milliseconds: 300), () {
-      Get.toNamed('/lx_music_detail', arguments: {
-        'musics': musics,
-        'index': index,
-      });
+      Get.toNamed(
+        '/lx_music_detail',
+        arguments: {
+          'musics': musics,
+          'index': index,
+        },
+      );
     });
   }
 }

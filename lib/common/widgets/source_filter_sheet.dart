@@ -93,6 +93,7 @@ class _SourceFilterSheetContentState extends State<_SourceFilterSheetContent> {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
+
     // 获取底部安全区域高度，用于 iOS 等设备的底部预留
     final bottomSafeArea = MediaQuery.of(context).padding.bottom;
 
@@ -109,7 +110,6 @@ class _SourceFilterSheetContentState extends State<_SourceFilterSheetContent> {
           ),
         ),
         const SizedBox(height: 8),
-
         // 全选/全不选 + 关闭按钮
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -145,7 +145,6 @@ class _SourceFilterSheetContentState extends State<_SourceFilterSheetContent> {
                 ],
               ),
               const SizedBox(height: 8),
-
               // 搜索框
               TextField(
                 controller: _searchController,
@@ -181,15 +180,12 @@ class _SourceFilterSheetContentState extends State<_SourceFilterSheetContent> {
             ],
           ),
         ),
-
         const SizedBox(height: 12),
-
         // 分隔线
         Container(
           height: 1,
           color: colorScheme.outline.withOpacity(0.1),
         ),
-
         // 源列表（双列网格）
         Expanded(
           child: Obx(() {
@@ -209,12 +205,12 @@ class _SourceFilterSheetContentState extends State<_SourceFilterSheetContent> {
 
             return GridView.builder(
               controller: widget.scrollController,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
               gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: 2,
-                crossAxisSpacing: 0,
-                mainAxisSpacing: 0,
-                childAspectRatio: 5.5,
+                crossAxisSpacing: 8,
+                mainAxisSpacing: 8,
+                mainAxisExtent: 44,
               ),
               itemCount: sites.length,
               itemBuilder: (context, index) {
@@ -224,20 +220,10 @@ class _SourceFilterSheetContentState extends State<_SourceFilterSheetContent> {
                 final enabled = filterService.isSourceEnabled(key);
 
                 return Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   decoration: BoxDecoration(
-                    border: Border(
-                      right: (index % 2 == 0)
-                          ? BorderSide(
-                              color: colorScheme.outline.withOpacity(0.1),
-                              width: 0.5,
-                            )
-                          : BorderSide.none,
-                      bottom: BorderSide(
-                        color: colorScheme.outline.withOpacity(0.1),
-                        width: 0.5,
-                      ),
-                    ),
+                    color: colorScheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(10),
                   ),
                   child: Row(
                     children: [
@@ -253,8 +239,6 @@ class _SourceFilterSheetContentState extends State<_SourceFilterSheetContent> {
                                 filterService.toggleSourceEnabled(key, value);
                               });
                             },
-                            activeColor: colorScheme.primary,
-                            inactiveThumbColor: colorScheme.outline,
                             materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                           ),
                         ),
@@ -275,7 +259,6 @@ class _SourceFilterSheetContentState extends State<_SourceFilterSheetContent> {
             );
           }),
         ),
-
         // 底部："只搜默认源"
         // 增加底部安全区域 padding，避免在 iPhone 上与 Home Indicator 重叠
         Padding(

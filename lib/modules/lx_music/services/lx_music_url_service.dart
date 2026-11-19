@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import '../models/lx_music_model.dart';
 import '../models/lx_script_model.dart';
 import '../utils/lx_logger.dart';
@@ -26,7 +28,16 @@ class LxMusicUrlService {
   Future<String?> getMusicUrl({
     required LxMusic music,
     String quality = '320k',
+    bool preferLocal = true,
   }) async {
+    if (preferLocal) {
+      final localUrl = await _getExistingLocalUrl(music);
+      if (localUrl != null) {
+        LxLogger.info('使用本地下载播放: $localUrl');
+        return localUrl;
+      }
+    }
+
     final source = music.source ?? 'kw';
 
     // 内置解析器优先：咪咕音乐
@@ -49,8 +60,7 @@ class LxMusicUrlService {
       return null;
     }
 
-    final scriptActions =
-        _engine.sources[source]?.actions ?? const <String>[];
+    final scriptActions = _engine.sources[source]?.actions ?? const <String>[];
     if (scriptActions.isNotEmpty && !scriptActions.contains('musicUrl')) {
       LxLogger.warn('脚本未声明支持 musicUrl ($source)，跳过');
       return null;
@@ -71,9 +81,7 @@ class LxMusicUrlService {
       quality: actualQuality,
     );
 
-    if ((url == null || url.isEmpty) &&
-        actualQuality != '128k' &&
-        _engine.lastScriptError == null) {
+    if ((url == null || url.isEmpty) && actualQuality != '128k' && _engine.lastScriptError == null) {
       LxLogger.warn('$actualQuality 获取失败（无结果），尝试 128k 兜底');
       url = await _engine.getMusicUrl(
         apiId: apiId,
@@ -94,19 +102,40 @@ class LxMusicUrlService {
     final lastErr = _engine.lastScriptError;
     LxLogger.error('用户 API 获取 URL 失败 (lastError=$lastErr)');
     if (lastErr != null) {
-      throw LxMusicUrlException(lastErr,
-          retryable: !LxMusicUrlException.isFatal(lastErr));
+      throw LxMusicUrlException(
+        lastErr,
+        retryable: !LxMusicUrlException.isFatal(lastErr),
+      );
     }
 
     return null;
+  }
+
+  Future<String?> _getExistingLocalUrl(LxMusic music) async {
+    final raw = music.songUrl?.trim();
+    if (raw == null || raw.isEmpty) return null;
+
+    final lower = raw.toLowerCase();
+    if (lower.startsWith('http://') || lower.startsWith('https://')) {
+      return null;
+    }
+
+    try {
+      final uri = Uri.tryParse(raw);
+      final path = uri?.scheme == 'file' ? uri!.toFilePath() : raw;
+      if (!await File(path).exists()) return null;
+      return uri?.scheme == 'file' ? uri.toString() : Uri.file(path).toString();
+    } catch (e) {
+      LxLogger.warn('检查本地下载文件失败: $e');
+      return null;
+    }
   }
 
   /// 音质预选
   String pickQuality(String source, LxMusic music, String preferred) {
     const order = ['flac24bit', 'flac', '320k', '192k', '128k'];
     final declared = _engine.sources[source]?.qualitys ?? const <String>[];
-    final musicTypes =
-        music.types?.map((t) => t.type).toSet() ?? const <String>{};
+    final musicTypes = music.types?.map((t) => t.type).toSet() ?? const <String>{};
 
     final reqIdx = order.indexOf(preferred);
     if (reqIdx < 0) return '128k';
@@ -132,8 +161,7 @@ class LxMusicUrlService {
     if (!_engine.isActive) return null;
     if (!_engine.sources.containsKey(source)) return null;
 
-    final scriptActions =
-        _engine.sources[source]?.actions ?? const <String>[];
+    final scriptActions = _engine.sources[source]?.actions ?? const <String>[];
     if (scriptActions.isNotEmpty && !scriptActions.contains('musicUrl')) {
       return null;
     }

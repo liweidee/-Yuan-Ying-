@@ -4,7 +4,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 
-import 'package:yuanying/core/theme/style.dart';
 import 'package:yuanying/models/common/enum_with_label.dart';
 import 'package:yuanying/plugin/pl_player/controller.dart';
 import 'package:collection/collection.dart';
@@ -31,10 +30,6 @@ class ShutdownTimerService {
   int _durationInMinutes = 0;
   _ShutdownType _shutdownType = _ShutdownType.pause;
 
-  bool _isWaiting = false;
-  bool get isWaiting => _isWaiting;
-  bool _waitUntilCompleted = false;
-
   void _stopTimer() {
     if (_shutdownTimer != null) {
       _shutdownTimer!.cancel();
@@ -44,7 +39,6 @@ class ShutdownTimerService {
 
   void reset([int durationInMinutes = 0]) {
     _stopTimer();
-    _isWaiting = false;
     _durationInMinutes = durationInMinutes;
   }
 
@@ -65,35 +59,14 @@ class ShutdownTimerService {
     switch (_shutdownType) {
       case _ShutdownType.pause:
         final player = PlPlayerController.instanceExists() ? PlPlayerController.getInstance() : null;
-final isPlaying = this.isPlaying?.call() ?? player?.playerStatus.value.isPlaying ?? false;
+        final isPlaying = this.isPlaying?.call() ??
+            player?.playerStatus.value.isPlaying ??
+            false;
         if (isPlaying) {
-          if (_waitUntilCompleted) {
-            _isWaiting = true;
-          } else {
-            _durationInMinutes = 0;
-            (onPause ?? player?.pause)?.call();
-            SmartDialog.showToast('定时时间已到，已暂停');
-          }
+          _durationInMinutes = 0;
+          (onPause ?? player?.pause)?.call();
+          SmartDialog.showToast('定时时间已到，已暂停');
         }
-      case _ShutdownType.exit:
-        if (_waitUntilCompleted) {
-          final isPlaying = this.isPlaying?.call() ??
-    (PlPlayerController.instanceExists() ? PlPlayerController.getInstance().playerStatus.value.isPlaying : false);
-          if (isPlaying) {
-            _isWaiting = true;
-            return;
-          }
-        }
-        _syncProgressAndExit();
-    }
-  }
-
-  void handleWaiting() {
-    switch (_shutdownType) {
-      case _ShutdownType.pause:
-        _isWaiting = false;
-        _durationInMinutes = 0;
-        SmartDialog.showToast('定时时间已到，已暂停');
       case _ShutdownType.exit:
         _syncProgressAndExit();
     }
@@ -192,27 +165,6 @@ final isPlaying = this.isPlaying?.call() ?? player?.playerStatus.value.isPlaying
                         });
                       },
                       title: const Text('自定义', style: titleStyle),
-                    ),
-                    ListTile(
-                      dense: true,
-                      onTap: () {
-                        setState(() {
-                          _waitUntilCompleted = !_waitUntilCompleted;
-                        });
-                      },
-                      title: const Text('额外等待视频播放完毕', style: titleStyle),
-                      trailing: Transform.scale(
-                        alignment: Alignment.centerRight,
-                        scale: 0.8,
-                        child: Switch(
-                          value: _waitUntilCompleted,
-                          onChanged: (value) {
-                            setState(() {
-                              _waitUntilCompleted = value;
-                            });
-                          },
-                        ),
-                      ),
                     ),
                     Padding(
                       padding: const EdgeInsets.only(left: 18, bottom: 12),

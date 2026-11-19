@@ -182,9 +182,18 @@ class GStorage {
   static Future<void> addFavorite(Map<String, dynamic> item) async {
     final list = getFavorites();
     final itemApiUrl = item['api_url']?.toString() ?? '';
-    final exists = list.any((e) =>
-        e['vod_id'] == item['vod_id'] &&
-        (e['api_url']?.toString() ?? '') == itemApiUrl);
+    final itemEpisodeUrl = item['episode_url']?.toString() ?? '';
+    final itemDetailType = item['detail_type']?.toString() ?? '';
+    final exists = list.any((e) {
+      final sameParent =
+          e['vod_id'] == item['vod_id'] &&
+          (e['api_url']?.toString() ?? '') == itemApiUrl;
+      if (!sameParent) return false;
+      if (itemEpisodeUrl.isEmpty) return true;
+
+      return (e['detail_type']?.toString() ?? '') == itemDetailType &&
+          (e['episode_url']?.toString() ?? '') == itemEpisodeUrl;
+    });
     if (!exists) {
       list.add(item);
       await saveFavorites(list);
@@ -195,6 +204,38 @@ class GStorage {
     final list = getFavorites();
     list.removeWhere(
       (e) => e['vod_id'] == vodId && (e['api_url']?.toString() ?? '') == apiUrl,
+    );
+    await saveFavorites(list);
+  }
+
+  static bool isAudioFavorite({
+    required String vodId,
+    required String apiUrl,
+    required String episodeUrl,
+  }) {
+    if (episodeUrl.isEmpty) return false;
+    return getFavorites().any(
+      (item) =>
+          item['vod_id'] == vodId &&
+          (item['api_url']?.toString() ?? '') == apiUrl &&
+          (item['detail_type']?.toString() ?? '') == 'audio' &&
+          (item['episode_url']?.toString() ?? '') == episodeUrl,
+    );
+  }
+
+  static Future<void> removeAudioFavorite({
+    required String vodId,
+    required String apiUrl,
+    required String episodeUrl,
+  }) async {
+    if (episodeUrl.isEmpty) return;
+    final list = getFavorites();
+    list.removeWhere(
+      (item) =>
+          item['vod_id'] == vodId &&
+          (item['api_url']?.toString() ?? '') == apiUrl &&
+          (item['detail_type']?.toString() ?? '') == 'audio' &&
+          (item['episode_url']?.toString() ?? '') == episodeUrl,
     );
     await saveFavorites(list);
   }

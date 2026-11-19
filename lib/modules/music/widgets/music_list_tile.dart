@@ -35,7 +35,11 @@ class MusicListTile extends StatelessWidget {
         height: 32,
         child: Center(
           child: isCurrent
-              ? Icon(Icons.equalizer, size: 20, color: colorScheme.primary)
+              ? Icon(
+                  isPlaying ? Icons.equalizer : Icons.pause_rounded,
+                  size: 20,
+                  color: colorScheme.primary,
+                )
               : Text(
                   '${index + 1}',
                   style: TextStyle(

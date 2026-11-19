@@ -10,6 +10,7 @@ import '../models/lx_download_model.dart';
 import '../models/lx_music_model.dart';
 import '../storage/lx_storage.dart';
 import '../utils/lx_logger.dart';
+import '../../../utils/storage_manager.dart';
 
 /// 洛雪音乐下载服务
 class LxDownloadService {
@@ -66,10 +67,8 @@ class LxDownloadService {
   /// 尝试从项目的 SettingBox 读取 downloadPath（避免强依赖，做容错）
   String? _readSettingDownloadPath() {
     try {
-      // 用 Hive 直接读 app_settings box（与项目 SettingBoxKey.downloadPath 对应）
-      // 这里用同步方式；如果 box 未打开则返回 null
-      // 由于 Hive box 是懒加载的，这里用 try-catch 兜底
-      return null; // 保守：不读设置，直接用应用目录。如需读取请告知我补充
+      final path = StorageManager.getSetting<String>(SettingBoxKey.downloadPath);
+      return path?.trim();
     } catch (_) {
       return null;
     }

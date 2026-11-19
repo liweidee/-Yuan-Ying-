@@ -18,20 +18,14 @@ class LxDownloadController extends GetxController {
 
   StreamSubscription<LxDownloadTask>? _taskSub;
 
-  int get downloadingCount => queue
-      .where((t) =>
-          t.status == LxDownloadStatus.downloading ||
-          t.status == LxDownloadStatus.pending)
-      .length;
+  int get downloadingCount =>
+      queue.where((t) => t.status == LxDownloadStatus.downloading || t.status == LxDownloadStatus.pending).length;
 
-  int get completedCount =>
-      queue.where((t) => t.status == LxDownloadStatus.completed).length;
+  int get completedCount => queue.where((t) => t.status == LxDownloadStatus.completed).length;
 
-  int get failedCount =>
-      queue.where((t) => t.status == LxDownloadStatus.failed).length;
+  int get failedCount => queue.where((t) => t.status == LxDownloadStatus.failed).length;
 
-  bool isDownloaded(String musicId) =>
-      downloadedSongs.any((s) => s.id == musicId);
+  bool isDownloaded(String musicId) => downloadedSongs.any((s) => s.id == musicId);
 
   @override
   void onInit() {
@@ -85,7 +79,10 @@ class LxDownloadController extends GetxController {
   /// 供 UI 层取下载地址（不触发下载）
   Future<String?> serviceUrlFor(LxMusic music) async {
     try {
-      return await LxMusicUrlService.instance.getMusicUrl(music: music);
+      return await LxMusicUrlService.instance.getMusicUrl(
+        music: music,
+        preferLocal: false,
+      );
     } catch (e) {
       LxLogger.warn('取下载URL失败: $e');
       return null;

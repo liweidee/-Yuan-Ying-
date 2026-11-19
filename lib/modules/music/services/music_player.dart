@@ -3,8 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:yuanying/t4/models/video_detail.dart';
-import 'package:yuanying/modules/music/services/music_source.dart';
-import 'package:yuanying/utils/toast_utils.dart';
 import 'package:yuanying/utils/storage_manager.dart';
 import 'package:yuanying/core/constants/storage_keys.dart';
 
@@ -74,11 +72,6 @@ class MusicPlayer {
       final playUrl = url ?? music.url;
       await _audio.setUrl(playUrl, headers: headers ?? {});
       await _audio.play();
-    } catch (e) {
-      if (e is PlayerInterruptedException) {
-        return;
-      }
-      ToastUtils.show('播放失败：$e');
     } finally {
       isLoading = false;
     }
