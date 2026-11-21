@@ -90,6 +90,8 @@ import 'package:yuanying/modules/sandbox/services/sandbox_service_store.dart';
 import 'package:yuanying/modules/setting/controllers/bg_config_controller.dart';
 import 'package:yuanying/common/widgets/app_background_layer.dart';
 import 'package:yuanying/utils/android_pip_helper.dart';
+import 'package:yuanying/utils/ios_pip_helper.dart';
+import 'package:yuanying/modules/video/controllers/video_controller.dart';
 
 // ============================================================================
 // 全局变量
@@ -251,6 +253,11 @@ void main() async {
   );
 
   AndroidPipHelper.init();
+  if (Platform.isIOS) {
+    await IosPipHelper.instance.initialize(
+      onRestorePage: _restoreIosPipPage,
+    );
+  }
 
   // 配置 iOS 音频会话（Android 上也有益，但 iOS 上是必须的）
   final session = await AudioSession.instance;
@@ -648,6 +655,20 @@ class _WindowListener extends WindowListener {
 
   @override
   void onWindowUnfocused() {}
+}
+
+Future<bool> _restoreIosPipPage(Map<String, dynamic> arguments) async {
+  final navigator = Get.key.currentState;
+  if (navigator == null) return false;
+  final tag = DetailController.generateTag(prefix: 'detail_pip_restore');
+  navigator.pushNamed(
+    AppPages.detail,
+    arguments: <String, dynamic>{
+      ...arguments,
+      '_controllerTag': tag,
+    },
+  );
+  return true;
 }
 
 class MyApp extends StatelessWidget {

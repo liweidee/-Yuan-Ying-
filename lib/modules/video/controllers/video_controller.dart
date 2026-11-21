@@ -47,6 +47,7 @@ import 'package:yuanying/services/external_player_service.dart';
 import 'package:yuanying/plugin/pl_player/models/external_player_type.dart';
 import 'package:yuanying/modules/setting/views/play_setting_page.dart';
 import 'package:yuanying/services/ad_block_proxy_service.dart';
+import 'package:yuanying/utils/ios_pip_helper.dart';
 
 import 'package:yuanying/modules/download/models/cache_entry.dart';
 import 'package:yuanying/modules/download/services/cache_service.dart';
@@ -111,6 +112,10 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
   /// null = 接口未指定；1 = DASH；0 = 非 DASH
   int? _currentPlayUrlIsDash;
 
+  Map<String, int>? Function()? _iosPipSourceRectProvider;
+  int? _iosPipOriginalEpisodeIndex;
+  bool _iosPipWasPlaying = false;
+
   /// 当前播放源的 DASH 外挂音频直链（非 DASH 源为 null）
   ///
   /// `_startPlay` / `switchQuality` 解析 MPD 后写入；
@@ -120,6 +125,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
 
   final RxBool isPlaying = false.obs;
   bool _isDirectPushMode = false;
+  bool _pipRestoreAutoPlay = false;
 
   /// 是否为合并列表模式（懒加载：每集先 getDetail 再 getPlayUrl）
   bool _isMergeListMode = false;
@@ -840,6 +846,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
 
     final args = Get.arguments;
     if (args is Map) {
+      _pipRestoreAutoPlay = args['pipRestoreAutoPlay'] == true;
       // ---- 合并列表模式（优先级最高，命中即返回） ----
       if (args['mergeDetail'] is VideoDetail) {
         _initMergeListMode(args);
@@ -1077,7 +1084,13 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     // ============================================================
     _locateCurrentEpisodeInPushMode(detail, url, title);
 
-    _playDirect(url);
+    final resumeSeconds = args['resumePositionSeconds'];
+    _playDirect(
+      url,
+      seekTo: resumeSeconds is num && resumeSeconds > 0
+          ? Duration(seconds: resumeSeconds.toInt())
+          : null,
+    );
 
     // Web 源解析器注入（可选）
     final resolver = args['webResolver'];
@@ -1183,11 +1196,15 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     introController.switchEpisode(startIdx);
 
     // ---- 10. 走 API 播放（_isDirectPushMode 保持 false）----
+    final mergeResumeSeconds = args['resumePositionSeconds'];
     _playEpisode(
       _currentEpisode!,
       sourceIndex: 0,
       episodeIndex: startIdx,
       autoPlay: true,
+      seekTo: mergeResumeSeconds is num && mergeResumeSeconds > 0
+          ? Duration(seconds: mergeResumeSeconds.toInt())
+          : null,
     );
   }
 
@@ -1291,7 +1308,8 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
             }
 
             // 非推送链接：根据自动播放开关决定是否自动播放
-            final bool autoPlay = PlayerPref.autoPlayEnable;
+            final bool autoPlay =
+                _pipRestoreAutoPlay || PlayerPref.autoPlayEnable;
             if (autoPlay) {
               _showPlayLoading();
             }
@@ -1384,7 +1402,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     final posSec = resume.positionSeconds ?? 0;
     final seekTo = posSec > 0 ? Duration(seconds: posSec) : null;
 
-    final bool autoPlay = PlayerPref.autoPlayEnable;
+    final bool autoPlay = _pipRestoreAutoPlay || PlayerPref.autoPlayEnable;
     if (autoPlay) _showPlayLoading();
     try {
       await _playEpisode(
@@ -2705,6 +2723,343 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     playerController.toggleDanmaku();
   }
 
+  void setIosPipSourceRectProvider(
+    Map<String, int>? Function()? provider,
+  ) {
+    _iosPipSourceRectProvider = provider;
+  }
+
+  bool get canEnterIosPictureInPicture {
+    if (!Platform.isIOS || currentPlayUrl.value.isEmpty) return false;
+    if (playerController.dataStatus.value != DataStatus.loaded) return false;
+    if (_currentPlayUrlIsDash == 1) return false;
+    if (_currentAudioUrl != null && _currentAudioUrl!.isNotEmpty) return false;
+    return _isAvPlayerCandidateUrl(currentPlayUrl.value);
+  }
+
+  bool _isAvPlayerCandidateUrl(String url) {
+    final value = url.trim();
+    if (value.isEmpty) return false;
+    final uri = Uri.tryParse(value);
+    if (uri == null) return false;
+    if (uri.scheme == 'file') return true;
+    if (uri.scheme == 'http' || uri.scheme == 'https') return true;
+    return File(value).existsSync();
+  }
+
+  Future<bool> enterIosPictureInPicture() async {
+    if (!Platform.isIOS) return false;
+    if (!canEnterIosPictureInPicture) {
+      SmartDialog.showToast('当前视频暂不支持进入 iOS 画中画');
+      return false;
+    }
+    if (!IosPipHelper.instance.isSupported.value) {
+      await IosPipHelper.instance.refreshStatus();
+    }
+    if (!IosPipHelper.instance.isSupported.value) {
+      SmartDialog.showToast('当前设备或系统不支持画中画');
+      return false;
+    }
+
+    final wasPlaying = playerController.playerStatus.value.isPlaying;
+    final position = playerController.position;
+    _iosPipWasPlaying = wasPlaying;
+    _iosPipOriginalEpisodeIndex = _currentEpisodeIndex;
+
+    if (wasPlaying) {
+      await playerController.pause();
+    }
+    isPlaying.value = false;
+    SmartDialog.showToast('正在启动画中画...');
+
+    final rect = _iosPipSourceRectProvider?.call();
+    final videoWidth = playerController.videoWidth.value;
+    final videoHeight = playerController.videoHeight.value;
+    final pipHeaders = Map<String, String>.from(currentHeaders.value);
+    final pipUrl = _wrapUrlIfNeeded(
+      currentPlayUrl.value,
+      headers: pipHeaders,
+    );
+    final sourceSnapshot = introController.getCurrentPlaySource();
+    final detailSnapshot = introController.videoDetail.value;
+    final siteSnapshot =
+        _currentSiteConfig ?? _sourceManager.currentSite.value;
+    final result = await IosPipHelper.instance.enter(
+      tag: _tag ?? 'detail',
+      url: pipUrl,
+      headers: pipHeaders,
+      positionMs: position.inMilliseconds,
+      speed: playerController.playbackSpeed,
+      episodeIndex: _currentEpisodeIndex,
+      title: introController.videoDetail.value?.vodName,
+      width: videoWidth > 0 ? videoWidth : null,
+      height: videoHeight > 0 ? videoHeight : null,
+      sourceRect: rect,
+      restoreArguments: (positionMs) => _buildIosPipRestoreArguments(
+        positionMs,
+        source: sourceSnapshot,
+        detail: detailSnapshot,
+        site: siteSnapshot,
+      ),
+      resolveNext: (index) => _resolveIosPipEpisode(index, sourceSnapshot),
+      nextEpisodeIndex: (index) => _nextIosPipEpisodeIndex(
+        index,
+        sourceSnapshot,
+      ),
+      onEpisodeAdvanced: (index) =>
+          _applyIosPipEpisodeAdvanced(index, sourceSnapshot),
+      onRestoreCurrent: _restoreIosPipCurrent,
+      onStatusChanged: _handleIosPipStatusChanged,
+    );
+
+    if (!result.active && !result.requested) {
+      if (wasPlaying) {
+        await playerController.play();
+        isPlaying.value = true;
+      }
+      if (result.error != null && result.error!.isNotEmpty) {
+        SmartDialog.showToast(result.error!);
+      }
+      _iosPipOriginalEpisodeIndex = null;
+      return false;
+    }
+    return true;
+  }
+
+  Future<void> stopIosPictureInPictureAndRestore() async {
+    await IosPipHelper.instance.stop();
+  }
+
+  Future<void> _handleIosPipStatusChanged(
+    bool active,
+    String? error,
+    int? positionMs,
+  ) async {
+    if (active || (error == null || error.isEmpty)) return;
+    final lower = error.toLowerCase();
+    final message =
+        lower.contains('could not be completed') ||
+            lower.contains('cannot be completed')
+        ? '当前视频暂不支持在画中画中播放'
+        : error;
+    SmartDialog.showToast(message);
+    _iosPipOriginalEpisodeIndex = null;
+    if (_iosPipWasPlaying && !isClosed) {
+      await playerController.play();
+      isPlaying.value = true;
+    }
+  }
+
+  Map<String, dynamic> _buildIosPipRestoreArguments(
+    int positionMs, {
+    required PlaySource? source,
+    required VideoDetail? detail,
+    required Map<String, dynamic>? site,
+  }) {
+    final episode = _currentEpisode;
+    if (_isDirectPushMode) {
+      return <String, dynamic>{
+        'isPush': true,
+        'directUrl': episode?.url ?? currentPlayUrl.value,
+        'directTitle': episode?.name ?? detail?.vodName ?? '画中画播放',
+        'videoDetail': detail,
+        if (_initHeaders != null) 'headers': _initHeaders,
+        'resumePositionSeconds': positionMs ~/ 1000,
+        'pipRestoreAutoPlay': true,
+      };
+    }
+
+    if (_isMergeListMode) {
+      return <String, dynamic>{
+        'mergeDetail': detail,
+        'mergeStartVodId': episode?.url ?? '',
+        'vodId': vodId,
+        'pwd': pwd,
+        if (site != null) 'site': site,
+        'resumePositionSeconds': positionMs ~/ 1000,
+        'pipRestoreAutoPlay': true,
+      };
+    }
+
+    return <String, dynamic>{
+      'vodId': vodId,
+      'pwd': pwd,
+      if (site != null) 'site': site,
+      'resumeEpisodeIndex': _currentEpisodeIndex,
+      'resumeSourceIndex': _currentSourceIndex,
+      if (source != null) 'resumeSourceName': source.name,
+      if (episode != null) 'resumeEpisodeName': episode.name,
+      'resumePositionSeconds': positionMs ~/ 1000,
+      'pipRestoreAutoPlay': true,
+    };
+  }
+
+  void _applyIosPipEpisodeAdvanced(int index, PlaySource? source) {
+    if (index < 0) return;
+    if (source == null || index >= source.episodes.length) return;
+    if (introController.videoDetail.value != null) {
+      introController.switchEpisode(index);
+    }
+    _currentEpisodeIndex = index;
+    _currentEpisode = source.episodes[index];
+    _currentSourceIndex = introController.currentSourceIndex.value;
+  }
+
+  Future<void> _restoreIosPipCurrent(
+    int positionMs,
+    int episodeIndex,
+  ) async {
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    final appVisible =
+        lifecycle == null ||
+        lifecycle == AppLifecycleState.resumed ||
+        lifecycle == AppLifecycleState.inactive;
+    final resumePlayback = _iosPipWasPlaying && appVisible;
+    final advanced =
+        _iosPipOriginalEpisodeIndex != null &&
+        _iosPipOriginalEpisodeIndex != episodeIndex;
+    _iosPipOriginalEpisodeIndex = null;
+    _pipRestoreAutoPlay = false;
+    if (advanced) {
+      final source = introController.getCurrentPlaySource();
+      if (source != null &&
+          episodeIndex >= 0 &&
+          episodeIndex < source.episodes.length) {
+        introController.switchEpisode(episodeIndex);
+        await _playEpisode(
+          source.episodes[episodeIndex],
+          sourceIndex: introController.currentSourceIndex.value,
+          episodeIndex: episodeIndex,
+          autoPlay: resumePlayback,
+          seekTo: Duration(milliseconds: positionMs),
+        );
+      }
+      return;
+    }
+
+    if (positionMs > 0) {
+      await playerController.seekTo(
+        Duration(milliseconds: positionMs),
+        isSeek: false,
+      );
+    }
+    if (resumePlayback) {
+      await playerController.play();
+      isPlaying.value = true;
+    }
+  }
+
+  Future<IosPipMedia?> _resolveIosPipEpisode(
+    int index,
+    PlaySource? source,
+  ) async {
+    if (source == null || index < 0 || index >= source.episodes.length) {
+      return null;
+    }
+    final episode = source.episodes[index];
+
+    if (_isDirectPushMode) {
+      var mediaUrl = episode.url;
+      if (!_isDirectMediaUrl(mediaUrl) && _webResolver != null) {
+        final resolved = await _webResolver!(mediaUrl);
+        if (resolved == null || resolved.isEmpty) return null;
+        mediaUrl = resolved;
+      }
+      if (!_isAvPlayerCandidateUrl(mediaUrl)) return null;
+      return IosPipMedia(
+        url: mediaUrl,
+        headers: Map<String, String>.from(
+          _initHeaders ?? const <String, String>{},
+        ),
+        episodeIndex: index,
+        episodeName: episode.name,
+      );
+    }
+
+    String playParams = episode.url;
+    String flag = source.name;
+    if (_isMergeListMode) {
+      final detail = await _apiService.getDetail(
+        vodId: episode.url,
+        pwd: pwd,
+      );
+      if (detail == null ||
+          detail.playSources.isEmpty ||
+          detail.playSources.first.episodes.isEmpty) {
+        return null;
+      }
+      playParams = detail.playSources.first.episodes.first.url;
+      flag = detail.playSources.first.name;
+    }
+
+    final playUrl = await _apiService.getPlayUrl(
+      playParams: playParams,
+      flag: flag,
+      pwd: pwd,
+    );
+    if (playUrl == null ||
+        playUrl.needParser ||
+        playUrl.needSniff ||
+        playUrl.defaultUrl == null) {
+      return null;
+    }
+    if (playUrl.isDash == 1 ||
+        (playUrl.audioUrl != null && playUrl.audioUrl!.isNotEmpty) ||
+        MpdParser.looksLikeMpd(playUrl.defaultUrl!) ||
+        !_isAvPlayerCandidateUrl(playUrl.defaultUrl!)) {
+      return null;
+    }
+
+    final headers = _prepareIosPipHeaders(
+      playUrl,
+      playUrl.defaultUrl!,
+    );
+    final url = _wrapUrlIfNeeded(
+      playUrl.defaultUrl!,
+      headers: headers,
+    );
+    return IosPipMedia(
+      url: url,
+      headers: headers,
+      episodeIndex: index,
+      episodeName: episode.name,
+    );
+  }
+
+  int? _nextIosPipEpisodeIndex(int index, PlaySource? source) {
+    if (source == null || source.episodes.isEmpty) return null;
+    switch (playerController.playRepeat) {
+      case PlayRepeat.singleCycle:
+        return index;
+      case PlayRepeat.listOrder:
+        final next = index + 1;
+        return next < source.episodes.length ? next : null;
+      case PlayRepeat.listCycle:
+        return (index + 1) % source.episodes.length;
+      case PlayRepeat.pause:
+        return null;
+    }
+  }
+
+  Map<String, String> _prepareIosPipHeaders(
+    PlayUrl playUrl,
+    String url,
+  ) {
+    var headers = _sanitizeHeaders(playUrl.headers);
+    final strategy = PlayerPref.requestHeaderStrategy;
+    if (strategy == 0 && headers.isEmpty) {
+      final domain = _extractDomain(url);
+      headers['User-Agent'] =
+          _isCloudStorage(domain) ? BrowserUa.mob : BrowserUa.pc;
+    } else if (strategy == 1) {
+      headers['User-Agent'] = BrowserUa.pc;
+    } else if (strategy == 2) {
+      final accept = headers['Accept'] ?? '*/*';
+      headers = <String, String>{'Accept': accept};
+    }
+    return headers;
+  }
+
   /// 标记片头：当前播放位置在开头 180 秒内合法
   /// 返回 null 表示成功，返回 String 表示失败原因（用于 toast）
   String? markTipStart(Duration position) {
@@ -3288,6 +3643,8 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
 
   @override
   void onClose() {
+    IosPipHelper.instance.notifyPlayerDisposed(_tag ?? 'detail');
+
     // 停止录制
     if (playerController.isRecording.value) {
       playerController.stopRecording();
@@ -3474,7 +3831,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
   }
 
   /// 直链播放（跳过详情 API 请求）
-  Future<void> _playDirect(String url) async {
+  Future<void> _playDirect(String url, {Duration? seekTo}) async {
     currentPlayUrl.value = url;
     currentQualities.value = [PlayQuality(label: '直链', url: url)];
     // 直链模式无 DASH 外挂音频概念，清掉上一个源可能残留的音频直链
@@ -3529,7 +3886,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
       await playerController.setDataSource(
         dataSource,
         autoplay: true,
-        seekTo: null,
+        seekTo: seekTo,
         vodId: '直链播放',
       );
 

@@ -27,6 +27,7 @@ import 'package:yuanying/common/assets.dart';
 import 'package:yuanying/plugin/pl_player/player_pref.dart';
 import 'package:yuanying/modules/music/controllers/music_player_controller.dart';
 import 'package:yuanying/services/silence_keeper.dart';
+import 'package:yuanying/utils/ios_pip_helper.dart';
 
 class DetailPage extends CommonSlidePage {
   const DetailPage({super.key, super.enableSlide = true});
@@ -70,6 +71,7 @@ class _DetailPageState extends State<DetailPage>
       } else {
         controller = Get.put(DetailController(tag: _controllerTag), tag: _controllerTag);
       }
+      controller.setIosPipSourceRectProvider(_iosPipSourceRect);
 
       if (SettingPref.removeSafeArea) {
         hideSystemBar();
@@ -212,6 +214,7 @@ class _DetailPageState extends State<DetailPage>
       //   再删 IntroController，其 onClose 会清空 videoDetail。
       //   顺序反了会导致兜底时 videoDetail 已为 null。
       if (Get.isRegistered<DetailController>(tag: _controllerTag)) {
+        controller.setIosPipSourceRectProvider(null);
         Get.delete<DetailController>(tag: _controllerTag);
       }
       if (Get.isRegistered<IntroController>(tag: _controllerTag)) {
@@ -219,6 +222,54 @@ class _DetailPageState extends State<DetailPage>
       }
 
       super.dispose();
+  }
+
+  Map<String, int>? _iosPipSourceRect() {
+    final context = _videoPlayerKey.currentContext;
+    final renderObject = context?.findRenderObject();
+    if (context == null || renderObject is! RenderBox || !renderObject.hasSize) {
+      return null;
+    }
+    final topLeft = renderObject.localToGlobal(Offset.zero);
+    final size = renderObject.size;
+    if (size.width <= 0 || size.height <= 0) return null;
+
+    final width = controller.playerController.videoWidth.value;
+    final height = controller.playerController.videoHeight.value;
+    final rawRatio = width > 0 && height > 0
+        ? width / height
+        : size.width / size.height;
+    final ratio = rawRatio.clamp(1 / 2.39, 2.39).toDouble();
+    final containerRatio = size.width / size.height;
+    late final double dx;
+    late final double dy;
+    late final double videoWidth;
+    late final double videoHeight;
+    if (containerRatio > ratio) {
+      videoHeight = size.height;
+      videoWidth = size.height * ratio;
+      dx = (size.width - videoWidth) / 2;
+      dy = 0;
+    } else {
+      videoWidth = size.width;
+      videoHeight = size.width / ratio;
+      dx = 0;
+      dy = (size.height - videoHeight) / 2;
+    }
+    final pixelRatio =
+        MediaQuery.maybeOf(context)?.devicePixelRatio ??
+        View.of(context).devicePixelRatio;
+    final left = ((topLeft.dx + dx) * pixelRatio).round();
+    final top = ((topLeft.dy + dy) * pixelRatio).round();
+    final right = ((topLeft.dx + dx + videoWidth) * pixelRatio).round();
+    final bottom = ((topLeft.dy + dy + videoHeight) * pixelRatio).round();
+    if (right <= left || bottom <= top) return null;
+    return <String, int>{
+      'left': left,
+      'top': top,
+      'right': right,
+      'bottom': bottom,
+    };
   }
 
   // ===== 手动播放 UI（封面 + 导航栏 + 播放按钮） =====
@@ -566,7 +617,149 @@ class _DetailPageState extends State<DetailPage>
           }
           return _buildLoadingOverlay();
         }),
+        if (Platform.isIOS)
+          ListenableBuilder(
+            listenable: Listenable.merge([
+              IosPipHelper.instance.isActive,
+              IosPipHelper.instance.isRequested,
+              IosPipHelper.instance.activeEpisodeIndex,
+            ]),
+            builder: (context, _) {
+              if (IosPipHelper.instance.isActive.value) {
+                return _buildIosPipOverlay();
+              }
+              if (IosPipHelper.instance.isRequested.value) {
+                return _buildIosPipStartingOverlay();
+              }
+              return const SizedBox.shrink();
+            },
+          ),
       ],
+    );
+  }
+
+  Widget _buildIosPipOverlay() {
+    final title = controller.introController.videoDetail.value?.vodName ?? '';
+    final episode = controller.introController.currentPlayEpisode?.name ?? '';
+    return Positioned.fill(
+      child: ColoredBox(
+        color: Colors.black.withValues(alpha: 0.94),
+        child: SafeArea(
+          child: Stack(
+            children: [
+              Positioned(
+                left: 8,
+                top: 8,
+                child: IconButton(
+                  tooltip: '返回',
+                  onPressed: () => Navigator.of(context).maybePop(),
+                  icon: const Icon(
+                    Icons.arrow_back_ios_new_rounded,
+                    color: Colors.white,
+                    size: 20,
+                  ),
+                ),
+              ),
+              Center(
+                child: Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 24),
+                  padding: const EdgeInsets.fromLTRB(24, 24, 24, 20),
+                  decoration: BoxDecoration(
+                    color: const Color(0xDD111111),
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(color: Colors.white24),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Icons.picture_in_picture_alt_rounded,
+                        color: Colors.white,
+                        size: 34,
+                      ),
+                      const SizedBox(height: 14),
+                      Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      if (episode.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          episode,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 6),
+                      const Text(
+                        '正在画中画窗口中播放',
+                        style: TextStyle(color: Colors.white70, fontSize: 13),
+                      ),
+                      const SizedBox(height: 18),
+                      Wrap(
+                        alignment: WrapAlignment.center,
+                        spacing: 10,
+                        runSpacing: 8,
+                        children: [
+                          FilledButton.icon(
+                            onPressed: () => controller
+                                .stopIosPictureInPictureAndRestore(),
+                            icon: const Icon(Icons.fullscreen_rounded, size: 18),
+                            label: const Text('恢复应用内播放'),
+                          ),
+                          OutlinedButton.icon(
+                            onPressed: () => Navigator.of(context).maybePop(),
+                            icon: const Icon(Icons.close_rounded, size: 18),
+                            label: const Text('退出播放'),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildIosPipStartingOverlay() {
+    return Positioned.fill(
+      child: ColoredBox(
+        color: Colors.black.withValues(alpha: 0.88),
+        child: const Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: 30,
+                height: 30,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.5,
+                  color: Colors.white,
+                ),
+              ),
+              SizedBox(height: 14),
+              Text(
+                '正在启动画中画...',
+                style: TextStyle(color: Colors.white, fontSize: 14),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 

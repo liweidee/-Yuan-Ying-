@@ -24,6 +24,7 @@ import UIKit
         setupNodeJSChannel(with: flutterViewController)
         setupEventChannel(with: flutterViewController)
         setupSilenceKeeperChannel(with: flutterViewController)
+        setupIosPipChannel(with: flutterViewController)
 
         NotificationCenter.default.addObserver(
             self,
@@ -143,6 +144,15 @@ import UIKit
                 result(FlutterMethodNotImplemented)
             }
         }
+    }
+
+    private func setupIosPipChannel(with controller: FlutterViewController?) {
+        guard let controller = controller else { return }
+        let channel = FlutterMethodChannel(
+            name: "com.example.yuanying/ios_pip",
+            binaryMessenger: controller.binaryMessenger
+        )
+        IosPipManager.shared.attach(channel: channel)
     }
 
     @objc private func handleNodePortNotification(_ notification: Notification) {

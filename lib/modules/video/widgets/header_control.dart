@@ -16,6 +16,7 @@ import 'package:yuanying/plugin/pl_player/models/external_player_type.dart';
 import 'package:yuanying/services/external_player_service.dart';
 import 'package:yuanying/modules/video/widgets/danmaku_settings.dart';
 import 'package:yuanying/utils/android_pip_helper.dart';
+import 'package:yuanying/utils/ios_pip_helper.dart';
 
 class HeaderControl extends StatefulWidget {
   final String controllerTag;
@@ -65,6 +66,10 @@ class _HeaderControlState extends State<HeaderControl> {
       final rawSpeed = playerController.downloadSpeed.value;
       final speed = _smoothSpeed(rawSpeed);
       final isFvpEngine = PlayerPref.playerEngine == PlayerEngineType.fvp;
+      final showIosPip =
+          Platform.isIOS &&
+          IosPipHelper.instance.isSupported.value &&
+          controller.canEnterIosPictureInPicture;
 
       // ---- 构建显示内容 ----
       String resolution = '';
@@ -205,8 +210,9 @@ class _HeaderControlState extends State<HeaderControl> {
                 ),
                 // 画中画：桌面端保持原有行为；Android 端新增系统 PiP 入口
                 // 位置、尺寸、图标风格不变，仅点击行为按平台分流。
-                if ((PlatformUtils.isDesktop || Platform.isAndroid) &&
-                    PlayerPref.playerEngine != PlayerEngineType.fvp)
+                if (showIosPip ||
+                    ((PlatformUtils.isDesktop || Platform.isAndroid) &&
+                        PlayerPref.playerEngine != PlayerEngineType.fvp))
                   SizedBox(
                     width: 40,
                     height: 34,
@@ -214,9 +220,13 @@ class _HeaderControlState extends State<HeaderControl> {
                       // 桌面端 isDesktopPip 是 RxBool，原本用 Obx 感知；
                       // 这里统一用 ValueListenableBuilder 是因为 Android 的 PiP 状态
                       // 是 ValueNotifier（非 Rx），Obx 无法监听。
-                      valueListenable: AndroidPipHelper.isPipActive,
+                      valueListenable: Platform.isIOS
+                          ? IosPipHelper.instance.isActive
+                          : AndroidPipHelper.isPipActive,
                       builder: (context, androidPip, _) {
-                        final isPip = Platform.isAndroid
+                        final isPip = Platform.isIOS
+                            ? IosPipHelper.instance.isActive.value
+                            : Platform.isAndroid
                             ? androidPip
                             : playerController.isDesktopPip;
 
@@ -226,6 +236,16 @@ class _HeaderControlState extends State<HeaderControl> {
                             padding: WidgetStatePropertyAll(EdgeInsets.zero),
                           ),
                           onPressed: () async {
+                            if (Platform.isIOS) {
+                              if (isPip) {
+                                await controller
+                                    .stopIosPictureInPictureAndRestore();
+                              } else {
+                                await controller.enterIosPictureInPicture();
+                              }
+                              return;
+                            }
+
                             if (Platform.isAndroid) {
                               final ok = await AndroidPipHelper.enter();
                               if (!ok) {
