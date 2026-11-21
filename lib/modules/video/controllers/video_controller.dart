@@ -2731,10 +2731,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
 
   bool get canEnterIosPictureInPicture {
     if (!Platform.isIOS || currentPlayUrl.value.isEmpty) return false;
-    if (playerController.dataStatus.value != DataStatus.loaded) return false;
-    if (_currentPlayUrlIsDash == 1) return false;
-    if (_currentAudioUrl != null && _currentAudioUrl!.isNotEmpty) return false;
-    return _isAvPlayerCandidateUrl(currentPlayUrl.value);
+    return playerController.dataStatus.value == DataStatus.loaded;
   }
 
   bool _isAvPlayerCandidateUrl(String url) {
@@ -2750,7 +2747,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
   Future<bool> enterIosPictureInPicture() async {
     if (!Platform.isIOS) return false;
     if (!canEnterIosPictureInPicture) {
-      SmartDialog.showToast('当前视频暂不支持进入 iOS 画中画');
+      SmartDialog.showToast('视频尚未加载完成，请稍后再试');
       return false;
     }
     if (!IosPipHelper.instance.isSupported.value) {
@@ -3834,7 +3831,8 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
   Future<void> _playDirect(String url, {Duration? seekTo}) async {
     currentPlayUrl.value = url;
     currentQualities.value = [PlayQuality(label: '直链', url: url)];
-    // 直链模式无 DASH 外挂音频概念，清掉上一个源可能残留的音频直链
+    // 直链模式绕过了 getPlayUrl，不能沿用上一个源的 DASH 元数据。
+    _currentPlayUrlIsDash = null;
     _currentAudioUrl = null;
 
     // 应用请求头

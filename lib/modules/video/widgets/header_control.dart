@@ -66,10 +66,9 @@ class _HeaderControlState extends State<HeaderControl> {
       final rawSpeed = playerController.downloadSpeed.value;
       final speed = _smoothSpeed(rawSpeed);
       final isFvpEngine = PlayerPref.playerEngine == PlayerEngineType.fvp;
-      final showIosPip =
-          Platform.isIOS &&
-          IosPipHelper.instance.isSupported.value &&
-          controller.canEnterIosPictureInPicture;
+      // iOS 画中画入口必须保持可见。系统能力、视频格式和播放器状态
+      // 只在点击后校验，避免用户完全找不到入口。
+      final showIosPip = Platform.isIOS;
 
       // ---- 构建显示内容 ----
       String resolution = '';
