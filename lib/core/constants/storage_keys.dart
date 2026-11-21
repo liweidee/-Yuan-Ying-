@@ -199,6 +199,11 @@ abstract final class SettingBoxKey {
   static const String novelPageAnim = 'novelPageAnim';
   static const String ttsRate = 'ttsRate';
   static const String ttsVoiceKey = 'ttsVoiceKey';
+  static const String ttsEngine = 'ttsEngine';
+  static const String ttsNetworkRate = 'ttsNetworkRate';
+  static const String ttsNetworkVoices = 'ttsNetworkVoices';
+  static const String ttsNetworkVoiceId = 'ttsNetworkVoiceId';
+  static const String novelTtsFollow = 'novelTtsFollow';
   static const String novelBookmarksPrefix = 'novel_bookmarks_';
   static const String novelPurifyRulesPrefix = 'novel_purify_rules_';
 

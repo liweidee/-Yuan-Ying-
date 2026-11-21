@@ -3,18 +3,20 @@ import 'dart:async';
 import 'dart:math';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:battery_plus/battery_plus.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
-import 'package:json5/json5.dart';
 import 'package:yuanying/t4/models/video_detail.dart';
+import 'package:yuanying/core/routes/app_pages.dart';
 import 'package:yuanying/t4/services/source_manager.dart';
 import 'package:yuanying/t4/services/i_spider_service.dart';
-import 'package:yuanying/modules/novel/utils/html_text.dart';
-import 'package:yuanying/modules/novel/utils/purify.dart';
 import 'package:yuanying/modules/novel/settings/novel_reader_settings.dart';
+import 'package:yuanying/modules/novel/models/novel_chapter_content.dart';
+import 'package:yuanying/modules/novel/services/novel_chapter_content_service.dart';
 import 'package:yuanying/modules/novel/services/novel_tts_service.dart';
+import 'package:yuanying/modules/novel/services/novel_tts_reading_session.dart';
 import 'package:yuanying/modules/novel/widgets/chapter_sheet.dart';
 import 'package:yuanying/modules/novel/widgets/inbook_search_sheet.dart';
 import 'package:yuanying/modules/novel/widgets/bookmark_sheet.dart';
@@ -30,7 +32,8 @@ class NovelReaderPage extends StatefulWidget {
   State<NovelReaderPage> createState() => _NovelReaderPageState();
 }
 
-class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingObserver {
+class _NovelReaderPageState extends State<NovelReaderPage>
+    with WidgetsBindingObserver {
   // 参数
   late String _vodId;
   late String _vodName;
@@ -44,11 +47,18 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
   // 服务
   late ISpiderService _apiService;
   late NovelTtsService _ttsService;
+  late NovelChapterContentService _chapterContentService;
+  final NovelTtsReadingSession _ttsSession = NovelTtsReadingSession();
 
   // 阅读状态
   List<String> _titles = [];
   int _index = 0;
   String _content = '';
+  List<NovelChapterParagraph> _readerParagraphs = const [];
+  NovelChapterContent? _currentChapterContent;
+  List<GlobalKey> _paragraphKeys = const [];
+  String _paragraphLayoutSource = '';
+  double? _paragraphLayoutGap;
   bool _loading = true;
   String? _error;
   bool _toolbar = false;
@@ -71,6 +81,14 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
 
   // 听书
   bool _ttsActive = false;
+  bool _ttsEngineSwitching = false;
+  int? _ttsHighlightStart;
+  int? _ttsHighlightEnd;
+  int? _pendingTtsOffset;
+  int? _readingOffset;
+  int? _pendingReadingOffset;
+  bool _ttsProgrammaticPageChange = false;
+  bool _ttsStartAtChapterTop = false;
   Timer? _sleepTimer;
   int _sleepMinutes = 0;
   Future<List<Map<String, String>>>? _voicesFuture;
@@ -91,7 +109,8 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
   final Set<String> _downloadingFonts = {};
 
   // 阅读主题（使用 yuedu 主题系统）
-  NovelReaderTheme get _theme => NovelReaderTheme.getThemeByIndex(NovelReaderSettings.themeIndex);
+  NovelReaderTheme get _theme =>
+      NovelReaderTheme.getThemeByIndex(NovelReaderSettings.themeIndex);
 
   @override
   void initState() {
@@ -110,16 +129,26 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
     _sourceName = args?['sourceName']?.toString() ?? '';
     final episodesData = args?['episodes'] as List?;
     if (episodesData != null) {
-      _episodes = episodesData.map((e) => Episode(
-        name: e['name']?.toString() ?? '',
-        url: e['url']?.toString() ?? '',
-      )).toList();
+      _episodes = episodesData
+          .map(
+            (e) => Episode(
+              name: e['name']?.toString() ?? '',
+              url: e['url']?.toString() ?? '',
+            ),
+          )
+          .toList();
     } else {
       _episodes = [];
     }
     _apiService = _site != null
         ? Get.find<SourceManager>().createIndependentService(_site!)
         : Get.find<SourceManager>().currentApiService;
+    _chapterContentService = NovelChapterContentService(
+      apiService: _apiService,
+      sourceName: _sourceName,
+      pwd: _pwd,
+      apiUrl: _site?['api']?.toString() ?? '',
+    );
     _index = _initialChapter.clamp(0, _episodes.length - 1);
     if (_episodes.isEmpty) {
       _error = '没有章节';
@@ -132,12 +161,18 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
     }
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     _refreshBattery();
-    _footerTimer = Timer.periodic(const Duration(seconds: 30), (_) => _refreshBattery());
+    _footerTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => _refreshBattery(),
+    );
     // _statTimer = Timer.periodic(const Duration(seconds: 30), (_) {});
   }
 
   @override
   void dispose() {
+    if (_ttsActive) {
+      unawaited(_ttsService.stop());
+    }
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     _sleepTimer?.cancel();
     _footerTimer?.cancel();
@@ -172,23 +207,16 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
     }
   }
 
-  String _cleanJsonString(String raw) {
-    var s = raw.trim();
-    while (s.startsWith('/') || s.startsWith('\\')) {
-      s = s.substring(1);
-    }
-    if (s.startsWith('"') && s.endsWith('"')) {
-      s = s.substring(1, s.length - 1);
-    }
-    return s;
-  }
-
   // ---------- 书签 ----------
   void _loadBookmarks() {
     final key = '${SettingBoxKey.novelBookmarksPrefix}$_vodId';
     final data = StorageManager.getCache<List>(key);
     if (data != null) {
-      _bookmarks = data.map((e) => NovelBookmark.fromMap(Map<String, dynamic>.from(e as Map))).toList();
+      _bookmarks = data
+          .map(
+            (e) => NovelBookmark.fromMap(Map<String, dynamic>.from(e as Map)),
+          )
+          .toList();
       _bookmarks.sort((a, b) => b.createdAt.compareTo(a.createdAt));
     }
   }
@@ -245,14 +273,21 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
             });
           }
           if (_paged && _pagedReady) {
-            final target = (offset * (_pageUnits.length - 1)).round().clamp(0, _pageUnits.length - 1);
+            final target = (offset * (_pageUnits.length - 1)).round().clamp(
+              0,
+              _pageUnits.length - 1,
+            );
             _pageCtrl?.jumpToPage(target);
             setState(() => _pageIndex = target);
           }
         }
       },
       onDelete: (bookmark) async {
-        _bookmarks.removeWhere((b) => b.chapter == bookmark.chapter && b.createdAt == bookmark.createdAt);
+        _bookmarks.removeWhere(
+          (b) =>
+              b.chapter == bookmark.chapter &&
+              b.createdAt == bookmark.createdAt,
+        );
         _saveBookmarks();
         SmartDialog.showToast('已删除书签');
       },
@@ -266,7 +301,9 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
     if (data != null && data.isNotEmpty) {
       try {
         final list = jsonDecode(data) as List;
-        _purifyRules = list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+        _purifyRules = list
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList();
       } catch (_) {
         _purifyRules = [];
       }
@@ -289,89 +326,37 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
   }
 
   // ---------- 章节内容加载 ----------
-  Future<void> _loadChapter(int idx) async {
+  Future<void> _loadChapter(int idx, {bool fromTts = false}) async {
     if (idx < 0 || idx >= _episodes.length) return;
+    if (_ttsActive && !fromTts && idx != _index) {
+      _ttsSession.takeOver();
+    }
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
-      final apiUrl = _site?['api']?.toString() ?? '';
-      final cacheKey = StorageManager.sourceScopedKey(
-          'novel_chapter_${_vodId}_$idx', apiUrl);
-      String text = StorageManager.getCache<String>(cacheKey) ?? '';
-      if (text.isEmpty) {
-        final playUrl = await _apiService.getPlayUrl(
-          playParams: _episodes[idx].url,
-          flag: _sourceName,
-          pwd: _pwd,
-        );
-        if (playUrl == null) {
-          SmartDialog.showToast('获取播放地址失败');
-          setState(() {
-            _loading = false;
-            _error = '获取播放地址失败';
-          });
-          return;
-        }
-        final url = playUrl.defaultUrl;
-        if (url == null || url.isEmpty) {
-          SmartDialog.showToast('播放地址为空');
-          setState(() {
-            _loading = false;
-            _error = '播放地址为空';
-          });
-          return;
-        }
-        if (!url.startsWith('novel://')) {
-          SmartDialog.showToast('非小说协议');
-          setState(() {
-            _loading = false;
-            _error = '不支持该协议';
-          });
-          return;
-        }
-        String jsonStr = url.substring(7);
-        String cleaned = _cleanJsonString(jsonStr);
-        Map<String, dynamic>? data;
-        try {
-          data = JSON5.parse(cleaned) as Map<String, dynamic>;
-        } catch (e) {
-          SmartDialog.showToast('解析章节内容失败: $e');
-          setState(() {
-            _loading = false;
-            _error = '解析失败';
-          });
-          return;
-        }
-        if (data == null) {
-          SmartDialog.showToast('解析结果为空');
-          setState(() {
-            _loading = false;
-            _error = '解析结果为空';
-          });
-          return;
-        }
-        text = data['content']?.toString() ?? data['body']?.toString() ?? data['text']?.toString() ?? '';
-        if (text.isEmpty) {
-          SmartDialog.showToast('章节内容为空');
-          setState(() {
-            _loading = false;
-            _error = '章节内容为空';
-          });
-          return;
-        }
-        StorageManager.setCache(cacheKey, text);
-      }
-
-      // ---------- 应用净化规则 ----------
-      if (_purifyRules.isNotEmpty) {
-        text = applyReplaceRules(text, jsonEncode(_purifyRules));
-      }
+      final content = await _chapterContentService.load(
+        chapterIndex: idx,
+        vodId: _vodId,
+        playParams: _episodes[idx].url,
+        separator: _paragraphSeparator,
+        purifyRules: _purifyRules,
+      );
 
       if (mounted) {
         setState(() {
-          _content = text;
+          _currentChapterContent = content;
+          _content = content.text;
+          _readerParagraphs = content.paragraphs;
+          _paragraphKeys = [for (final _ in content.paragraphs) GlobalKey()];
+          _paragraphLayoutSource = content.text;
+          _paragraphLayoutGap = NovelReaderSettings.paragraphGap;
+          _ttsHighlightStart = null;
+          _ttsHighlightEnd = null;
+          _pendingTtsOffset = null;
+          _ttsProgrammaticPageChange = false;
+          _readingOffset = 0;
           _index = idx;
           _pageIndex = 0;
           _pagedReady = false;
@@ -397,10 +382,10 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
         _saveProgress();
       }
     } catch (e) {
-      SmartDialog.showToast('加载章节异常: $e');
+      SmartDialog.showToast('加载章节失败：$e');
       if (mounted) {
         setState(() {
-          _error = '加载章节异常: $e';
+          _error = '加载章节失败：$e';
           _loading = false;
         });
       }
@@ -414,17 +399,17 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
     await StorageManager.setCache(key, progress);
   }
 
-  void _nextChapter() {
+  void _nextChapter({bool fromTts = false}) {
     if (_index < _episodes.length - 1) {
-      _loadChapter(_index + 1);
+      _loadChapter(_index + 1, fromTts: fromTts);
     } else {
       SmartDialog.showToast('已经是最后一章');
     }
   }
 
-  void _prevChapter() {
+  void _prevChapter({bool fromTts = false}) {
     if (_index > 0) {
-      _loadChapter(_index - 1);
+      _loadChapter(_index - 1, fromTts: fromTts);
     } else {
       SmartDialog.showToast('已经是第一章');
     }
@@ -458,6 +443,7 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
   }
 
   void _nextPage() {
+    if (_ttsActive) _ttsSession.takeOver();
     if (_paged) {
       _pagedNext();
       return;
@@ -466,8 +452,11 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
       final pos = _scroll.position;
       if (pos.maxScrollExtent - pos.pixels > _pageStep * 0.5) {
         final target = (pos.pixels + _pageStep).clamp(0.0, pos.maxScrollExtent);
-        _scroll.animateTo(target,
-            duration: const Duration(milliseconds: 180), curve: Curves.easeOut);
+        _scroll.animateTo(
+          target,
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOut,
+        );
         return;
       }
     }
@@ -475,6 +464,7 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
   }
 
   void _prevPage() {
+    if (_ttsActive) _ttsSession.takeOver();
     if (_paged) {
       _pagedPrev();
       return;
@@ -482,8 +472,11 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
     if (_scroll.hasClients && _scroll.position.pixels > 2) {
       final pos = _scroll.position;
       final target = (pos.pixels - _pageStep).clamp(0.0, pos.maxScrollExtent);
-      _scroll.animateTo(target,
-          duration: const Duration(milliseconds: 180), curve: Curves.easeOut);
+      _scroll.animateTo(
+        target,
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOut,
+      );
       return;
     }
     _prevChapter();
@@ -496,8 +489,11 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
     if (_pageIndex < n - 1) {
       final ctrl = _pageCtrl;
       if (ctrl != null && ctrl.hasClients) {
-        ctrl.animateToPage(_pageIndex + 1,
-            duration: const Duration(milliseconds: 240), curve: Curves.easeOutCubic);
+        ctrl.animateToPage(
+          _pageIndex + 1,
+          duration: const Duration(milliseconds: 240),
+          curve: Curves.easeOutCubic,
+        );
       }
     } else {
       _pageIndex = 0;
@@ -510,8 +506,11 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
     if (_pageIndex > 0) {
       final ctrl = _pageCtrl;
       if (ctrl != null && ctrl.hasClients) {
-        ctrl.animateToPage(_pageIndex - 1,
-            duration: const Duration(milliseconds: 240), curve: Curves.easeOutCubic);
+        ctrl.animateToPage(
+          _pageIndex - 1,
+          duration: const Duration(milliseconds: 240),
+          curve: Curves.easeOutCubic,
+        );
       }
     } else if (_index > 0) {
       _pendingJumpLast = true;
@@ -525,6 +524,10 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
     if (_paginating) return;
     _paginating = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_paged) {
+        _paginating = false;
+        return;
+      }
       final text = _joinedText;
       final cuts = _computeCuts(area, text);
       final units = <_PageUnit>[];
@@ -536,7 +539,10 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
       if (units.isEmpty) units.add(const _PageUnit.text(0, 0));
       int target = 0;
       if (_pendingRestore > 0 && units.length > 1) {
-        target = (_pendingRestore * (units.length - 1)).round().clamp(0, units.length - 1);
+        target = (_pendingRestore * (units.length - 1)).round().clamp(
+          0,
+          units.length - 1,
+        );
         _pendingRestore = -1;
       } else if (_pendingJumpLast) {
         target = units.length - 1;
@@ -562,6 +568,22 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
           if (mounted) _jumpToOffsetInPage(off);
         });
       }
+      if (_pendingTtsOffset != null) {
+        final off = _pendingTtsOffset!;
+        _pendingTtsOffset = null;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && _ttsActive && NovelReaderSettings.followTts) {
+            _followPagedOffset(off);
+          }
+        });
+      }
+      if (_pendingReadingOffset != null) {
+        final off = _pendingReadingOffset!;
+        _pendingReadingOffset = null;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _jumpToOffsetInPage(off);
+        });
+      }
     });
   }
 
@@ -571,10 +593,12 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
     const footerH = 44.0;
     final w = area.width - padH - 2;
     final hAvail = area.height - headerH - footerH;
-    final style = NovelReaderSettings.applyTextStyle(TextStyle(
-      fontSize: NovelReaderSettings.fontSize,
-      height: NovelReaderSettings.lineHeight,
-    ));
+    final style = NovelReaderSettings.applyTextStyle(
+      TextStyle(
+        fontSize: NovelReaderSettings.fontSize,
+        height: NovelReaderSettings.lineHeight,
+      ),
+    );
     if (text.isEmpty || w <= 0 || hAvail <= 0) return const [0];
     final tp = TextPainter(
       text: TextSpan(text: text, style: style),
@@ -604,10 +628,40 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
     return cuts;
   }
 
-  String get _joinedText {
+  String get _paragraphSeparator {
     final gap = NovelReaderSettings.paragraphGap;
-    final sep = gap <= 2 ? '\n' : (gap >= 20 ? '\n\n\n' : '\n\n');
-    return _content.split('\n')
+    return gap <= 2 ? '\n' : (gap >= 20 ? '\n\n\n' : '\n\n');
+  }
+
+  void _prepareReaderParagraphLayout(String source) {
+    final content = NovelChapterContent.fromText(
+      chapterIndex: _index,
+      text: source,
+      separator: _paragraphSeparator,
+    );
+    _currentChapterContent = content;
+    _readerParagraphs = content.paragraphs;
+    _paragraphKeys = [for (final _ in content.paragraphs) GlobalKey()];
+    _paragraphLayoutSource = source;
+    _paragraphLayoutGap = NovelReaderSettings.paragraphGap;
+    _ttsHighlightStart = null;
+    _ttsHighlightEnd = null;
+    _pendingTtsOffset = null;
+    _ttsProgrammaticPageChange = false;
+  }
+
+  void _ensureReaderParagraphLayout() {
+    if (_paragraphLayoutSource == _content &&
+        _paragraphLayoutGap == NovelReaderSettings.paragraphGap) {
+      return;
+    }
+    _prepareReaderParagraphLayout(_content);
+  }
+
+  String get _joinedText {
+    final sep = _paragraphSeparator;
+    return _content
+        .split('\n')
         .where((p) => p.trim().isNotEmpty)
         .map((p) => p.trim())
         .join(sep);
@@ -617,7 +671,9 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
   // 翻页动画系统（移植自 yuedu 项目，5种动画模式）
   // ============================================================================
   Widget _pageTransform(int i, Widget child) {
-    final mode = NovelPageTurnModeExt.fromStorageKey(NovelReaderSettings.pageAnim);
+    final mode = NovelPageTurnModeExt.fromStorageKey(
+      NovelReaderSettings.pageAnim,
+    );
     if (mode == NovelPageTurnMode.none) return child;
     final ctrl = _pageCtrl;
     if (ctrl == null) return child;
@@ -796,27 +852,18 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
       searchableChapters: indexes,
       titles: _titles,
       chapterText: (i) async {
-        final apiUrl = _site?['api']?.toString() ?? '';
-        final cacheKey = StorageManager.sourceScopedKey(
-            'novel_chapter_${_vodId}_$i', apiUrl);
-        final cached = StorageManager.getCache<String>(cacheKey);
-        if (cached != null) return cached;
-        final playUrl = await _apiService.getPlayUrl(
-          playParams: _episodes[i].url,
-          flag: _sourceName,
-          pwd: _pwd,
-        );
-        if (playUrl != null) {
-          final url = playUrl.defaultUrl;
-          if (url != null && url.startsWith('novel://')) {
-            final jsonStr = url.substring(7);
-            try {
-              final data = JSON5.parse(jsonStr) as Map<String, dynamic>;
-              return data['content']?.toString() ?? '';
-            } catch (_) {}
-          }
+        try {
+          final content = await _chapterContentService.load(
+            chapterIndex: i,
+            vodId: _vodId,
+            playParams: _episodes[i].url,
+            separator: _paragraphSeparator,
+            purifyRules: _purifyRules,
+          );
+          return content.text;
+        } catch (_) {
+          return '';
         }
-        return '';
       },
       onJump: (chapter, offset) {
         _pendingSearchHit = offset;
@@ -830,69 +877,399 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
   }
 
   // ---------- 听书 ----------
-  List<String> _chunksOf(String text) {
-    final chunks = <String>[];
-    for (final p0 in text.split('\n')) {
-      var p = p0.trim();
-      if (p.isEmpty) continue;
-      while (p.length > 260) {
-        var cut = 260;
-        final punct = p.lastIndexOf(RegExp(r'[。！？；]'), 260);
-        if (punct > 100) cut = punct + 1;
-        chunks.add(p.substring(0, cut));
-        p = p.substring(cut);
-      }
-      if (p.isNotEmpty) chunks.add(p);
-    }
-    return chunks;
+  List<NovelTtsChunk> _ttsChunksOfCurrentLayout() {
+    return _ttsSession.content?.buildTtsChunks() ??
+        _currentChapterContent?.buildTtsChunks() ??
+        const [];
   }
 
-  int _ttsStartChunkIndex(int total) {
-    if (total <= 1) return 0;
-    double ratio = 0;
-    if (_paged && _pagedReady && _pageUnits.length > 1) {
-      ratio = _pageIndex / (_pageUnits.length - 1);
-    } else if (_scroll.hasClients && _scroll.position.maxScrollExtent > 0) {
-      ratio = _scroll.position.pixels / _scroll.position.maxScrollExtent;
+  int _ttsStartChunkIndex(List<NovelTtsChunk> chunks) {
+    if (chunks.length <= 1) return 0;
+    if (_ttsStartAtChapterTop) {
+      _ttsStartAtChapterTop = false;
+      return 0;
     }
-    return (ratio * total).floor().clamp(0, total - 1);
-  }
-
-  Future<void> _startTts() async {
-    if (_ttsActive || _content.isEmpty) return;
-    setState(() => _ttsActive = true);
-    while (_ttsActive && mounted) {
-      var chunks = _chunksOf(_content);
-      final startIdx = _ttsStartChunkIndex(chunks.length);
-      if (startIdx > 0 && startIdx < chunks.length) {
-        chunks = chunks.sublist(startIdx);
-      }
-      if (chunks.isEmpty) break;
-      await _ttsService.speakChunks(
-        chunks,
-        isCancelled: () => !_ttsActive,
+    final resumeOffset = _readingOffset;
+    if (resumeOffset != null) {
+      final resumeIndex = chunks.indexWhere(
+        (chunk) => chunk.end > resumeOffset,
       );
-      if (!_ttsActive || !mounted) break;
-      if (_index < _episodes.length - 1) {
-        _nextChapter();
-        while (_loading && _ttsActive && mounted) {
-          await Future.delayed(const Duration(milliseconds: 120));
+      if (resumeIndex >= 0) return resumeIndex;
+    }
+    if (_paged && _pagedReady && _pageUnits.length > 1) {
+      final offset =
+          _pageUnits[_pageIndex.clamp(0, _pageUnits.length - 1)].start;
+      final index = chunks.indexWhere((chunk) => chunk.end > offset);
+      return index < 0 ? chunks.length - 1 : index;
+    }
+    final double ratio =
+        _scroll.hasClients && _scroll.position.maxScrollExtent > 0
+        ? _scroll.position.pixels / _scroll.position.maxScrollExtent
+        : 0;
+    final offset = (_joinedText.length * ratio).round();
+    final index = chunks.indexWhere((chunk) => chunk.end > offset);
+    return index < 0 ? chunks.length - 1 : index;
+  }
+
+  void _onTtsChunk(NovelTtsChunk chunk) {
+    _ttsSession.updateChunk(chunk);
+    if (!_ttsActive || chunk.chapterIndex != _index) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_ttsActive || chunk.chapterIndex != _index) return;
+      try {
+        setState(() {
+          _ttsHighlightStart = chunk.start;
+          _ttsHighlightEnd = chunk.end;
+          _readingOffset = chunk.start;
+        });
+      } catch (e) {
+        debugPrint('[NovelTts] highlight update skipped: $e');
+        return;
+      }
+      if (!NovelReaderSettings.followTts) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted ||
+            !_ttsActive ||
+            !NovelReaderSettings.followTts ||
+            _ttsSession.manualTakeover) {
+          return;
         }
-      } else {
-        break;
+        try {
+          if (_paged) {
+            _followPagedOffset(chunk.start);
+          } else {
+            _followScrollOffset(chunk.start);
+          }
+        } catch (e) {
+          debugPrint('[NovelTts] follow skipped: $e');
+        }
+      });
+    });
+    WidgetsBinding.instance.scheduleFrame();
+  }
+
+  void _clearTtsHighlight() {
+    _ttsHighlightStart = null;
+    _ttsHighlightEnd = null;
+    _pendingTtsOffset = null;
+    _ttsSession.clear();
+    _ttsProgrammaticPageChange = false;
+    _ttsStartAtChapterTop = false;
+  }
+
+  int _captureReadingOffset() {
+    _ensureReaderParagraphLayout();
+    if (_content.isEmpty) return 0;
+    if (_ttsActive &&
+        !_ttsSession.manualTakeover &&
+        _ttsHighlightStart != null) {
+      return _ttsHighlightStart!;
+    }
+    if (_paged && _pagedReady && _pageUnits.isNotEmpty) {
+      final index = _pageIndex.clamp(0, _pageUnits.length - 1);
+      return _pageUnits[index].start;
+    }
+    if (!_paged && _scroll.hasClients) {
+      final viewportObject = _scroll.position.context.storageContext
+          .findRenderObject();
+      if (viewportObject is RenderBox) {
+        final topGlobal = viewportObject.localToGlobal(Offset.zero).dy + 2;
+        for (int i = 0; i < _readerParagraphs.length; i++) {
+          if (i >= _paragraphKeys.length) break;
+          final renderObject = _paragraphKeys[i].currentContext
+              ?.findRenderObject();
+          if (renderObject is! RenderParagraph || !renderObject.hasSize) {
+            continue;
+          }
+          final top = renderObject.localToGlobal(Offset.zero).dy;
+          final bottom = top + renderObject.size.height;
+          if (top <= topGlobal && bottom >= topGlobal) {
+            final local = renderObject.globalToLocal(
+              Offset(0, topGlobal),
+            );
+            final position = renderObject.getPositionForOffset(local);
+            return _readerParagraphs[i].start + position.offset;
+          }
+        }
+      }
+      if (_scroll.position.maxScrollExtent > 0) {
+        final ratio =
+            _scroll.position.pixels / _scroll.position.maxScrollExtent;
+        return (_joinedText.length * ratio).round().clamp(
+          0,
+          _joinedText.length,
+        );
       }
     }
-    if (mounted) setState(() => _ttsActive = false);
+    return _readingOffset ?? 0;
+  }
+
+  void _followPagedOffset(int offset) {
+    if (!_pagedReady || _paginating || _pageUnits.isEmpty) {
+      _pendingTtsOffset = offset;
+      return;
+    }
+    var page = _pageUnits.indexWhere(
+      (unit) => !unit.isImage && offset >= unit.start && offset < unit.end,
+    );
+    if (page < 0) {
+      page = _pageUnits.indexWhere(
+        (unit) => !unit.isImage && unit.end > offset,
+      );
+    }
+    if (page < 0 || page == _pageIndex) return;
+    final controller = _pageCtrl;
+    if (controller == null || !controller.hasClients) {
+      _pendingTtsOffset = offset;
+      return;
+    }
+    _ttsProgrammaticPageChange = true;
+    unawaited(
+      controller
+          .animateToPage(
+            page,
+            duration: const Duration(milliseconds: 260),
+            curve: Curves.easeOutCubic,
+          )
+          .whenComplete(() {
+            if (!mounted) return;
+            _ttsProgrammaticPageChange = false;
+          }),
+    );
+  }
+
+  void _followScrollOffset(int offset, {bool animate = true}) {
+    if (!_scroll.hasClients) return;
+    final index = _readerParagraphs.indexWhere(
+      (paragraph) => offset >= paragraph.start && offset < paragraph.end,
+    );
+    if (index < 0 || index >= _paragraphKeys.length) return;
+    final paragraph = _readerParagraphs[index];
+    final renderObject = _paragraphKeys[index].currentContext
+        ?.findRenderObject();
+    if (renderObject is! RenderParagraph || !renderObject.hasSize) return;
+    final localOffset = (offset - paragraph.start).clamp(
+      0,
+      paragraph.text.length,
+    );
+    final boxes = renderObject.getBoxesForSelection(
+      TextSelection(
+        baseOffset: localOffset,
+        extentOffset: min(localOffset + 1, paragraph.text.length),
+      ),
+    );
+    if (boxes.isEmpty) return;
+    final caretGlobal = renderObject.localToGlobal(
+      Offset(boxes.first.left, boxes.first.top),
+    );
+    final viewportObject = _scroll.position.context.storageContext
+        .findRenderObject();
+    final viewportTop = viewportObject is RenderBox
+        ? viewportObject.localToGlobal(Offset.zero).dy
+        : 0.0;
+    final target = (_scroll.offset + caretGlobal.dy - viewportTop - 80).clamp(
+      0.0,
+      _scroll.position.maxScrollExtent,
+    );
+    if ((target - _scroll.offset).abs() < 4) return;
+    if (animate) {
+      _scroll.animateTo(
+        target,
+        duration: const Duration(milliseconds: 280),
+        curve: Curves.easeOutCubic,
+      );
+    } else {
+      _scroll.jumpTo(target);
+    }
+  }
+
+  void _scheduleScrollRestore(int offset, [int attempt = 0]) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (!_paged && _scroll.hasClients) {
+        _followScrollOffset(offset, animate: false);
+      } else if (!_paged && attempt < 3) {
+        _scheduleScrollRestore(offset, attempt + 1);
+      }
+    });
+  }
+
+  TextSpan _ttsTextSpan(
+    String text,
+    int globalStart,
+    TextStyle style,
+    NovelReaderTheme theme,
+  ) {
+    final highlightStart = _ttsHighlightStart;
+    final highlightEnd = _ttsHighlightEnd;
+    if (highlightStart == null || highlightEnd == null || text.isEmpty) {
+      return TextSpan(text: text, style: style);
+    }
+    final start = max(highlightStart, globalStart) - globalStart;
+    final end = min(highlightEnd, globalStart + text.length) - globalStart;
+    if (start >= end || end <= 0 || start >= text.length) {
+      return TextSpan(text: text, style: style);
+    }
+    final safeStart = start.clamp(0, text.length);
+    final safeEnd = end.clamp(safeStart, text.length);
+    return TextSpan(
+      style: style,
+      children: [
+        if (safeStart > 0) TextSpan(text: text.substring(0, safeStart)),
+        TextSpan(
+          text: text.substring(safeStart, safeEnd),
+          style: style.copyWith(
+            backgroundColor: theme.primaryColor.withValues(alpha: 0.2),
+          ),
+        ),
+        if (safeEnd < text.length) TextSpan(text: text.substring(safeEnd)),
+      ],
+    );
+  }
+
+  Future<void> _startTts({VoidCallback? onStateChanged}) async {
+    if (_ttsActive || _content.isEmpty) return;
+    if (_ttsService.engine == NovelTtsEngine.network) {
+      try {
+        await _ttsService.ensureRaTtsReady();
+      } catch (e) {
+        SmartDialog.showToast('$e');
+        return;
+      }
+      if (_ttsService.currentNetworkVoice == null) {
+        SmartDialog.showToast('请先选择网络音色');
+        return;
+      }
+    }
+    _readingOffset = _captureReadingOffset();
+    final initialContent = _currentChapterContent;
+    if (initialContent == null) {
+      SmartDialog.showToast('章节内容尚未加载完成');
+      return;
+    }
+    _ttsSession.begin(
+      chapterIndex: _index,
+      chapterContent: initialContent,
+      offset: _readingOffset ?? 0,
+    );
+    setState(() => _ttsActive = true);
+    _ttsProgrammaticPageChange = false;
+    _ttsStartAtChapterTop = false;
+    onStateChanged?.call();
+    try {
+      while (_ttsActive && mounted) {
+        if (_paged) {
+          while (_ttsActive && mounted && (!_pagedReady || _paginating)) {
+            await Future.delayed(const Duration(milliseconds: 80));
+          }
+        }
+        if (!_ttsActive || !mounted) break;
+        final allChunks = _ttsChunksOfCurrentLayout();
+        if (allChunks.isEmpty) break;
+        final startIdx = _ttsStartChunkIndex(allChunks);
+        final chunks = allChunks.sublist(startIdx);
+        await _ttsService.speakChunks(
+          chunks.map((chunk) => chunk.text).toList(),
+          isCancelled: () => !_ttsActive,
+          onChunk: (index) => _onTtsChunk(chunks[index]),
+        );
+        if (!_ttsActive || !mounted) break;
+        if ((_ttsSession.readingChapter ?? _index) < _episodes.length - 1) {
+          final nextChapter = (_ttsSession.readingChapter ?? _index) + 1;
+          _ttsStartAtChapterTop = true;
+          if (_ttsSession.manualTakeover) {
+            final nextContent =
+                _index == nextChapter && _currentChapterContent != null
+                ? _currentChapterContent!
+                : await _chapterContentService.load(
+                    chapterIndex: nextChapter,
+                    vodId: _vodId,
+                    playParams: _episodes[nextChapter].url,
+                    separator: _paragraphSeparator,
+                    purifyRules: _purifyRules,
+                  );
+            if (!_ttsActive || !mounted) break;
+            _ttsSession.advance(nextContent);
+          } else {
+            if (_index != nextChapter) {
+              await _loadChapter(nextChapter, fromTts: true);
+            }
+            while (_loading && _ttsActive && mounted) {
+              await Future.delayed(const Duration(milliseconds: 120));
+            }
+            final nextContent = _currentChapterContent;
+            if (!_ttsActive || !mounted || nextContent == null) break;
+            _ttsSession.advance(nextContent);
+          }
+        } else {
+          break;
+        }
+      }
+    } catch (e) {
+      if (_ttsActive && mounted) {
+        SmartDialog.showToast('朗读失败：$e');
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _ttsActive = false;
+          _clearTtsHighlight();
+        });
+        onStateChanged?.call();
+      }
+    }
   }
 
   void _stopTts() {
     _sleepTimer?.cancel();
     _sleepMinutes = 0;
     if (_ttsActive) {
+      _readingOffset = _captureReadingOffset();
       _ttsActive = false;
       _ttsService.stop();
+      _clearTtsHighlight();
     }
     if (mounted) setState(() {});
+  }
+
+  Future<void> _switchTtsEngine(
+    NovelTtsEngine next,
+    BuildContext sheetContext,
+    StateSetter setSheet,
+  ) async {
+    if (_ttsEngineSwitching ||
+        next == _ttsService.engine ||
+        !mounted ||
+        !sheetContext.mounted) {
+      return;
+    }
+    if (next == NovelTtsEngine.network &&
+        !NovelTtsService.isSupportedPlatform) {
+      SmartDialog.showToast(NovelTtsService.unsupportedPlatformMessage);
+      return;
+    }
+    final wasActive = _ttsActive;
+    if (wasActive) {
+      _sleepTimer?.cancel();
+      _sleepMinutes = 0;
+      _ttsActive = false;
+    }
+    setState(() => _ttsEngineSwitching = true);
+    try {
+      if (sheetContext.mounted) setSheet(() {});
+      // setEngine 内部只执行一次 stop；这里不能先调 _stopTts()，
+      // 否则原生播放器会收到并发 stop，导致平台通道重复返回并闪退。
+      await _ttsService.setEngine(next, stopPlayback: wasActive);
+    } catch (e) {
+      SmartDialog.showToast('切换朗读引擎失败：$e');
+    } finally {
+      if (mounted) {
+        setState(() => _ttsEngineSwitching = false);
+      }
+      if (sheetContext.mounted) {
+        setSheet(() {});
+      }
+    }
   }
 
   void _setSleepTimer(int minutes, void Function(void Function()) setSheet) {
@@ -906,8 +1283,10 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
   }
 
   void _showTtsSheet() {
+    Future<NovelTtsServiceStatus> statusFuture = _ttsService.raTtsStatus();
     showModalBottomSheet<void>(
       context: context,
+      isScrollControlled: true,
       backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
@@ -915,148 +1294,585 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
       builder: (ctx) {
         return StatefulBuilder(
           builder: (ctx, setSheet) {
-            return Padding(
-              padding: const EdgeInsets.fromLTRB(22, 18, 22, 28),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Text(
-                        '听书',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                          color: Theme.of(ctx).colorScheme.onSurface,
+            final colors = Theme.of(ctx).colorScheme;
+            final isNetwork = _ttsService.engine == NovelTtsEngine.network;
+            final networkSupported = NovelTtsService.isSupportedPlatform;
+            final currentNetworkVoice = _ttsService.currentNetworkVoice;
+            final systemVoiceLabel = _ttsService.voiceKey ?? '系统默认音色';
+            final rateValue = isNetwork
+                ? _ttsService.networkRate
+                : _ttsService.rate;
+            final rateText =
+                '${rateValue.toStringAsFixed(isNetwork ? 1 : 2)}'
+                '${isNetwork ? 'x' : ''}';
+            return ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.sizeOf(ctx).height * 0.86,
+              ),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(22, 12, 22, 28),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 36,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: colors.outlineVariant,
+                          borderRadius: BorderRadius.circular(2),
                         ),
                       ),
-                      const SizedBox(width: 10),
-                      Text(
-                        _ttsActive ? '正在朗读 第 ${_index + 1} 章' : '未在朗读',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Theme.of(ctx).colorScheme.outline,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 14),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 44,
-                    child: FilledButton.icon(
-                      onPressed: () {
-                        if (_ttsActive) {
-                          _stopTts();
-                        } else {
-                          _startTts();
-                        }
-                        setSheet(() {});
-                      },
-                      icon: Icon(_ttsActive ? Icons.stop : Icons.play_arrow),
-                      label: Text(_ttsActive ? '停止朗读' : '开始朗读'),
                     ),
-                  ),
-                  Row(
-                    children: [
-                      const Text('语速', style: TextStyle(fontSize: 13.5)),
-                      Expanded(
-                        child: Slider(
-                          value: _ttsService.rate,
-                          min: 0.3,
-                          max: 1.0,
-                          divisions: 14,
-                          onChanged: (v) {
-                            _ttsService.setRate(v);
-                            setSheet(() {});
-                          },
+                    const SizedBox(height: 14),
+                    Row(
+                      children: [
+                        Text(
+                          '听书',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: colors.onSurface,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Text(
+                          _ttsActive ? '正在朗读 第 ${_index + 1} 章' : '未在朗读',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: colors.outline,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 44,
+                      child: FilledButton.icon(
+                        onPressed: () {
+                          if (_ttsActive) {
+                            _stopTts();
+                          } else {
+                            _startTts(
+                              onStateChanged: () {
+                                if (ctx.mounted) setSheet(() {});
+                              },
+                            );
+                          }
+                          setSheet(() {});
+                        },
+                        icon: Icon(_ttsActive ? Icons.stop : Icons.play_arrow),
+                        label: Text(_ttsActive ? '停止朗读' : '开始朗读'),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Row(
+                      children: [
+                        const SizedBox(
+                          width: 64,
+                          child: Text('朗读引擎', style: TextStyle(fontSize: 13.5)),
+                        ),
+                        Expanded(
+                          child: SegmentedButton<NovelTtsEngine>(
+                            showSelectedIcon: false,
+                            segments: [
+                              const ButtonSegment(
+                                value: NovelTtsEngine.system,
+                                label: Text('系统引擎'),
+                                icon: Icon(Icons.record_voice_over_outlined),
+                              ),
+                              ButtonSegment(
+                                value: NovelTtsEngine.network,
+                                label: const Text('网络音色包'),
+                                icon: const Icon(Icons.cloud_outlined),
+                                enabled: networkSupported,
+                                tooltip: networkSupported
+                                    ? null
+                                    : NovelTtsService
+                                          .unsupportedPlatformMessage,
+                              ),
+                            ],
+                            selected: {_ttsService.engine},
+                            onSelectionChanged: _ttsEngineSwitching
+                                ? null
+                                : (selection) => _switchTtsEngine(
+                                    selection.first,
+                                    ctx,
+                                    setSheet,
+                                  ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (!networkSupported)
+                      Padding(
+                        padding: const EdgeInsets.only(left: 64, top: 2),
+                        child: Text(
+                          NovelTtsService.unsupportedPlatformMessage,
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            color: colors.outline,
+                          ),
                         ),
                       ),
-                      Text(
-                        _ttsService.rate.toStringAsFixed(2),
-                        style: const TextStyle(fontSize: 12.5),
+                    SwitchListTile.adaptive(
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                      title: const Text(
+                        '跟随朗读',
+                        style: TextStyle(fontSize: 13.5),
                       ),
-                    ],
-                  ),
-                  Row(
-                    children: [
-                      const Text('音色', style: TextStyle(fontSize: 13.5)),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: FutureBuilder<List<Map<String, String>>>(
-                          future: _voicesFuture ??= _ttsService.voices(),
+                      subtitle: const Text(
+                        '自动滚动或翻页到当前朗读片段',
+                        style: TextStyle(fontSize: 11.5),
+                      ),
+                      value: NovelReaderSettings.followTts,
+                      onChanged: (value) async {
+                        NovelReaderSettings.followTts = value;
+                        if (value) {
+                          _ttsSession.resumeFollow();
+                          _ttsProgrammaticPageChange = false;
+                        }
+                        NovelReaderSettings.save();
+                        setState(() {});
+                        setSheet(() {});
+                        if (!value || !_ttsActive) return;
+                        final readingChapter = _ttsSession.readingChapter;
+                        if (readingChapter != null &&
+                            readingChapter != _index) {
+                          await _loadChapter(
+                            readingChapter,
+                            fromTts: true,
+                          );
+                        }
+                        final offset = _ttsSession.readingOffset;
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          if (!mounted || !_ttsActive) return;
+                          if (_paged) {
+                            _followPagedOffset(offset);
+                          } else {
+                            _followScrollOffset(offset);
+                          }
+                        });
+                        if (ctx.mounted) setSheet(() {});
+                      },
+                    ),
+                    if (isNetwork)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 12),
+                        child: FutureBuilder<NovelTtsServiceStatus>(
+                          future: statusFuture,
                           builder: (ctx, snap) {
-                            final voices = snap.data ?? const [];
-                            if (voices.isEmpty) {
-                              return Text(
-                                snap.connectionState == ConnectionState.done
-                                    ? '系统默认'
-                                    : '加载中…',
-                                style: TextStyle(
-                                  fontSize: 12.5,
-                                  color: Theme.of(ctx).colorScheme.outline,
-                                ),
-                              );
-                            }
-                            String keyOf(Map<String, String> v) =>
-                                '${v['name']}|${v['locale']}';
-                            final current = _ttsService.voiceKey;
-                            final valid = current != null &&
-                                voices.any((v) => keyOf(v) == current);
-                            return DropdownButton<String>(
-                              value: valid ? current : null,
-                              hint: const Text('系统默认'),
-                              isExpanded: true,
-                              underline: const SizedBox.shrink(),
-                              items: [
-                                for (final v in voices)
-                                  DropdownMenuItem(
-                                    value: keyOf(v),
+                            final status = snap.data;
+                            final running = status?.running == true;
+                            final text = status == null
+                                ? (snap.hasError ? '服务检测失败' : '正在检测朗读服务…')
+                                : running
+                                ? 'Edge 朗读 TTS 运行中 · ${status.baseUrl}'
+                                : !status.pluginInstalled
+                                ? '未安装 Edge 朗读 TTS'
+                                : !status.pluginEnabled
+                                ? 'Edge 朗读 TTS 插件已关闭'
+                                : !status.serviceConfigured
+                                ? '服务配置缺失，请重新安装插件'
+                                : (status.message ?? 'Edge 朗读 TTS 未启动');
+                            return Container(
+                              padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+                              decoration: BoxDecoration(
+                                color: colors.surfaceContainerHighest
+                                    .withValues(
+                                      alpha: 0.55,
+                                    ),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    running
+                                        ? Icons.cloud_done
+                                        : Icons.cloud_off,
+                                    size: 18,
+                                    color: running
+                                        ? Colors.green
+                                        : colors.outline,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
                                     child: Text(
-                                      '${v['name']}（${v['locale']}）',
-                                      style: const TextStyle(fontSize: 13),
-                                      overflow: TextOverflow.ellipsis,
+                                      text,
+                                      style: TextStyle(
+                                        fontSize: 11.5,
+                                        color: running
+                                            ? Colors.green
+                                            : colors.outline,
+                                      ),
                                     ),
                                   ),
-                              ],
-                              onChanged: (key) async {
-                                if (key == null) return;
-                                await _ttsService.setVoice(key);
-                                setSheet(() {});
-                              },
+                                  if (status != null &&
+                                      status.pluginInstalled &&
+                                      status.pluginEnabled &&
+                                      status.serviceConfigured &&
+                                      !running)
+                                    TextButton(
+                                      onPressed: () async {
+                                        try {
+                                          await _ttsService.startRaTts();
+                                          SmartDialog.showToast(
+                                            'Edge 朗读 TTS 已启动',
+                                          );
+                                        } catch (e) {
+                                          SmartDialog.showToast('启动失败：$e');
+                                        }
+                                        if (!ctx.mounted) return;
+                                        setSheet(() {
+                                          statusFuture = _ttsService
+                                              .raTtsStatus();
+                                        });
+                                      },
+                                      child: const Text('启动服务'),
+                                    )
+                                  else if (status != null &&
+                                      (!status.pluginInstalled ||
+                                          !status.pluginEnabled ||
+                                          !status.serviceConfigured))
+                                    TextButton(
+                                      onPressed: () async {
+                                        await Get.toNamed(
+                                          AppPages.pluginCenter,
+                                        );
+                                        if (!ctx.mounted) return;
+                                        setSheet(() {
+                                          statusFuture = _ttsService
+                                              .raTtsStatus();
+                                        });
+                                      },
+                                      child: const Text('插件中心'),
+                                    )
+                                  else
+                                    IconButton(
+                                      tooltip: '重新检测',
+                                      onPressed: () {
+                                        setSheet(() {
+                                          statusFuture = _ttsService
+                                              .raTtsStatus();
+                                        });
+                                      },
+                                      icon: const Icon(Icons.refresh, size: 18),
+                                    ),
+                                ],
+                              ),
                             );
                           },
                         ),
                       ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      const Text('定时', style: TextStyle(fontSize: 13.5)),
-                      const SizedBox(width: 14),
-                      for (final m in [0, 15, 30, 60])
-                        Padding(
-                          padding: const EdgeInsets.only(right: 8),
-                          child: ChoiceChip(
-                            label: Text(
-                              m == 0 ? '关' : '$m分',
-                              style: const TextStyle(fontSize: 12),
-                            ),
-                            selected: _sleepMinutes == m,
-                            onSelected: (_) => _setSleepTimer(m, setSheet),
+                    Row(
+                      children: [
+                        const SizedBox(
+                          width: 64,
+                          child: Text('语速', style: TextStyle(fontSize: 13.5)),
+                        ),
+                        Expanded(
+                          child: Slider(
+                            value: isNetwork
+                                ? _ttsService.networkRate
+                                : _ttsService.rate,
+                            min: isNetwork ? 0.5 : 0.3,
+                            max: isNetwork ? 2.0 : 1.0,
+                            divisions: isNetwork ? 15 : 14,
+                            onChanged: (v) {
+                              if (isNetwork) {
+                                _ttsService.setNetworkRate(v);
+                              } else {
+                                _ttsService.setRate(v);
+                              }
+                              setSheet(() {});
+                            },
                           ),
                         ),
-                    ],
-                  ),
-                ],
+                        SizedBox(
+                          width: 42,
+                          child: Text(
+                            rateText,
+                            textAlign: TextAlign.end,
+                            style: const TextStyle(fontSize: 12.5),
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (isNetwork)
+                      Row(
+                        children: [
+                          const SizedBox(
+                            width: 64,
+                            child: Text('音色', style: TextStyle(fontSize: 13.5)),
+                          ),
+                          Expanded(
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(8),
+                              onTap: () => _showNetworkVoicePicker(setSheet),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 11,
+                                ),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        currentNetworkVoice?.name ?? '请选择网络音色',
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          color: currentNetworkVoice == null
+                                              ? colors.outline
+                                              : colors.onSurface,
+                                        ),
+                                      ),
+                                    ),
+                                    Icon(
+                                      Icons.chevron_right,
+                                      size: 20,
+                                      color: colors.outline,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: () async {
+                              if (_ttsActive) _stopTts();
+                              await Get.toNamed(AppPages.novelTtsVoices);
+                              if (!ctx.mounted) return;
+                              setSheet(() {});
+                            },
+                            child: const Text('管理音色包'),
+                          ),
+                        ],
+                      )
+                    else
+                      Row(
+                        children: [
+                          const SizedBox(
+                            width: 64,
+                            child: Text('音色', style: TextStyle(fontSize: 13.5)),
+                          ),
+                          Expanded(
+                            child: FutureBuilder<List<Map<String, String>>>(
+                              future: _voicesFuture ??= _ttsService.voices(),
+                              builder: (ctx, snap) {
+                                final voices = snap.data ?? const [];
+                                if (voices.isEmpty) {
+                                  return Text(
+                                    snap.connectionState == ConnectionState.done
+                                        ? '系统默认'
+                                        : '加载中…',
+                                    style: TextStyle(
+                                      fontSize: 12.5,
+                                      color: colors.outline,
+                                    ),
+                                  );
+                                }
+                                String keyOf(Map<String, String> v) =>
+                                    '${v['name']}|${v['locale']}';
+                                final current = _ttsService.voiceKey;
+                                final valid =
+                                    current != null &&
+                                    voices.any((v) => keyOf(v) == current);
+                                return DropdownButton<String>(
+                                  value: valid ? current : null,
+                                  hint: const Text('系统默认'),
+                                  isExpanded: true,
+                                  underline: const SizedBox.shrink(),
+                                  items: [
+                                    for (final v in voices)
+                                      DropdownMenuItem(
+                                        value: keyOf(v),
+                                        child: Text(
+                                          '${v['name']}（${v['locale']}）',
+                                          style: const TextStyle(fontSize: 13),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                  ],
+                                  onChanged: (key) async {
+                                    if (key == null) return;
+                                    await _ttsService.setVoice(key);
+                                    if (!ctx.mounted) return;
+                                    setSheet(() {});
+                                  },
+                                );
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        const SizedBox(
+                          width: 64,
+                          child: Text('定时', style: TextStyle(fontSize: 13.5)),
+                        ),
+                        for (final m in [0, 15, 30, 60])
+                          Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: ChoiceChip(
+                              label: Text(
+                                m == 0 ? '关' : '$m分',
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                              selected: _sleepMinutes == m,
+                              onSelected: (_) => _setSleepTimer(m, setSheet),
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      isNetwork
+                          ? '当前引擎：网络朗读 · ${currentNetworkVoice?.name ?? '未选择音色'}'
+                          : '当前引擎：系统朗读 · $systemVoiceLabel',
+                      style: TextStyle(fontSize: 11.5, color: colors.outline),
+                    ),
+                  ],
+                ),
               ),
             );
           },
         );
       },
     );
+  }
+
+  Future<void> _showNetworkVoicePicker(StateSetter setSheet) async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) {
+        final colors = Theme.of(ctx).colorScheme;
+        final voices = _ttsService.networkVoices;
+        return ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(ctx).height * 0.72,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 12, 8),
+                child: Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        '选择网络音色',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      icon: const Icon(Icons.close),
+                    ),
+                  ],
+                ),
+              ),
+              if (voices.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 22, 24, 26),
+                  child: Text(
+                    '还没有网络音色，请先管理音色包并快捷添加或导入音色。',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 13, color: colors.outline),
+                  ),
+                )
+              else
+                Flexible(
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: voices.length,
+                    itemBuilder: (ctx, index) {
+                      final voice = voices[index];
+                      final selected = voice.id == _ttsService.networkVoiceId;
+                      return ListTile(
+                        title: Text(
+                          voice.name,
+                          style: TextStyle(
+                            color: selected ? colors.primary : null,
+                            fontWeight: selected
+                                ? FontWeight.w600
+                                : FontWeight.normal,
+                          ),
+                        ),
+                        subtitle: Text(
+                          '${_networkVoiceIdentifier(voice)} · 在线音色包',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        trailing: selected
+                            ? Icon(Icons.check, color: colors.primary)
+                            : null,
+                        onTap: () => Navigator.pop(ctx, voice.id),
+                      );
+                    },
+                  ),
+                ),
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(Icons.tune),
+                title: const Text('管理音色包…'),
+                subtitle: const Text('快捷添加 / 导入 / 试听 / 编辑 / 导出'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.pop(ctx, '__manage__'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    if (!mounted || action == null) return;
+    if (action == '__manage__') {
+      if (_ttsActive) _stopTts();
+      await Get.toNamed(AppPages.novelTtsVoices);
+    } else {
+      await _ttsService.setNetworkVoice(action);
+    }
+    if (mounted) setSheet(() {});
+  }
+
+  String _networkVoiceIdentifier(NovelTtsVoice voice) {
+    final uri = Uri.tryParse(voice.url);
+    final raw = uri?.queryParameters['voice'];
+    return raw == null || raw.isEmpty ? voice.id : raw;
+  }
+
+  void _changeReadingMode(bool paged, VoidCallback refresh) {
+    if (paged == NovelReaderSettings.pagedMode) return;
+    final offset = _captureReadingOffset();
+    _readingOffset = offset;
+    _pendingReadingOffset = offset;
+    if (_ttsActive) _stopTts();
+    setState(() {
+      NovelReaderSettings.pagedMode = paged;
+      _pageIndex = 0;
+      _pagedReady = false;
+      _pageUnits = const [];
+      _pageKey = null;
+      _paginating = false;
+      _pendingJumpLast = false;
+      _pageCtrl?.dispose();
+      _pageCtrl = null;
+    });
+    refresh();
+    if (!paged) _scheduleScrollRestore(offset);
   }
 
   // ---------- 阅读设置 ----------
@@ -1076,6 +1892,7 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
               setState(() {});
               NovelReaderSettings.save();
             }
+
             return ConstrainedBox(
               constraints: BoxConstraints(
                 maxHeight: MediaQuery.sizeOf(ctx).height * 0.85,
@@ -1180,16 +1997,22 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
                                         f.$2,
                                         style: const TextStyle(fontSize: 12.5),
                                       ),
-                                      selected: NovelReaderSettings.fontKey == f.$1,
+                                      selected:
+                                          NovelReaderSettings.fontKey == f.$1,
                                       onSelected: (_) {
                                         NovelReaderSettings.fontKey = f.$1;
                                         refresh();
                                       },
-                                      selectedColor: Theme.of(ctx).colorScheme.primaryContainer,
+                                      selectedColor: Theme.of(
+                                        ctx,
+                                      ).colorScheme.primaryContainer,
                                       labelStyle: TextStyle(
-                                        color: NovelReaderSettings.fontKey == f.$1
+                                        color:
+                                            NovelReaderSettings.fontKey == f.$1
                                             ? Theme.of(ctx).colorScheme.primary
-                                            : Theme.of(ctx).colorScheme.onSurface,
+                                            : Theme.of(
+                                                ctx,
+                                              ).colorScheme.onSurface,
                                       ),
                                     ),
                                   ),
@@ -1210,7 +2033,10 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
                           const SizedBox(width: 8),
                           Text(
                             '点击下载后自动应用',
-                            style: TextStyle(fontSize: 11, color: Theme.of(ctx).colorScheme.outline),
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Theme.of(ctx).colorScheme.outline,
+                            ),
                           ),
                         ],
                       ),
@@ -1309,10 +2135,11 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
                                   label: const Text('滚动'),
                                   selected: !NovelReaderSettings.pagedMode,
                                   onSelected: (_) {
-                                    NovelReaderSettings.pagedMode = false;
-                                    refresh();
+                                    _changeReadingMode(false, refresh);
                                   },
-                                  selectedColor: Theme.of(ctx).colorScheme.primaryContainer,
+                                  selectedColor: Theme.of(
+                                    ctx,
+                                  ).colorScheme.primaryContainer,
                                   labelStyle: TextStyle(
                                     color: !NovelReaderSettings.pagedMode
                                         ? Theme.of(ctx).colorScheme.primary
@@ -1324,10 +2151,11 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
                                   label: const Text('仿真分页'),
                                   selected: NovelReaderSettings.pagedMode,
                                   onSelected: (_) {
-                                    NovelReaderSettings.pagedMode = true;
-                                    refresh();
+                                    _changeReadingMode(true, refresh);
                                   },
-                                  selectedColor: Theme.of(ctx).colorScheme.primaryContainer,
+                                  selectedColor: Theme.of(
+                                    ctx,
+                                  ).colorScheme.primaryContainer,
                                   labelStyle: TextStyle(
                                     color: NovelReaderSettings.pagedMode
                                         ? Theme.of(ctx).colorScheme.primary
@@ -1355,7 +2183,9 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
                             physics: const BouncingScrollPhysics(),
                             child: Row(
                               children: NovelPageTurnMode.values.map((mode) {
-                                final isSelected = NovelReaderSettings.pageAnim == mode.storageKey;
+                                final isSelected =
+                                    NovelReaderSettings.pageAnim ==
+                                    mode.storageKey;
                                 return Padding(
                                   padding: const EdgeInsets.only(right: 8),
                                   child: ChoiceChip(
@@ -1365,11 +2195,14 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
                                     ),
                                     selected: isSelected,
                                     onSelected: (_) {
-                                      NovelReaderSettings.pageAnim = mode.storageKey;
+                                      NovelReaderSettings.pageAnim =
+                                          mode.storageKey;
                                       NovelReaderSettings.save();
                                       refresh();
                                     },
-                                    selectedColor: Theme.of(ctx).colorScheme.primaryContainer,
+                                    selectedColor: Theme.of(
+                                      ctx,
+                                    ).colorScheme.primaryContainer,
                                     labelStyle: TextStyle(
                                       color: isSelected
                                           ? Theme.of(ctx).colorScheme.primary
@@ -1394,8 +2227,13 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
                           const Text('阅读主题', style: TextStyle(fontSize: 13.5)),
                           const SizedBox(width: 8),
                           Text(
-                            NovelReaderTheme.getThemeByIndex(NovelReaderSettings.themeIndex).name,
-                            style: TextStyle(fontSize: 11, color: Theme.of(ctx).colorScheme.outline),
+                            NovelReaderTheme.getThemeByIndex(
+                              NovelReaderSettings.themeIndex,
+                            ).name,
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Theme.of(ctx).colorScheme.outline,
+                            ),
                           ),
                         ],
                       ),
@@ -1408,7 +2246,8 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
                         itemCount: NovelReaderTheme.allThemes.length,
                         itemBuilder: (ctx, i) {
                           final theme = NovelReaderTheme.getThemeByIndex(i);
-                          final isSelected = NovelReaderSettings.themeIndex == i;
+                          final isSelected =
+                              NovelReaderSettings.themeIndex == i;
                           return GestureDetector(
                             onTap: () {
                               NovelReaderSettings.themeIndex = i;
@@ -1416,7 +2255,9 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
                               refresh();
                             },
                             child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 6),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                              ),
                               child: Column(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
@@ -1427,20 +2268,24 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
                                       color: theme.backgroundColor,
                                       borderRadius: BorderRadius.circular(8),
                                       border: Border.all(
-                                        color: isSelected ? theme.primaryColor : Colors.transparent,
+                                        color: isSelected
+                                            ? theme.primaryColor
+                                            : Colors.transparent,
                                         width: 2.5,
                                       ),
                                       boxShadow: isSelected
                                           ? [
                                               BoxShadow(
-                                                color: theme.primaryColor.withValues(alpha: 0.3),
+                                                color: theme.primaryColor
+                                                    .withValues(alpha: 0.3),
                                                 blurRadius: 8,
                                               ),
                                             ]
                                           : null,
                                     ),
                                     child: Column(
-                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
                                       children: [
                                         Text(
                                           'Aa',
@@ -1501,59 +2346,80 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTapUp: _handleTapZone,
-                onHorizontalDragEnd: _paged ? null : (details) {
-                  if (_loading || _episodes.length < 2) return;
-                  final velocity = details.primaryVelocity ?? 0;
-                  if (velocity.abs() < 350) return;
-                  if (velocity < 0) _nextChapter();
-                  else _prevChapter();
-                },
+                onHorizontalDragEnd: _paged
+                    ? null
+                    : (details) {
+                        if (_loading || _episodes.length < 2) return;
+                        final velocity = details.primaryVelocity ?? 0;
+                        if (velocity.abs() < 350) return;
+                        if (velocity < 0)
+                          _nextChapter();
+                        else
+                          _prevChapter();
+                      },
                 child: SafeArea(
                   bottom: false,
                   child: _error != null
                       ? _errorView(_error!, retry: () => _loadChapter(_index))
                       : !hasContent && _loading
-                          ? Center(child: CircularProgressIndicator(color: theme.primaryColor))
-                          : _paged
-                              ? _buildPagedArea(theme)
-                              : SingleChildScrollView(
-                                  controller: _scroll,
-                                  padding: EdgeInsets.fromLTRB(
-                                    NovelReaderSettings.pagePadding,
-                                    20,
-                                    NovelReaderSettings.pagePadding,
-                                    160,
+                      ? Center(
+                          child: CircularProgressIndicator(
+                            color: theme.primaryColor,
+                          ),
+                        )
+                      : _paged
+                      ? _buildPagedArea(theme)
+                      : NotificationListener<ScrollNotification>(
+                          onNotification: (notification) {
+                            if (_ttsActive &&
+                                notification is UserScrollNotification) {
+                              _ttsSession.takeOver();
+                            }
+                            return false;
+                          },
+                          child: SingleChildScrollView(
+                            controller: _scroll,
+                            padding: EdgeInsets.fromLTRB(
+                              NovelReaderSettings.pagePadding,
+                              20,
+                              NovelReaderSettings.pagePadding,
+                              160,
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                if (_titles.isNotEmpty)
+                                  Text(
+                                    _titles[_index],
+                                    style: TextStyle(
+                                      fontSize:
+                                          NovelReaderSettings.fontSize + 3,
+                                      fontWeight: FontWeight.w600,
+                                      color: theme.textColor,
+                                      height: 1.5,
+                                    ),
                                   ),
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      if (_titles.isNotEmpty)
-                                        Text(
-                                          _titles[_index],
-                                          style: TextStyle(
-                                            fontSize: NovelReaderSettings.fontSize + 3,
-                                            fontWeight: FontWeight.w600,
-                                            color: theme.textColor,
-                                            height: 1.5,
-                                          ),
-                                        ),
-                                      const SizedBox(height: 20),
-                                      if (_loading)
-                                        Padding(
-                                          padding: const EdgeInsets.only(top: 40),
-                                          child: Center(
-                                            child: CircularProgressIndicator(
-                                              color: theme.primaryColor,
-                                            ),
-                                          ),
-                                        )
-                                      else if (_error != null)
-                                        _errorView(_error!, retry: () => _loadChapter(_index))
-                                      else
-                                        ..._paragraphs(theme),
-                                    ],
-                                  ),
-                                ),
+                                const SizedBox(height: 20),
+                                if (_loading)
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 40),
+                                    child: Center(
+                                      child: CircularProgressIndicator(
+                                        color: theme.primaryColor,
+                                      ),
+                                    ),
+                                  )
+                                else if (_error != null)
+                                  _errorView(
+                                    _error!,
+                                    retry: () => _loadChapter(_index),
+                                  )
+                                else
+                                  ..._paragraphs(theme),
+                              ],
+                            ),
+                          ),
+                        ),
                 ),
               ),
             ),
@@ -1563,7 +2429,9 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
               Positioned.fill(
                 child: IgnorePointer(
                   child: Container(
-                    color: Colors.black.withValues(alpha: NovelReaderSettings.screenDim),
+                    color: Colors.black.withValues(
+                      alpha: NovelReaderSettings.screenDim,
+                    ),
                   ),
                 ),
               ),
@@ -1600,7 +2468,10 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
                       icon: const Icon(Icons.arrow_back_ios_new, size: 19),
                       color: theme.textColor,
                       padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+                      constraints: const BoxConstraints(
+                        minWidth: 40,
+                        minHeight: 40,
+                      ),
                       onPressed: _onBackPressed,
                     ),
                     const SizedBox(width: 4),
@@ -1641,7 +2512,10 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
                         size: 22,
                       ),
                       padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+                      constraints: const BoxConstraints(
+                        minWidth: 40,
+                        minHeight: 40,
+                      ),
                       tooltip: '添加书签',
                       onPressed: _addBookmark,
                     ),
@@ -1740,7 +2614,9 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
                     Row(
                       children: [
                         GestureDetector(
-                          onTap: _index > 0 ? () => _loadChapter(_index - 1) : null,
+                          onTap: _index > 0
+                              ? () => _loadChapter(_index - 1)
+                              : null,
                           child: Text(
                             '上一章',
                             style: TextStyle(
@@ -1757,13 +2633,18 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
                           child: Slider(
                             value: _titles.length > 1 ? _index.toDouble() : 0,
                             min: 0,
-                            max: (_titles.length - 1).toDouble().clamp(0, double.infinity),
+                            max: (_titles.length - 1).toDouble().clamp(
+                              0,
+                              double.infinity,
+                            ),
                             onChanged: (v) {
                               final target = v.round();
                               if (target != _index) _loadChapter(target);
                             },
                             activeColor: theme.primaryColor,
-                            inactiveColor: theme.textColor.withValues(alpha: 0.2),
+                            inactiveColor: theme.textColor.withValues(
+                              alpha: 0.2,
+                            ),
                             thumbColor: theme.primaryColor,
                           ),
                         ),
@@ -1847,9 +2728,7 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
             Icon(
               icon,
               size: 22,
-              color: disabled
-                  ? color.withValues(alpha: 0.25)
-                  : color,
+              color: disabled ? color.withValues(alpha: 0.25) : color,
             ),
             const SizedBox(height: 2),
             Text(
@@ -1869,18 +2748,28 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
 
   // ---------- 子组件 ----------
   List<Widget> _paragraphs(NovelReaderTheme theme) {
-    final style = NovelReaderSettings.applyTextStyle(TextStyle(
-      fontSize: NovelReaderSettings.fontSize,
-      height: NovelReaderSettings.lineHeight,
-      color: theme.textColor,
-    ));
+    _ensureReaderParagraphLayout();
+    final style = NovelReaderSettings.applyTextStyle(
+      TextStyle(
+        fontSize: NovelReaderSettings.fontSize,
+        height: NovelReaderSettings.lineHeight,
+        color: theme.textColor,
+      ),
+    );
     return [
-      for (final p in _content.split('\n'))
-        if (p.trim().isNotEmpty)
-          Padding(
-            padding: EdgeInsets.only(bottom: NovelReaderSettings.paragraphGap),
-            child: Text(p, style: style),
+      for (int i = 0; i < _readerParagraphs.length; i++)
+        Padding(
+          padding: EdgeInsets.only(bottom: NovelReaderSettings.paragraphGap),
+          child: Text.rich(
+            _ttsTextSpan(
+              _readerParagraphs[i].text,
+              _readerParagraphs[i].start,
+              style,
+              theme,
+            ),
+            key: _paragraphKeys[i],
           ),
+        ),
     ];
   }
 
@@ -1911,8 +2800,8 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
             decoration: BoxDecoration(
               color: isDownloaded
                   ? (isSelected
-                      ? Theme.of(context).colorScheme.primaryContainer
-                      : Theme.of(context).colorScheme.surfaceContainerHighest)
+                        ? Theme.of(context).colorScheme.primaryContainer
+                        : Theme.of(context).colorScheme.surfaceContainerHighest)
                   : Theme.of(context).colorScheme.surfaceContainerHighest,
               borderRadius: BorderRadius.circular(16),
               border: isSelected
@@ -1931,8 +2820,8 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
                     fontSize: 12.5,
                     color: isDownloaded
                         ? (isSelected
-                            ? Theme.of(context).colorScheme.primary
-                            : Theme.of(context).colorScheme.onSurface)
+                              ? Theme.of(context).colorScheme.primary
+                              : Theme.of(context).colorScheme.onSurface)
                         : Theme.of(context).colorScheme.outline,
                   ),
                 ),
@@ -1995,13 +2884,20 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.error_outline,
-                size: 44, color: theme.textColor.withValues(alpha: 0.4)),
+            Icon(
+              Icons.error_outline,
+              size: 44,
+              color: theme.textColor.withValues(alpha: 0.4),
+            ),
             const SizedBox(height: 14),
             Text(
               msg,
               textAlign: TextAlign.center,
-              style: TextStyle(color: theme.textColor, fontSize: 14, height: 1.6),
+              style: TextStyle(
+                color: theme.textColor,
+                fontSize: 14,
+                height: 1.6,
+              ),
             ),
             const SizedBox(height: 18),
             OutlinedButton(
@@ -2020,9 +2916,12 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
 
   Widget _buildPagedArea(NovelReaderTheme theme) {
     final hasContent = _content.isNotEmpty;
-    if (_error != null) return _errorView(_error!, retry: () => _loadChapter(_index));
+    if (_error != null)
+      return _errorView(_error!, retry: () => _loadChapter(_index));
     if (!hasContent && _loading) {
-      return Center(child: CircularProgressIndicator(color: theme.primaryColor));
+      return Center(
+        child: CircularProgressIndicator(color: theme.primaryColor),
+      );
     }
     if (!hasContent && _error != null) {
       return _errorView(_error!, retry: () => _loadChapter(_index));
@@ -2043,7 +2942,9 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
         );
         if (_pageKey != key) {
           _schedulePaginate(Size(c.maxWidth, c.maxHeight), key);
-          return Center(child: CircularProgressIndicator(color: theme.primaryColor));
+          return Center(
+            child: CircularProgressIndicator(color: theme.primaryColor),
+          );
         }
         final n = _pageUnits.length;
         if (n == 0) {
@@ -2057,7 +2958,11 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
           children: [
             Padding(
               padding: EdgeInsets.fromLTRB(
-                NovelReaderSettings.pagePadding, 6, NovelReaderSettings.pagePadding, 4),
+                NovelReaderSettings.pagePadding,
+                6,
+                NovelReaderSettings.pagePadding,
+                4,
+              ),
               child: Text(
                 _titles.isEmpty ? '' : _titles[_index],
                 maxLines: 1,
@@ -2070,23 +2975,38 @@ class _NovelReaderPageState extends State<NovelReaderPage> with WidgetsBindingOb
                 controller: _pageCtrl,
                 itemCount: n,
                 onPageChanged: (i) {
+                  if (!_ttsProgrammaticPageChange && _ttsActive) {
+                    _ttsSession.takeOver();
+                  }
                   setState(() => _pageIndex = i);
                   _saveProgress();
                 },
                 itemBuilder: (ctx, i) {
                   final unit = _pageUnits[i];
+                  var start = unit.start.clamp(0, _pagedJoined.length);
+                  var end = unit.end.clamp(start, _pagedJoined.length);
+                  while (start < end && _pagedJoined[start].trim().isEmpty) {
+                    start++;
+                  }
+                  while (end > start && _pagedJoined[end - 1].trim().isEmpty) {
+                    end--;
+                  }
+                  final pageText = _pagedJoined.substring(start, end);
+                  final pageStyle = NovelReaderSettings.applyTextStyle(
+                    TextStyle(
+                      fontSize: NovelReaderSettings.fontSize,
+                      height: NovelReaderSettings.lineHeight,
+                      color: theme.textColor,
+                    ),
+                  );
                   return _pageTransform(
                     i,
                     Padding(
                       padding: EdgeInsets.symmetric(
-                          horizontal: NovelReaderSettings.pagePadding),
-                      child: Text(
-                        _pagedJoined.substring(unit.start, unit.end).trim(),
-                        style: NovelReaderSettings.applyTextStyle(TextStyle(
-                          fontSize: NovelReaderSettings.fontSize,
-                          height: NovelReaderSettings.lineHeight,
-                          color: theme.textColor,
-                        )),
+                        horizontal: NovelReaderSettings.pagePadding,
+                      ),
+                      child: Text.rich(
+                        _ttsTextSpan(pageText, start, pageStyle, theme),
                       ),
                     ),
                   );

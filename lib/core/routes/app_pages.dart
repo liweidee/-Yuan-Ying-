@@ -98,6 +98,7 @@ import 'package:yuanying/modules/setting/views/bg_wallpaper_page.dart';
 import 'package:yuanying/modules/danmaku/views/danmaku_color_setting_page.dart';
 import 'package:yuanying/modules/subtitle_site/views/subtitle_site_page.dart';
 
+import 'package:yuanying/modules/novel/views/novel_tts_voice_page.dart';
 
 class AppPages {
   static const String initial = '/';
@@ -129,6 +130,7 @@ class AppPages {
   static const String liveConfig = '/liveConfig';
   static const String novelDetail = '/novelDetail';
   static const String novelReader = '/novelReader';
+  static const String novelTtsVoices = '/novelTtsVoices';
   static const String transfer = '/transfer';
   static const String mangaDetail = '/mangaDetail';
   static const String mangaReader = '/mangaReader';
@@ -244,6 +246,7 @@ class AppPages {
     GetPage(name: liveConfig, page: () => const LiveConfigPage()),
     GetPage(name: novelDetail, page: () => const NovelDetailPage()),
     GetPage(name: novelReader, page: () => const NovelReaderPage()),
+    GetPage(name: novelTtsVoices, page: () => const NovelTtsVoicePage()),
     GetPage(name: transfer, page: () => const TransferPage()),
     GetPage(name: mangaDetail, page: () => const MangaDetailPage()),
     GetPage(name: mangaReader, page: () => const MangaReaderPage()),

@@ -18,6 +18,7 @@ class NovelReaderSettings {
   static String customFontFamily = '';
   static double screenDim = 0;
   static String pageAnim = 'cover'; // 默认覆盖动画
+  static bool followTts = true;
 
   static Future<void> load() async {
     fontSize = StorageManager.getSetting<double>(SettingBoxKey.novelFontSize) ?? 20;
@@ -31,6 +32,7 @@ class NovelReaderSettings {
     customFontFamily = StorageManager.getSetting<String>(SettingBoxKey.novelCustomFontFamily) ?? '';
     screenDim = StorageManager.getSetting<double>(SettingBoxKey.novelScreenDim) ?? 0;
     pageAnim = StorageManager.getSetting<String>(SettingBoxKey.novelPageAnim) ?? 'cover';
+    followTts = StorageManager.getSetting<bool>(SettingBoxKey.novelTtsFollow) ?? true;
   }
 
   static Future<void> save() async {
@@ -45,6 +47,7 @@ class NovelReaderSettings {
     await StorageManager.setSetting(SettingBoxKey.novelCustomFontFamily, customFontFamily);
     await StorageManager.setSetting(SettingBoxKey.novelScreenDim, screenDim);
     await StorageManager.setSetting(SettingBoxKey.novelPageAnim, pageAnim);
+    await StorageManager.setSetting(SettingBoxKey.novelTtsFollow, followTts);
   }
 
   static TextStyle applyTextStyle(TextStyle base) {
