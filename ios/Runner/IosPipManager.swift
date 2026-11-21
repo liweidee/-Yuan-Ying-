@@ -160,7 +160,16 @@ final class IosPipManager: NSObject, AVPictureInPictureControllerDelegate {
     view.layer.addSublayer(layer)
     playerLayer = layer
 
-    let controller = AVPictureInPictureController(playerLayer: layer)
+    guard let controller = AVPictureInPictureController(playerLayer: layer) else {
+      cleanUpPip()
+      result([
+        "supported": true,
+        "active": false,
+        "requested": false,
+        "error": "无法创建系统画中画控制器",
+      ])
+      return
+    }
     controller.delegate = self
     if #available(iOS 14.2, *) {
       controller.canStartPictureInPictureAutomaticallyFromInline = true
@@ -536,7 +545,7 @@ final class IosPipManager: NSObject, AVPictureInPictureControllerDelegate {
 
   private var activeRootViewController: UIViewController? {
     if let appDelegate = UIApplication.shared.delegate,
-       let window = appDelegate.window,
+       let window = appDelegate.window ?? nil,
        let root = window.rootViewController {
       return root
     }
