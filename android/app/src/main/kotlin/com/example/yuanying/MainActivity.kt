@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager.LayoutParams
 import com.ryanheise.audioservice.AudioServiceActivity
+import com.dsplayer.ds_player.jar_spider.JarSpiderHost
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
@@ -178,6 +179,8 @@ class MainActivity : AudioServiceActivity(), MethodCallHandler {
                 else -> result.notImplemented()
             }
         }
+
+        JarSpiderHost.register(this, flutterEngine.dartExecutor.binaryMessenger)
 
         val bridge = PythonPluginBridge(applicationContext)
         bridge.registerChannel(

@@ -21,6 +21,9 @@ import 'package:yuanying/t4/services/catvod_open_service.dart';
 import 'package:yuanying/t4/services/py3_spider_service.dart';
 import 'package:yuanying/t4/services/app_cms_service.dart';
 import 'package:yuanying/t4/services/app_ysv2_service.dart';
+import 'package:yuanying/t4/services/i_jar_spider_service.dart';
+import 'package:yuanying/t4/services/jar_spider_service.dart';
+import 'package:yuanying/t4/services/jar_win_spider_service.dart';
 import 'package:yuanying/core/constants/storage_keys.dart';
 import 'package:yuanying/t4/services/nodejs_spider_service.dart';
 import 'package:yuanying/nodejs/nodejs_service.dart';
@@ -30,6 +33,7 @@ import 'package:yuanying/core/constants/app_constants.dart';
 import 'package:flutter/foundation.dart';
 import 'package:yuanying/services/catvod_log_service.dart';
 import 'package:yuanying/modules/manual_source/controllers/manual_source_controller.dart';
+import 'package:yuanying/modules/plugin_center/services/install_manager.dart';
 import 'site_switch_result.dart';
 import 'package:yuanying/utils/error_formatter.dart';
 import 'package:yuanying/utils/business_exception.dart';
@@ -65,7 +69,8 @@ class SourceManager extends GetxController {
   }
 
   final RxList<Map<String, dynamic>> remoteSites = <Map<String, dynamic>>[].obs;
-  final RxList<Map<String, dynamic>> remoteParses = <Map<String, dynamic>>[].obs;
+  final RxList<Map<String, dynamic>> remoteParses =
+      <Map<String, dynamic>>[].obs;
   final RxList<Map<String, dynamic>> localSites = <Map<String, dynamic>>[].obs;
   final RxList<Map<String, dynamic>> localParses = <Map<String, dynamic>>[].obs;
   final RxList<Map<String, dynamic>> fileSites = <Map<String, dynamic>>[].obs;
@@ -75,12 +80,15 @@ class SourceManager extends GetxController {
   final RxList<Map<String, dynamic>> manualSites = <Map<String, dynamic>>[].obs;
 
   final Rx<Map<String, dynamic>?> currentSite = Rx<Map<String, dynamic>?>(null);
-  final RxList<Map<String, dynamic>> currentParses = <Map<String, dynamic>>[].obs;
+  final RxList<Map<String, dynamic>> currentParses =
+      <Map<String, dynamic>>[].obs;
   final RxString configLogo = ''.obs;
   final RxBool isConfigLoaded = false.obs;
   final RxString configSource = 'remote'.obs;
   final RxBool isConfigLoading = false.obs;
   final RxBool configLoadError = false.obs;
+  final RxBool isAvailableSourceEmpty = false.obs;
+
   /// 配置加载失败的具体原因（仅业务异常时有值，例如插件未安装/已关闭）
   /// 首页列表区域可读取展示；为空时使用默认占位文案。
   final RxString configLoadErrorMessage = ''.obs;
@@ -96,6 +104,11 @@ class SourceManager extends GetxController {
 
   bool _isRestoring = false;
   int _configLoadId = 0; // 防止异步竞态
+
+  String _currentJarSource = '';
+  String _currentJarConfigBaseUrl = '';
+  bool _filteredAllSites = false;
+  bool _jarConfigActivated = false;
 
   late CatVodLogService _logService;
 
@@ -114,7 +127,8 @@ class SourceManager extends GetxController {
     final api = site['api']?.toString() ?? '';
     final apiWithoutQuery = api.split('?')[0];
     return type == '3' &&
-        (apiWithoutQuery.endsWith('drpy2.min.js') || apiWithoutQuery.endsWith('drpy2.js'));
+        (apiWithoutQuery.endsWith('drpy2.min.js') ||
+            apiWithoutQuery.endsWith('drpy2.js'));
   }
 
   /// 判断是否为 drpy3 站点
@@ -190,6 +204,62 @@ class SourceManager extends GetxController {
     return api == 'csp_AppYsV2';
   }
 
+  static const Set<String> _builtInCspApis = {
+    'csp_XBPQ',
+    'csp_XYQHiker',
+    'csp_AppCMS',
+    'csp_APPV2',
+    'csp_AppYsV2',
+  };
+
+  static bool _isCspSite(Map<String, dynamic> site) {
+    final type = site['type']?.toString() ?? '';
+    final api = (site['api']?.toString() ?? '').split('?').first;
+    return type == '3' && api.startsWith('csp_');
+  }
+
+  /// 无 JAR 插件时由应用内处理的 csp 类型。
+  static bool isCspJarCandidate(Map<String, dynamic> site) {
+    final api = (site['api']?.toString() ?? '').split('?').first;
+    return _isCspSite(site) && !_builtInCspApis.contains(api);
+  }
+
+  String get _jarPluginId => Platform.isWindows ? 'jar-win' : 'jar';
+
+  bool get _jarPluginEnabled =>
+      InstallManager.instance.findInstalled(_jarPluginId)?.enabled == true;
+
+  bool get _jarRuntimeSupported => Platform.isAndroid || Platform.isWindows;
+
+  bool _isJarSite(Map<String, dynamic> site) {
+    return _jarRuntimeSupported &&
+        _jarPluginEnabled &&
+        _currentJarSource.isNotEmpty &&
+        _isCspSite(site);
+  }
+
+  bool _isDisabledActiveJarSite(Map<String, dynamic> site) {
+    if (!_jarConfigActivated ||
+        _currentJarSource.isEmpty ||
+        !_isCspSite(site)) {
+      return false;
+    }
+    final plugin = InstallManager.instance.findInstalled(_jarPluginId);
+    return plugin != null && !plugin.enabled;
+  }
+
+  Never _throwJarDisabled() {
+    throw BusinessException(
+      'JAR 插件已关闭，当前配置的 csp 爬虫源不可用。'
+      '请前往「插件中心」开启 $_jarPluginId 后重试。',
+    );
+  }
+
+  void _captureJarSource(dynamic raw, {String configBaseUrl = ''}) {
+    _currentJarSource = raw?.toString().trim() ?? '';
+    _currentJarConfigBaseUrl = configBaseUrl;
+  }
+
   /// 该源是否支持"合并当前分类列表为播放列表"
   static bool isMergeListSite(Map<String, dynamic>? site) {
     if (site == null) return false;
@@ -231,12 +301,15 @@ class SourceManager extends GetxController {
     if (isCatVodOpenSite(site)) return 'CatVod';
     if (isAppCmsSite(site)) return 'AppCMS';
     if (isAppYsV2Site(site)) return 'YsV2';
+    if (isCspJarCandidate(site)) return 'JAR';
     return 'T4';
   }
 
   ISpiderService get currentApiService {
     final site = currentSite.value;
     if (site == null) return _apiService;
+    if (_isDisabledActiveJarSite(site)) _throwJarDisabled();
+    if (_isJarSite(site)) return _getOrCreateJarService(site);
     if (isXbpqSite(site)) return _getOrCreateXbpqService(site);
     if (isXyqSite(site)) return _getOrCreateXyqService(site);
     if (isCatVodOpenSite(site)) return _getOrCreateCatvodOpenService(site);
@@ -246,7 +319,8 @@ class SourceManager extends GetxController {
     if (isNodeJSSite(site)) return _getNodeJSService();
     if (isAppCmsSite(site)) return _getOrCreateAppCmsService(site);
     if (isAppYsV2Site(site)) return _getOrCreateAppYsV2Service(site);
-    if (isAppV2Site(site)) return _getOrCreateAppYsV2Service(site); // 兼容 csp_APPV2
+    if (isAppV2Site(site))
+      return _getOrCreateAppYsV2Service(site); // 兼容 csp_APPV2
     return _apiService;
   }
 
@@ -254,6 +328,10 @@ class SourceManager extends GetxController {
     final key = site['key']?.toString() ?? '';
     final api = site['api']?.toString() ?? '';
     final ext = site['ext'];
+    if (_isDisabledActiveJarSite(site)) _throwJarDisabled();
+    if (_isJarSite(site)) {
+      return _getOrCreateJarService(site);
+    }
     if (!isDrpy3Site(site) &&
         !isDrpy2Site(site) &&
         !isXbpqSite(site) &&
@@ -324,7 +402,9 @@ class SourceManager extends GetxController {
     return currentApiService;
   }
 
-  final Rx<Map<String, dynamic>?> _pushAgentSite = Rx<Map<String, dynamic>?>(null);
+  final Rx<Map<String, dynamic>?> _pushAgentSite = Rx<Map<String, dynamic>?>(
+    null,
+  );
   Map<String, dynamic>? get pushAgentSite => _pushAgentSite.value;
 
   /// 当前生效的源列表
@@ -358,7 +438,9 @@ class SourceManager extends GetxController {
     if (key.contains('catvod_')) return true;
     if (key.startsWith('nodejs_')) return true;
     if (isDrpy3Site(site)) return true;
-    if (apiWithoutQuery.endsWith('drpy2.min.js') || apiWithoutQuery.endsWith('drpy2.js')) return true;
+    if (apiWithoutQuery.endsWith('drpy2.min.js') ||
+        apiWithoutQuery.endsWith('drpy2.js'))
+      return true;
     if (api == 'csp_XBPQ') return true;
     if (api == 'csp_XYQHiker') return true;
     if (api == 'csp_AppCMS') return true;
@@ -366,12 +448,34 @@ class SourceManager extends GetxController {
     if (api == 'csp_AppYsV2') return true;
     if (apiWithoutQuery.endsWith('.py')) return true;
     if (key.startsWith('manual_')) return true;
+    if (_isJarSite(site)) return true;
     return false;
   }
 
   List<Map<String, dynamic>> _filterSites(List<Map<String, dynamic>> sites) {
-    return sites.where(_shouldKeepSite).toList();
+    final jarPlugin = InstallManager.instance.findInstalled(_jarPluginId);
+    final hasJarCandidates =
+        _currentJarSource.isNotEmpty && sites.any(isCspJarCandidate);
+    final filtered = sites.where(_shouldKeepSite).toList();
+    _jarConfigActivated =
+        _currentJarSource.isNotEmpty &&
+        _jarPluginEnabled &&
+        filtered.any(_isCspSite);
+    if (jarPlugin != null &&
+        !jarPlugin.enabled &&
+        hasJarCandidates &&
+        filtered.isNotEmpty) {
+      SmartDialog.showToast(
+        'jar插件已关闭，仅支持${_builtInCspApis.join('、')}类型',
+      );
+    }
+    if (sites.isNotEmpty && filtered.isEmpty) {
+      _filteredAllSites = true;
+    }
+    return filtered;
   }
+
+  String get _availableSourceEmptyMessage => '当前配置过滤后没有可用爬虫源，请检查配置内容后重试。';
 
   @override
   void onInit() {
@@ -391,7 +495,8 @@ class SourceManager extends GetxController {
     // 处理极端场景（如用户手动清空了 Hive）。
     _ensureManualConfigExists();
 
-    configSource.value = GStorage.getSetting<String>('config_source') ?? 'remote';
+    configSource.value =
+        GStorage.getSetting<String>('config_source') ?? 'remote';
     WidgetsBinding.instance.addPostFrameCallback((_) {
       loadConfig();
     });
@@ -446,10 +551,14 @@ class SourceManager extends GetxController {
     final parseList = this.parses;
     if (siteList.isNotEmpty) {
       Map<String, dynamic>? selectedSite;
-      final savedKey = GStorage.getSetting<String>(SettingBoxKey.lastSelectedSiteKey);
+      final savedKey = GStorage.getSetting<String>(
+        SettingBoxKey.lastSelectedSiteKey,
+      );
       if (savedKey != null && savedKey.isNotEmpty) {
         try {
-          selectedSite = siteList.firstWhere((s) => s['key']?.toString() == savedKey);
+          selectedSite = siteList.firstWhere(
+            (s) => s['key']?.toString() == savedKey,
+          );
         } catch (_) {
           selectedSite = null;
           GStorage.deleteSetting('source_switch_scroll_grid');
@@ -469,6 +578,7 @@ class SourceManager extends GetxController {
       // 避免首页残留"配置加载失败 / 手动源为空"的错误占位。
       configLoadError.value = false;
       isManualConfigEmpty.value = false;
+      isAvailableSourceEmpty.value = false;
       configLoadErrorMessage.value = '';
 
       await _switchToSite(currentSite.value!);
@@ -490,7 +600,9 @@ class SourceManager extends GetxController {
     final savedKey = GStorage.setting.get('selected_config_key');
     Map<String, dynamic>? selectedConfig;
     if (savedKey != null && savedKey.toString().isNotEmpty) {
-      selectedConfig = customConfigs.firstWhereOrNull((c) => c['key'] == savedKey);
+      selectedConfig = customConfigs.firstWhereOrNull(
+        (c) => c['key'] == savedKey,
+      );
     }
 
     // 兜底：仅当 savedKey 不存在时，才从 customConfigs 里挑第一条。
@@ -510,7 +622,8 @@ class SourceManager extends GetxController {
       }
     }
 
-    currentConfigType.value = selectedConfig?['configType']?.toString() ?? 'tvbox';
+    currentConfigType.value =
+        selectedConfig?['configType']?.toString() ?? 'tvbox';
     currentConfigKey.value = selectedConfig?['key']?.toString() ?? '';
     NodeJSService.instance.updateConfigType(currentConfigType.value);
 
@@ -518,10 +631,14 @@ class SourceManager extends GetxController {
     // 让"重试"和"切换配置"都能自然清除上一次的插件错误提示。
     configLoadErrorMessage.value = '';
     isManualConfigEmpty.value = false;
+    isAvailableSourceEmpty.value = false;
+    _filteredAllSites = false;
+    _jarConfigActivated = false;
 
     try {
       // ===== 手动源配置分支 =====
       if (configSource.value == 'manual') {
+        _captureJarSource(null);
         await _refreshManualSites();
         if (currentLoadId != _configLoadId) return;
         await _selectDefaultSite();
@@ -537,6 +654,7 @@ class SourceManager extends GetxController {
         if (manualSites.isEmpty) {
           configLoadError.value = true;
           isManualConfigEmpty.value = true;
+          isAvailableSourceEmpty.value = false;
           configLoadErrorMessage.value =
               '手动源为空，请前往「手动源管理」上传 py / dr2 / dr3 / js 等源文件';
         }
@@ -563,8 +681,13 @@ class SourceManager extends GetxController {
     final hasCustomSites = GStorage.getCustomSites().isNotEmpty;
     if (hasCustomSites && this.sites.isEmpty) {
       configLoadError.value = true;
+      isAvailableSourceEmpty.value = _filteredAllSites;
+      if (_filteredAllSites) {
+        configLoadErrorMessage.value = _availableSourceEmptyMessage;
+      }
     } else {
       configLoadError.value = false;
+      isAvailableSourceEmpty.value = false;
       // 非"手动源为空"的失败路径（如 remote 配置加载失败但 hasCustomSites 为 false）
       // 确保该标记被重置，避免首页走"前往手动源管理"的错误分支
       isManualConfigEmpty.value = false;
@@ -611,6 +734,7 @@ class SourceManager extends GetxController {
   }
 
   Future<void> _loadRemoteConfig({int? loadId}) async {
+    _captureJarSource(null);
     // 过滤掉手动源配置：manual_source 的 api 是 'manual'（不是 URL），
     // 不能当远端配置去 fetchConfig。手动源由 configSource == 'manual'
     // 分支处理（走 _refreshManualSites）。
@@ -656,6 +780,7 @@ class SourceManager extends GetxController {
       final result = await _apiService.fetchConfig(configUrl: configUrl);
       // 检查是否被更新的请求覆盖了
       if (loadId != null && loadId != _configLoadId) return;
+      _captureJarSource(result['spider'], configBaseUrl: configUrl);
       if (result['sites'] != null && result['sites'] is List) {
         final rawSites = (result['sites'] as List)
             .map((e) => Map<String, dynamic>.from(e))
@@ -680,6 +805,7 @@ class SourceManager extends GetxController {
       if (loadId == null || loadId == _configLoadId) _updatePushAgentCache();
     } catch (e) {
       print('加载远端配置失败: $e');
+      _captureJarSource(null);
       if (loadId == null || loadId == _configLoadId) {
         remoteSites.clear();
         remoteParses.clear();
@@ -733,6 +859,7 @@ class SourceManager extends GetxController {
   /// 加载 CatVod 配置（远程或本地 ZIP）
   Future<void> _loadCatVodConfig(String configUrl, {int? loadId}) async {
     final currentLoadId = loadId ?? ++_configLoadId;
+    _captureJarSource(null);
     try {
       // ===== 显式检查插件状态 =====
       // 即使 Node 进程已在运行，也要检查插件是否被禁用。
@@ -758,14 +885,17 @@ class SourceManager extends GetxController {
       if (selectedKey != null && selectedKey.isNotEmpty) {
         final customConfigs = GStorage.getCustomSites();
         try {
-          selectedConfig = customConfigs.firstWhere((c) => c['key'] == selectedKey);
+          selectedConfig = customConfigs.firstWhere(
+            (c) => c['key'] == selectedKey,
+          );
         } catch (_) {
           selectedConfig = null;
         }
       }
 
       // ---- 判断是否为本地 ZIP 配置 ----
-      final isLocalZip = selectedConfig != null &&
+      final isLocalZip =
+          selectedConfig != null &&
           selectedConfig['_source'] == 'catvod_local_zip' &&
           selectedConfig['zipFilePath'] != null &&
           selectedConfig['zipFilePath'].toString().isNotEmpty;
@@ -896,7 +1026,9 @@ class SourceManager extends GetxController {
 
       final videoSites = result['video']?['sites'] as List<dynamic>? ?? [];
       if (videoSites.isNotEmpty) {
-        final rawSites = videoSites.map((e) => Map<String, dynamic>.from(e)).toList();
+        final rawSites = videoSites
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList();
         final filteredSites = _filterSites(rawSites);
         if (currentLoadId == _configLoadId) {
           remoteSites.value = filteredSites;
@@ -936,6 +1068,7 @@ class SourceManager extends GetxController {
   }
 
   Future<void> _loadLocalConfigPackage(String configKey) async {
+    _captureJarSource(null);
     final package = GStorage.getConfigPackage(configKey);
     if (package == null) {
       print('配置包不存在: $configKey');
@@ -945,7 +1078,10 @@ class SourceManager extends GetxController {
     }
     final rawSites = package['sites'] as List? ?? [];
     final rawParses = package['parses'] as List? ?? [];
-    final allSites = rawSites.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+    _captureJarSource(package['spider']);
+    final allSites = rawSites
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
     final filteredSites = _filterSites(allSites);
     if (filteredSites.isEmpty) {
       localSites.clear();
@@ -957,7 +1093,9 @@ class SourceManager extends GetxController {
       site['_source'] = 'local';
     }
     localSites.value = filteredSites;
-    localParses.value = rawParses.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+    localParses.value = rawParses
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
     _updatePushAgentCache();
   }
 
@@ -985,6 +1123,7 @@ class SourceManager extends GetxController {
   }
 
   Future<void> _loadFileConfig(String filePath) async {
+    _captureJarSource(null);
     try {
       final file = File(filePath);
       if (!await file.exists()) {
@@ -995,6 +1134,7 @@ class SourceManager extends GetxController {
       }
       final content = await file.readAsString();
       final jsonData = jsonDecode(content) as Map<String, dynamic>;
+      _captureJarSource(jsonData['spider'], configBaseUrl: filePath);
       if (jsonData['sites'] == null || jsonData['sites'] is! List) {
         print('配置文件缺少 sites 字段');
         fileSites.clear();
@@ -1014,12 +1154,15 @@ class SourceManager extends GetxController {
         site['_source'] = 'local_file';
       }
       fileSites.value = filteredSites;
-      fileParses.value = (jsonData['parses'] as List?)
-          ?.map((e) => Map<String, dynamic>.from(e))
-          .toList() ?? [];
+      fileParses.value =
+          (jsonData['parses'] as List?)
+              ?.map((e) => Map<String, dynamic>.from(e))
+              .toList() ??
+          [];
       _updatePushAgentCache();
     } catch (e) {
       print('加载本地文件配置失败: $e');
+      _captureJarSource(null);
       fileSites.clear();
       fileParses.clear();
     }
@@ -1057,7 +1200,9 @@ class SourceManager extends GetxController {
 
   Future<void> switchConfig(String configKey) async {
     final customConfigs = GStorage.getCustomSites();
-    final targetConfig = customConfigs.firstWhereOrNull((c) => c['key'] == configKey);
+    final targetConfig = customConfigs.firstWhereOrNull(
+      (c) => c['key'] == configKey,
+    );
     if (targetConfig == null) return;
 
     final configType = targetConfig['configType']?.toString() ?? 'tvbox';
@@ -1123,7 +1268,8 @@ class SourceManager extends GetxController {
     final sourceList = this.sites;
     final parseList = this.parses;
     Map<String, dynamic>? target = sourceList.firstWhereOrNull(
-        (s) => s['key']?.toString() == siteKey);
+      (s) => s['key']?.toString() == siteKey,
+    );
     if (target == null) {
       target = sourceList.isNotEmpty ? sourceList.first : null;
     }
@@ -1146,7 +1292,7 @@ class SourceManager extends GetxController {
     } else {
       final raw = result.error;
       final errorMsg = (raw != null && raw.isNotEmpty)
-          ? ErrorFormatter.formatSwitchError(raw)   // 幂等，已带切源前缀原样返回
+          ? ErrorFormatter.formatSwitchError(raw) // 幂等，已带切源前缀原样返回
           : '切换源失败：未知错误';
       _notifyHomeControllerFailure(errorMsg);
     }
@@ -1182,21 +1328,29 @@ class SourceManager extends GetxController {
     if (siteKey.isEmpty) return;
     Map<String, dynamic>? target;
     try {
-      target = remoteSites.firstWhere((site) => site['key']?.toString() == siteKey);
+      target = remoteSites.firstWhere(
+        (site) => site['key']?.toString() == siteKey,
+      );
     } catch (_) {}
     if (target == null) {
       try {
-        target = localSites.firstWhere((site) => site['key']?.toString() == siteKey);
+        target = localSites.firstWhere(
+          (site) => site['key']?.toString() == siteKey,
+        );
       } catch (_) {}
     }
     if (target == null) {
       try {
-        target = fileSites.firstWhere((site) => site['key']?.toString() == siteKey);
+        target = fileSites.firstWhere(
+          (site) => site['key']?.toString() == siteKey,
+        );
       } catch (_) {}
     }
     if (target == null) {
       try {
-        target = manualSites.firstWhere((site) => site['key']?.toString() == siteKey);
+        target = manualSites.firstWhere(
+          (site) => site['key']?.toString() == siteKey,
+        );
       } catch (_) {}
     }
     if (target != null) {
@@ -1221,6 +1375,10 @@ class SourceManager extends GetxController {
     final key = site['key']?.toString();
 
     try {
+      if (_isDisabledActiveJarSite(site)) _throwJarDisabled();
+      if (_isJarSite(site)) {
+        return await _switchToJarSite(site);
+      }
       if (isDrpy3Site(site)) {
         return await _switchToDrpy3Site(site);
       }
@@ -1308,7 +1466,12 @@ class SourceManager extends GetxController {
     if (!Get.isRegistered<XbpqService>(tag: key)) {
       final extUrl = site['ext']?.toString() ?? '';
       final categories = <String>[];
-      final service = XbpqService(key, site['api']?.toString() ?? '', extUrl, categories);
+      final service = XbpqService(
+        key,
+        site['api']?.toString() ?? '',
+        extUrl,
+        categories,
+      );
       Get.put(service, tag: key, permanent: true);
     }
     return Get.find<XbpqService>(tag: key);
@@ -1324,19 +1487,24 @@ class SourceManager extends GetxController {
         ext: site['ext'],
       );
       return SiteSwitchResult.success(siteKey: site['key']?.toString());
-      } catch (e) {
-        return SiteSwitchResult.failure(
-          ErrorFormatter.formatException(e),
-          siteKey: site['key']?.toString(),
-        );
-      }
+    } catch (e) {
+      return SiteSwitchResult.failure(
+        ErrorFormatter.formatException(e),
+        siteKey: site['key']?.toString(),
+      );
+    }
   }
 
   XyqService _getOrCreateXyqService(Map<String, dynamic> site) {
     final key = site['key']?.toString() ?? 'xyq_default';
     if (!Get.isRegistered<XyqService>(tag: key)) {
       final extUrl = site['ext']?.toString() ?? '';
-      final service = XyqService(key, site['api']?.toString() ?? '', extUrl, []);
+      final service = XyqService(
+        key,
+        site['api']?.toString() ?? '',
+        extUrl,
+        [],
+      );
       Get.put(service, tag: key, permanent: true);
     }
     return Get.find<XyqService>(tag: key);
@@ -1352,19 +1520,21 @@ class SourceManager extends GetxController {
         ext: site['ext'],
       );
       return SiteSwitchResult.success(siteKey: site['key']?.toString());
-      } catch (e) {
-        return SiteSwitchResult.failure(
-          ErrorFormatter.formatException(e),
-          siteKey: site['key']?.toString(),
-        );
-      }
+    } catch (e) {
+      return SiteSwitchResult.failure(
+        ErrorFormatter.formatException(e),
+        siteKey: site['key']?.toString(),
+      );
+    }
   }
 
   CatvodOpenService _getOrCreateCatvodOpenService(Map<String, dynamic> site) {
     return Get.find<CatvodOpenService>();
   }
 
-  Future<SiteSwitchResult> _switchToCatVodOpenSite(Map<String, dynamic> site) async {
+  Future<SiteSwitchResult> _switchToCatVodOpenSite(
+    Map<String, dynamic> site,
+  ) async {
     print('_switchToCatVodOpenSite: start for ${site['key']}');
     try {
       final service = _getOrCreateCatvodOpenService(site);
@@ -1374,8 +1544,10 @@ class SourceManager extends GetxController {
         site['key']?.toString() ?? '',
         ext: site['ext'],
       );
-      print('_switchToCatVodOpenSite: '
-          '${result.success ? "ready" : "fail: ${result.error}"}');
+      print(
+        '_switchToCatVodOpenSite: '
+        '${result.success ? "ready" : "fail: ${result.error}"}',
+      );
       return result;
     } catch (e, stack) {
       print('_switchToCatVodOpenSite error: $e\n$stack');
@@ -1404,6 +1576,46 @@ class SourceManager extends GetxController {
     return Get.find<AppCmsService>(tag: key);
   }
 
+  IJarSpiderService _getOrCreateJarService(Map<String, dynamic> site) {
+    final key = site['key']?.toString() ?? 'jar_default';
+    final tag = '${_jarPluginId}_runtime_$key';
+    if (Platform.isWindows) {
+      if (!Get.isRegistered<JarWinSpiderService>(tag: tag)) {
+        Get.put(JarWinSpiderService(), tag: tag, permanent: true);
+      }
+      return Get.find<JarWinSpiderService>(tag: tag);
+    }
+    if (!Get.isRegistered<JarSpiderService>(tag: tag)) {
+      Get.put(JarSpiderService(), tag: tag, permanent: true);
+    }
+    return Get.find<JarSpiderService>(tag: tag);
+  }
+
+  Future<SiteSwitchResult> _switchToJarSite(
+    Map<String, dynamic> site,
+  ) async {
+    final service = _getOrCreateJarService(site);
+    final siteKey = site['key']?.toString();
+    service.configureJarSource(
+      _currentJarSource,
+      configBaseUrl: _currentJarConfigBaseUrl,
+    );
+    service.switchSite(
+      site['api']?.toString() ?? '',
+      siteKey ?? '',
+      ext: site['ext'],
+    );
+    try {
+      await service.ensureReady();
+      return SiteSwitchResult.success(siteKey: siteKey);
+    } catch (e) {
+      return SiteSwitchResult.failure(
+        ErrorFormatter.formatSwitchError(e),
+        siteKey: siteKey,
+      );
+    }
+  }
+
   AppYsV2Service _getOrCreateAppYsV2Service(Map<String, dynamic> site) {
     final key = site['key']?.toString() ?? 'appysv2_default';
     if (!Get.isRegistered<AppYsV2Service>(tag: key)) {
@@ -1429,7 +1641,9 @@ class SourceManager extends GetxController {
     return Get.find<NodeJSSpiderService>();
   }
 
-  Future<SiteSwitchResult> _switchToNodeJSSite(Map<String, dynamic> site) async {
+  Future<SiteSwitchResult> _switchToNodeJSSite(
+    Map<String, dynamic> site,
+  ) async {
     final service = _getNodeJSService();
     final siteKey = site['key']?.toString();
     final nodejs = NodeJSService.instance;
@@ -1506,8 +1720,7 @@ class SourceManager extends GetxController {
       // - 远端配置：key='push_agent', type=4
       // - 手动 T4：key='manual_t4_push_agent', name='push_agent(T4)', type=4
       if (type == 4 &&
-          (key == 'push_agent' ||
-              name.toLowerCase().contains('push_agent'))) {
+          (key == 'push_agent' || name.toLowerCase().contains('push_agent'))) {
         _pushAgentSite.value = site;
         return;
       }

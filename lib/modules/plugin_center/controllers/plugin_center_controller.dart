@@ -13,6 +13,7 @@ import 'package:yuanying/modules/plugin_center/models/service_config.dart';
 import 'package:yuanying/modules/plugin_center/services/service_manager.dart';
 import 'package:yuanying/nodejs/nodejs_service.dart';
 import 'package:yuanying/modules/sandbox/services/sandbox_service_manager.dart';
+import 'package:yuanying/t4/services/jar_win_spider_service.dart';
 
 enum MarketFilter { all, updatable, installed, notInstalled }
 
@@ -226,6 +227,14 @@ class PluginCenterController extends GetxController {
         }
       }
 
+      if (id == 'jar-win' || id == 'jar-guard') {
+        try {
+          await JarWinSpiderService.shutdownAll();
+        } catch (e) {
+          debugPrint('[PluginCenterController] stop jar-win failed: $e');
+        }
+      }
+
       // ===== 通用：停掉所有依赖此运行时的服务 =====
       // 覆盖 php-win / php / python-win / qjs 等所有被 ServiceManager 管理的服务
       // （含隐藏的 svc-local-php-t4）。
@@ -269,6 +278,9 @@ class PluginCenterController extends GetxController {
   }
 
   Future<void> uninstall(InstalledPlugin plugin) async {
+    if (plugin.id == 'jar-win' || plugin.id == 'jar-guard') {
+      await JarWinSpiderService.shutdownAll();
+    }
     await InstallManager.instance.uninstall(plugin);
     reloadInstalled();
   }

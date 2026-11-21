@@ -6,7 +6,8 @@ import 'package:get/get.dart';
 import 'package:yuanying/core/routes/app_pages.dart';
 import 'package:yuanying/core/theme/style.dart';
 import 'package:yuanying/common/widgets/button/icon_button.dart';
-import 'package:yuanying/common/widgets/flutter/refresh_indicator.dart' as custom;
+import 'package:yuanying/common/widgets/flutter/refresh_indicator.dart'
+    as custom;
 import 'package:yuanying/common/widgets/video_card/video_card_v.dart';
 import 'package:yuanying/common/widgets/video_card/video_card_h.dart';
 import 'package:yuanying/common/skeleton/video_card_v.dart';
@@ -63,11 +64,14 @@ class _HomePageState extends CommonPageState<HomePage>
 
   bool _shouldUseTmdb(String siteKey) {
     // 1. 检查 TMDB 总开关
-    final tmdbEnabled = StorageManager.getSetting<bool>(SettingBoxKey.tmdbEnabled) ?? false;
+    final tmdbEnabled =
+        StorageManager.getSetting<bool>(SettingBoxKey.tmdbEnabled) ?? false;
     if (!tmdbEnabled) return false;
 
     // 2. 检查当前站点是否在启用列表中
-    final rawMap = StorageManager.getSetting<Map<dynamic, dynamic>>(SettingBoxKey.tmdbSiteEnabledMap);
+    final rawMap = StorageManager.getSetting<Map<dynamic, dynamic>>(
+      SettingBoxKey.tmdbSiteEnabledMap,
+    );
     if (rawMap == null) return false;
     return rawMap[siteKey] as bool? ?? false;
   }
@@ -86,11 +90,13 @@ class _HomePageState extends CommonPageState<HomePage>
     final siteKey = site?['key']?.toString() ?? '';
     final siteName = site?['name']?.toString() ?? '';
     final pwd = site?['ext'] is Map
-      ? (site!['ext'] as Map)['pwd']?.toString() ?? 'tinydust'
-      : 'tinydust';
-    
+        ? (site!['ext'] as Map)['pwd']?.toString() ?? 'tinydust'
+        : 'tinydust';
+
     // ---- 小说判断（优先） ----
-    if (siteKey.contains('[书]') || siteName.contains('[书]') || siteName.contains('小说')) {
+    if (siteKey.contains('[书]') ||
+        siteName.contains('[书]') ||
+        siteName.contains('小说')) {
       Get.toNamed(
         '/novelDetail',
         arguments: {
@@ -115,7 +121,11 @@ class _HomePageState extends CommonPageState<HomePage>
       return;
     }
 
-    if (siteKey.contains('[听]') || siteName.contains('[听]') || siteName.contains('音乐') || siteName.contains('有声') || siteName.contains('听书')) {
+    if (siteKey.contains('[听]') ||
+        siteName.contains('[听]') ||
+        siteName.contains('音乐') ||
+        siteName.contains('有声') ||
+        siteName.contains('听书')) {
       Get.toNamed(
         AppPages.musicDetail,
         arguments: {
@@ -133,12 +143,16 @@ class _HomePageState extends CommonPageState<HomePage>
     // }
 
     // 猫影视 nodejs_baseset 配置中心
-    if (sourceManager.currentConfigType.value == 'catvod' && siteKey == 'nodejs_baseset' && item.vodId == 'config-center') {
-      Get.to(() => WebviewPage(
-        url: 'http://127.0.0.1:9988/website',
-        title: '配置中心',
-        inApp: true,
-      ));
+    if (sourceManager.currentConfigType.value == 'catvod' &&
+        siteKey == 'nodejs_baseset' &&
+        item.vodId == 'config-center') {
+      Get.to(
+        () => WebviewPage(
+          url: 'http://127.0.0.1:9988/website',
+          title: '配置中心',
+          inApp: true,
+        ),
+      );
       return;
     }
 
@@ -176,9 +190,7 @@ class _HomePageState extends CommonPageState<HomePage>
       // 2. vod_id 是纯字符串（如 '夸克扫码' / 'set-cookie'），
       //    需要先请求服务端 ac=action&action=xxx 拿到真正的配置
       final raw = item.vodId.trim();
-      if (raw.isNotEmpty &&
-          !raw.startsWith('{') &&
-          !raw.startsWith('[')) {
+      if (raw.isNotEmpty && !raw.startsWith('{') && !raw.startsWith('[')) {
         actionRenderer.showStringAction(
           raw,
           module: module,
@@ -209,13 +221,15 @@ class _HomePageState extends CommonPageState<HomePage>
       List<String> sourceKeys;
       final bool onlyDefault = filterService.onlyDefaultSource.value;
       if (onlyDefault) {
-        final currentKey = sourceManager.currentSite.value?['key']?.toString() ?? '';
+        final currentKey =
+            sourceManager.currentSite.value?['key']?.toString() ?? '';
         sourceKeys = currentKey.isNotEmpty ? [currentKey] : [];
       } else {
         sourceKeys = filterService.enabledSourceKeyList;
       }
       if (sourceKeys.isEmpty) {
-        final currentKey = sourceManager.currentSite.value?['key']?.toString() ?? '';
+        final currentKey =
+            sourceManager.currentSite.value?['key']?.toString() ?? '';
         if (currentKey.isNotEmpty) sourceKeys = [currentKey];
       }
       if (sourceKeys.isEmpty) {
@@ -241,7 +255,6 @@ class _HomePageState extends CommonPageState<HomePage>
       return;
     }
 
-
     // TMDB 集成拦截 - 首页进入（fromHome: true）
     if (_shouldUseTmdb(siteKey)) {
       // ↓ 查缓存
@@ -253,8 +266,8 @@ class _HomePageState extends CommonPageState<HomePage>
           videoItem: item,
           site: site!,
           fromHome: true,
-          tmdbId: cached?.tmdbId,        // 命中缓存则直接带 ID
-          mediaType: cached?.mediaType,  // 命中缓存则直接带类型
+          tmdbId: cached?.tmdbId, // 命中缓存则直接带 ID
+          mediaType: cached?.mediaType, // 命中缓存则直接带类型
         ),
         routeName: AppPages.tmdbDetail,
       );
@@ -403,7 +416,7 @@ class _HomePageState extends CommonPageState<HomePage>
         'pwd': pwd,
         'site': site,
         'mergeDetail': detail,
-        'mergeStartVodId': clickedItem.vodId,   // vod_id，用于定位起始集
+        'mergeStartVodId': clickedItem.vodId, // vod_id，用于定位起始集
       },
     );
   }
@@ -464,9 +477,14 @@ class _HomePageState extends CommonPageState<HomePage>
                     style: FilledButton.styleFrom(
                       backgroundColor: colorScheme.primary,
                       foregroundColor: colorScheme.onPrimary,
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 12,
+                      ),
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(Style.mdRadius.topLeft.x),
+                        borderRadius: BorderRadius.circular(
+                          Style.mdRadius.topLeft.x,
+                        ),
                       ),
                     ),
                     child: const Text(
@@ -490,13 +508,15 @@ class _HomePageState extends CommonPageState<HomePage>
     final colorScheme = theme.colorScheme;
     final isCatvod = sourceManager.currentConfigType.value == 'catvod';
     final isManualEmpty = sourceManager.isManualConfigEmpty.value;
+    final isAvailableSourceEmpty = sourceManager.isAvailableSourceEmpty.value;
     // 业务异常时优先展示具体原因（如"未安装 Node.js 运行时"）
     final specificError = sourceManager.configLoadErrorMessage.value;
 
-    // 三种场景文案：
+    // 四种场景文案：
     //   1. 手动源为空（最优先）
-    //   2. 猫影视配置失败
-    //   3. 其他（remote / local / file）配置失败
+    //   2. 过滤后没有可用爬虫源
+    //   3. 猫影视配置失败
+    //   4. 其他（remote / local / file）配置失败
     final String title;
     final String subtitle;
     final IconData icon;
@@ -509,18 +529,19 @@ class _HomePageState extends CommonPageState<HomePage>
           : '请前往「手动源管理」上传 py / dr2 / dr3 等源文件';
       icon = Icons.folder_off_outlined;
       iconColor = colorScheme.primary;
+    } else if (isAvailableSourceEmpty) {
+      title = '可用爬虫源为空';
+      subtitle = specificError.isNotEmpty ? specificError : '当前配置过滤后没有可用爬虫源';
+      icon = Icons.playlist_remove;
+      iconColor = colorScheme.primary;
     } else if (isCatvod) {
       title = '猫影视配置获取失败';
-      subtitle = specificError.isNotEmpty
-          ? specificError
-          : '如果点击重试无效则需要重启 App';
+      subtitle = specificError.isNotEmpty ? specificError : '如果点击重试无效则需要重启 App';
       icon = Icons.error_outline;
       iconColor = colorScheme.error;
     } else {
       title = '配置加载失败';
-      subtitle = specificError.isNotEmpty
-          ? specificError
-          : '请检查网络连接或配置内容是否正确';
+      subtitle = specificError.isNotEmpty ? specificError : '请检查网络连接或配置内容是否正确';
       icon = Icons.error_outline;
       iconColor = colorScheme.error;
     }
@@ -564,6 +585,7 @@ class _HomePageState extends CommonPageState<HomePage>
                         OutlinedButton(
                           onPressed: () {
                             sourceManager.configLoadError.value = false;
+                            sourceManager.isAvailableSourceEmpty.value = false;
                             sourceManager.loadConfig();
                           },
                           style: OutlinedButton.styleFrom(
@@ -573,8 +595,7 @@ class _HomePageState extends CommonPageState<HomePage>
                         ),
                         const SizedBox(width: 12),
                         FilledButton.icon(
-                          onPressed: () =>
-                              Get.toNamed(AppPages.manualSource),
+                          onPressed: () => Get.toNamed(AppPages.manualSource),
                           icon: const Icon(Icons.folder_special, size: 18),
                           label: const Text('前往手动源管理'),
                           style: FilledButton.styleFrom(
@@ -588,6 +609,7 @@ class _HomePageState extends CommonPageState<HomePage>
                     FilledButton(
                       onPressed: () {
                         sourceManager.configLoadError.value = false;
+                        sourceManager.isAvailableSourceEmpty.value = false;
                         sourceManager.loadConfig();
                       },
                       style: FilledButton.styleFrom(
@@ -696,8 +718,11 @@ class _HomePageState extends CommonPageState<HomePage>
             ),
           ),
           const SizedBox(width: 2),
-          Icon(Icons.arrow_drop_down,
-              size: 18, color: theme.colorScheme.outline),
+          Icon(
+            Icons.arrow_drop_down,
+            size: 18,
+            color: theme.colorScheme.outline,
+          ),
         ],
       );
     });
@@ -753,7 +778,8 @@ class _HomePageState extends CommonPageState<HomePage>
               child: _SourceSwitchDialogContent(
                 sites: sites,
                 tagList: tagList,
-                currentSiteKey: sourceManager.currentSite.value?['key']?.toString() ?? '',
+                currentSiteKey:
+                    sourceManager.currentSite.value?['key']?.toString() ?? '',
                 onSelectSite: (site) {
                   sourceManager.switchSite(site);
                   Navigator.of(context).pop();
@@ -773,8 +799,10 @@ class _HomePageState extends CommonPageState<HomePage>
       return;
     }
 
-    String currentKey = GStorage.getSetting<String>('selected_config_key') ?? '';
-    if (currentKey.isEmpty || !customSites.any((site) => site['key']?.toString() == currentKey)) {
+    String currentKey =
+        GStorage.getSetting<String>('selected_config_key') ?? '';
+    if (currentKey.isEmpty ||
+        !customSites.any((site) => site['key']?.toString() == currentKey)) {
       final firstKey = customSites.first['key']?.toString();
       if (firstKey != null && firstKey.isNotEmpty) {
         currentKey = firstKey;
@@ -803,7 +831,10 @@ class _HomePageState extends CommonPageState<HomePage>
             borderRadius: BorderRadius.circular(16),
           ),
           backgroundColor: Colors.white,
-          insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 24,
+          ),
           child: Container(
             width: dialogWidth,
             constraints: const BoxConstraints(maxHeight: 500),
@@ -879,14 +910,22 @@ class _HomePageState extends CommonPageState<HomePage>
                           if (source == 'local') {
                             final configKey = site['_configKey']?.toString();
                             if (configKey != null && configKey.isNotEmpty) {
-                              final package = GStorage.getConfigPackage(configKey);
+                              final package = GStorage.getConfigPackage(
+                                configKey,
+                              );
                               if (package != null) {
-                                final sites = (package['sites'] as List?)
-                                        ?.map((e) => Map<String, dynamic>.from(e))
+                                final sites =
+                                    (package['sites'] as List?)
+                                        ?.map(
+                                          (e) => Map<String, dynamic>.from(e),
+                                        )
                                         .toList() ??
                                     [];
-                                final parses = (package['parses'] as List?)
-                                        ?.map((e) => Map<String, dynamic>.from(e))
+                                final parses =
+                                    (package['parses'] as List?)
+                                        ?.map(
+                                          (e) => Map<String, dynamic>.from(e),
+                                        )
                                         .toList() ??
                                     [];
                                 sourceManager.applyLocalConfigPackage(
@@ -900,7 +939,10 @@ class _HomePageState extends CommonPageState<HomePage>
                           } else if (source == 'local_file') {
                             final filePath = site['api']?.toString();
                             if (filePath != null && filePath.isNotEmpty) {
-                              sourceManager.loadFileConfig(filePath, siteKey: key);
+                              sourceManager.loadFileConfig(
+                                filePath,
+                                siteKey: key,
+                              );
                             }
                           } else {
                             sourceManager.switchConfig(key);
@@ -911,9 +953,14 @@ class _HomePageState extends CommonPageState<HomePage>
                         child: Container(
                           height: 48,
                           padding: const EdgeInsets.symmetric(horizontal: 16),
-                          margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                          margin: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 2,
+                          ),
                           decoration: BoxDecoration(
-                            color: isSelected ? const Color(0xFFE8F5E9) : Colors.white,
+                            color: isSelected
+                                ? const Color(0xFFE8F5E9)
+                                : Colors.white,
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Row(
@@ -935,8 +982,12 @@ class _HomePageState extends CommonPageState<HomePage>
                                 name,
                                 style: TextStyle(
                                   fontSize: 16,
-                                  fontWeight: isSelected ? FontWeight.w500 : FontWeight.normal,
-                                  color: isSelected ? const Color(0xFF2E7D32) : Colors.grey[800],
+                                  fontWeight: isSelected
+                                      ? FontWeight.w500
+                                      : FontWeight.normal,
+                                  color: isSelected
+                                      ? const Color(0xFF2E7D32)
+                                      : Colors.grey[800],
                                 ),
                               ),
                             ],
@@ -961,12 +1012,17 @@ class _HomePageState extends CommonPageState<HomePage>
       textDirection: TextDirection.ltr,
       textScaler: MediaQuery.textScalerOf(context),
     )..layout();
-    return textPainter.width.clamp(0.0, MediaQuery.of(context).size.width * 0.25);
+    return textPainter.width.clamp(
+      0.0,
+      MediaQuery.of(context).size.width * 0.25,
+    );
   }
 
   /// 获取顶栏背景色：开启壁纸时全透明，否则实色
   Color _getTopBarColor(ThemeData theme) {
-    return SettingPref.bgActive ? Colors.transparent : theme.colorScheme.surface;
+    return SettingPref.bgActive
+        ? Colors.transparent
+        : theme.colorScheme.surface;
   }
 
   /// 开启壁纸时，全透明底（仅保留一条 0.5px 的极细分割线，用于区分滚动内容）
@@ -976,7 +1032,9 @@ class _HomePageState extends CommonPageState<HomePage>
       decoration: BoxDecoration(
         border: Border(
           bottom: BorderSide(
-            color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.08),
+            color: Theme.of(
+              context,
+            ).colorScheme.outline.withValues(alpha: 0.08),
             width: 0.5,
           ),
         ),
@@ -1012,7 +1070,10 @@ class _HomePageState extends CommonPageState<HomePage>
         });
       } else {
         topBar = Obx(() {
-          final offset = mainController.barOffset.value.clamp(0.0, Style.topBarHeight);
+          final offset = mainController.barOffset.value.clamp(
+            0.0,
+            Style.topBarHeight,
+          );
           return _maybeBlur(
             CustomHeightWidget(
               height: Style.topBarHeight - offset,
@@ -1067,12 +1128,21 @@ class _HomePageState extends CommonPageState<HomePage>
                   indicatorWeight: 0.1,
                   labelColor: theme.colorScheme.primary,
                   unselectedLabelColor: theme.colorScheme.onSurface,
-                  labelStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
-                  unselectedLabelStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.normal),
+                  labelStyle: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  unselectedLabelStyle: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.normal,
+                  ),
                   overlayColor: WidgetStateProperty.all(Colors.transparent),
                   splashFactory: NoSplash.splashFactory,
-                  tabs: categories.map((item) => Tab(text: item.typeName)).toList(),
-                  onTap: (index) => controller.switchCategory(categories[index]),
+                  tabs: categories
+                      .map((item) => Tab(text: item.typeName))
+                      .toList(),
+                  onTap: (index) =>
+                      controller.switchCategory(categories[index]),
                 ),
               ),
             ),
@@ -1096,9 +1166,7 @@ class _HomePageState extends CommonPageState<HomePage>
                         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       ),
                       icon: Icon(
-                        isOn
-                            ? Icons.playlist_play
-                            : Icons.playlist_remove,
+                        isOn ? Icons.playlist_play : Icons.playlist_remove,
                         size: 24,
                       ),
                       onPressed: () =>
@@ -1110,15 +1178,21 @@ class _HomePageState extends CommonPageState<HomePage>
                   const SizedBox(width: 4),
                   Obx(() {
                     final cid = controller.currentCategory.value?.typeId;
-                    final hasFilter = cid != null &&
+                    final hasFilter =
+                        cid != null &&
                         controller.filters.containsKey(cid) &&
                         controller.filters[cid]!.isNotEmpty;
                     if (!hasFilter) return const SizedBox.shrink();
                     return IconButton(
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(),
-                      style: IconButton.styleFrom(tapTargetSize: MaterialTapTargetSize.shrinkWrap),
-                      icon: Icon(showFilter ? Icons.filter_alt : Icons.filter_alt_off, size: 20),
+                      style: IconButton.styleFrom(
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      icon: Icon(
+                        showFilter ? Icons.filter_alt : Icons.filter_alt_off,
+                        size: 20,
+                      ),
                       onPressed: () => controller.toggleFilterBar(siteKey),
                       splashRadius: 20,
                     );
@@ -1129,7 +1203,9 @@ class _HomePageState extends CommonPageState<HomePage>
                     return IconButton(
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(),
-                      style: IconButton.styleFrom(tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                      style: IconButton.styleFrom(
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
                       icon: Icon(mode.icon, size: 20),
                       onPressed: controller.toggleCardLayout,
                       tooltip: mode.label,
@@ -1140,7 +1216,9 @@ class _HomePageState extends CommonPageState<HomePage>
                   IconButton(
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(),
-                    style: IconButton.styleFrom(tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                    style: IconButton.styleFrom(
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
                     icon: const Icon(Icons.expand_more, size: 20),
                     onPressed: () => _showAllCategoriesDialog(context),
                     splashRadius: 20,
@@ -1215,7 +1293,10 @@ class _HomePageState extends CommonPageState<HomePage>
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
                 child: Row(
                   children: [
                     Text(
@@ -1229,7 +1310,11 @@ class _HomePageState extends CommonPageState<HomePage>
                     const Spacer(),
                     GestureDetector(
                       onTap: () => Navigator.pop(context),
-                      child: Icon(Icons.close, size: 20, color: colorScheme.outline),
+                      child: Icon(
+                        Icons.close,
+                        size: 20,
+                        color: colorScheme.outline,
+                      ),
                     ),
                   ],
                 ),
@@ -1248,7 +1333,8 @@ class _HomePageState extends CommonPageState<HomePage>
                   itemCount: categories.length,
                   itemBuilder: (context, index) {
                     final c = categories[index];
-                    final isSelected = controller.currentCategory.value?.typeId == c.typeId;
+                    final isSelected =
+                        controller.currentCategory.value?.typeId == c.typeId;
                     return GestureDetector(
                       onTap: () {
                         controller.switchCategory(c);
@@ -1440,13 +1526,15 @@ class _SourceSwitchDialogContent extends StatefulWidget {
       _SourceSwitchDialogContentState();
 }
 
-class _SourceSwitchDialogContentState extends State<_SourceSwitchDialogContent> {
+class _SourceSwitchDialogContentState
+    extends State<_SourceSwitchDialogContent> {
   String _searchQuery = '';
   String _selectedTag = '全部';
   bool _isGridView = true;
   late ScrollController _scrollController;
 
-  String get _scrollOffsetKey => 'source_switch_scroll_${_isGridView ? 'grid' : 'list'}';
+  String get _scrollOffsetKey =>
+      'source_switch_scroll_${_isGridView ? 'grid' : 'list'}';
   String get _viewModeKey => 'source_switch_view_mode';
   String get _selectedTagKey => 'source_switch_selected_tag';
 
@@ -1606,13 +1694,13 @@ class _SourceSwitchDialogContentState extends State<_SourceSwitchDialogContent> 
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           child: Container(
-            width: double.infinity,                    // 强制容器宽度填满父级
-            alignment: Alignment.centerLeft,            // 让内部子组件左对齐
+            width: double.infinity, // 强制容器宽度填满父级
+            alignment: Alignment.centerLeft, // 让内部子组件左对齐
             child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               physics: const BouncingScrollPhysics(),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.start,  // 显式左对齐
+                mainAxisAlignment: MainAxisAlignment.start, // 显式左对齐
                 children: [
                   _buildTagChip(
                     label: '全部',
@@ -1624,9 +1712,9 @@ class _SourceSwitchDialogContentState extends State<_SourceSwitchDialogContent> 
                     return Padding(
                       padding: const EdgeInsets.only(right: 8),
                       child: _buildTagChip(
-                        label: '[$tag]',                  // 加中括号显示
-                        isSelected: _selectedTag == tag,  // 选中判断仍用原始 tag
-                        onTap: () => _selectTag(tag),     // 选中值仍用原始 tag
+                        label: '[$tag]', // 加中括号显示
+                        isSelected: _selectedTag == tag, // 选中判断仍用原始 tag
+                        onTap: () => _selectTag(tag), // 选中值仍用原始 tag
                       ),
                     );
                   }),
@@ -1645,12 +1733,13 @@ class _SourceSwitchDialogContentState extends State<_SourceSwitchDialogContent> 
                     controller: _scrollController,
                     slivers: [
                       SliverGrid(
-                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 2,
-                          crossAxisSpacing: 12,
-                          mainAxisSpacing: 8,
-                          childAspectRatio: 3.2,
-                        ),
+                        gridDelegate:
+                            const SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: 2,
+                              crossAxisSpacing: 12,
+                              mainAxisSpacing: 8,
+                              childAspectRatio: 3.2,
+                            ),
                         delegate: SliverChildBuilderDelegate(
                           (context, index) {
                             final site = _filteredSites[index];
@@ -1789,8 +1878,8 @@ class _SourceSwitchDialogContentState extends State<_SourceSwitchDialogContent> 
                 size: 18,
                 color: canSearch
                     ? (isSearchEnabled
-                        ? colorScheme.primary
-                        : colorScheme.outline.withOpacity(0.5))
+                          ? colorScheme.primary
+                          : colorScheme.outline.withOpacity(0.5))
                     : colorScheme.outline.withOpacity(0.3),
               ),
               padding: EdgeInsets.zero,
