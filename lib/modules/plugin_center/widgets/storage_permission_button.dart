@@ -13,6 +13,21 @@ import 'package:get/get.dart';
 class StoragePermissionButton extends StatefulWidget {
   const StoragePermissionButton({super.key});
 
+  static const _channel = MethodChannel('com.example.yuanying/storage');
+
+  static Future<bool> isGranted() async {
+    try {
+      return await _channel.invokeMethod<bool>('isExternalStorageManager') ??
+          false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<void> request() async {
+    await _channel.invokeMethod('requestAllFilesAccess');
+  }
+
   @override
   State<StoragePermissionButton> createState() =>
       _StoragePermissionButtonState();
@@ -20,8 +35,6 @@ class StoragePermissionButton extends StatefulWidget {
 
 class _StoragePermissionButtonState extends State<StoragePermissionButton>
     with WidgetsBindingObserver {
-  static const _channel = MethodChannel('com.example.yuanying/storage');
-
   final RxBool _granted = false.obs;
   bool _checking = false;
 
@@ -50,9 +63,7 @@ class _StoragePermissionButtonState extends State<StoragePermissionButton>
 
   Future<void> _refreshStatus() async {
     try {
-      final ok =
-          await _channel.invokeMethod<bool>('isExternalStorageManager') ??
-              false;
+      final ok = await StoragePermissionButton.isGranted();
       if (!mounted) return;
       _granted.value = ok;
     } catch (_) {
@@ -65,15 +76,13 @@ class _StoragePermissionButtonState extends State<StoragePermissionButton>
     if (_checking) return;
     _checking = true;
     try {
-      final ok =
-          await _channel.invokeMethod<bool>('isExternalStorageManager') ??
-              false;
+      final ok = await StoragePermissionButton.isGranted();
       _granted.value = ok;
       if (ok) {
         SmartDialog.showToast('已授权文件访问');
         return;
       }
-      await _channel.invokeMethod('requestAllFilesAccess');
+      await StoragePermissionButton.request();
       // 500ms 刷新覆盖「用户快速返回」的极小概率路径；
       // 主路径靠 didChangeAppLifecycleState(resumed) 兜底
       Future.delayed(const Duration(milliseconds: 500), _refreshStatus);

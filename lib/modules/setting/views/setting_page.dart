@@ -172,7 +172,15 @@ class SettingPage extends StatelessWidget {
             subtitle: '查看和管理已缓存的视频',
             onTap: () => Get.toNamed(AppPages.cacheManager),
           ),
-                    const SizedBox(height: 8),
+          const SizedBox(height: 8),
+          _buildSettingItem(
+            context: context,
+            icon: Icons.storage_rounded,
+            title: '存储空间与下载目录',
+            subtitle: '查看离线缓存占用并迁移下载保存位置',
+            onTap: () => Get.toNamed(AppPages.storageManagement),
+          ),
+          const SizedBox(height: 8),
           _buildSettingItem(
             context: context,
             icon: Icons.wifi,

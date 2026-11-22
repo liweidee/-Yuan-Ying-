@@ -9,13 +9,11 @@ import 'package:yuanying/build_config.dart';
 import 'package:yuanying/common/assets.dart';
 import 'package:yuanying/common/extensions/num_ext.dart';
 import 'package:yuanying/common/widgets/dialog/backup_dialog.dart';
-import 'package:yuanying/common/widgets/dialog/dialog.dart';
 import 'package:yuanying/core/constants/app_constants.dart';
 import 'package:yuanying/core/theme/style.dart';
 import 'package:yuanying/services/debug_log_service.dart';
 import 'package:yuanying/services/system_log_service.dart';
 import 'package:yuanying/t4/services/source_manager.dart';
-import 'package:yuanying/utils/cache_manager.dart';
 import 'package:yuanying/utils/page_utils.dart';
 import 'package:yuanying/utils/platform_utils.dart';
 import 'package:yuanying/utils/storage.dart';
@@ -36,27 +34,7 @@ class AboutPage extends StatefulWidget {
 
 class _AboutPageState extends State<AboutPage> {
   final String _version = BuildConfig.versionName;
-  final RxString cacheSize = ''.obs;
   int _pressCount = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    _getCacheSize();
-  }
-
-  @override
-  void dispose() {
-    cacheSize.close();
-    super.dispose();
-  }
-
-  Future<void> _getCacheSize() async {
-    final size = await CacheManager.loadApplicationCache();
-    if (mounted) {
-      cacheSize.value = CacheManager.formatSize(size);
-    }
-  }
 
   void _showDebugDialog() {
     showDialog(
@@ -437,37 +415,6 @@ class _AboutPageState extends State<AboutPage> {
               trailing: Icon(Icons.arrow_forward, size: 16, color: outline),
             );
           }),
-
-          // ===== 清除缓存 =====
-          ListTile(
-            onTap: () async {
-              if (cacheSize.value.isEmpty) return;
-              final confirmed = await showConfirmDialog(
-                context: context,
-                title: const Text('提示'),
-                content: const Text('该操作将清除图片及网络请求缓存数据，确认清除？'),
-              );
-              if (!confirmed) return;
-              SmartDialog.showLoading(msg: '正在清除...');
-              try {
-                await CacheManager.clearLibraryCache();
-                SmartDialog.showToast('清除成功');
-              } catch (e) {
-                SmartDialog.showToast(e.toString());
-              } finally {
-                SmartDialog.dismiss();
-                await _getCacheSize();
-              }
-            },
-            leading: const Icon(Icons.delete_outline),
-            title: const Text('清除缓存'),
-            subtitle: Obx(
-              () => Text(
-                '应用缓存 ${cacheSize.value}',
-                style: subTitleStyle,
-              ),
-            ),
-          ),
 
           // ===== 备份与恢复（ZIP）=====
           ListTile(

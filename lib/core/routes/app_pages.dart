@@ -81,6 +81,7 @@ import 'package:yuanying/modules/lx_music/views/lx_recent_page.dart';
 import 'package:yuanying/modules/lx_music/views/lx_playlist_page.dart';
 
 import 'package:yuanying/modules/download/views/cache_manager_page.dart';
+import 'package:yuanying/modules/download/views/storage_management_page.dart';
 import 'package:yuanying/modules/danmaku/views/danmaku_block_page.dart';
 
 import 'package:yuanying/modules/setting/views/subtitle_translation_page.dart';
@@ -187,6 +188,7 @@ class AppPages {
   static const String lxPlaylist = '/lx_playlist';
 
   static const String cacheManager = '/cache_manager';
+  static const String storageManagement = '/storage_management';
   static const String danmakuBlock = '/danmakuBlock';
 
   static const String subtitleTranslation = '/subtitleTranslation';
@@ -371,6 +373,10 @@ class AppPages {
     GetPage(name: lxPlaylist, page: () => const LxPlaylistPage()),
 
     GetPage(name: cacheManager, page: () => const CacheManagerPage()),
+    GetPage(
+      name: storageManagement,
+      page: () => const StorageManagementPage(),
+    ),
     GetPage(name: danmakuBlock, page: () => const DanmakuBlockPage()),
 
     GetPage(

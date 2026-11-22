@@ -102,6 +102,16 @@ WebViewEnvironment? webViewEnvironment;
 /// MediaProxy 全局实例（固定端口 9988）
 MediaProxyServer? mediaProxyServer;
 
+/// ===== 桌面端窗口尺寸约束 =====
+/// 最小宽度：下发给原生的硬限制，向左拖到 400 卡住（与原逻辑一致）。
+const double _kMinWindowWidth = 400;
+
+/// 最小高度：下发给原生的硬限制。
+/// 原值 720 过高（1080p 笔记本上几乎无法非最大化使用），
+/// 但完全取消会让侧栏 / 首页 Column 在极矮窗口下 RenderFlex overflow，
+/// 故降到 500。若实测仍有页面溢出，只调这一个值即可。
+const double _kMinWindowHeight = 500;
+
 /// 单实例锁的文件句柄。持有期间该文件被独占锁定，
 /// 后续启动的实例会因拿不到锁而 exit(0)。进程退出时操作系统自动释放。
 RandomAccessFile? _appLockFile;
@@ -339,7 +349,12 @@ void main() async {
         if (parts.length == 2) {
           final width = double.tryParse(parts[0]);
           final height = double.tryParse(parts[1]);
-          if (width != null && height != null && width >= 400 && height >= 720) {
+          // 旧版本可能存过 < 500 高的尺寸，这类记录视为无效，回落到默认 1100×720，
+          // 避免下次启动直接撞上原生最小高度约束导致窗口尺寸异常。
+          if (width != null &&
+              height != null &&
+              width >= _kMinWindowWidth &&
+              height >= _kMinWindowHeight) {
             windowSize = Size(width, height);
           }
         }
@@ -347,8 +362,10 @@ void main() async {
     }
 
     final windowOptions = WindowOptions(
+      // 首次启动的默认尺寸，保持不变（这是默认大小，不是约束）
       size: windowSize ?? const Size(1100, 720),
-      minimumSize: const Size(400, 720),
+      // 宽 400 保持原样；高从 720 降到 500，放开可缩空间
+      minimumSize: const Size(_kMinWindowWidth, _kMinWindowHeight),
       skipTaskbar: false,
       titleBarStyle: TitleBarStyle.normal,
       title: '源影',
@@ -562,7 +579,9 @@ class _WindowListener extends WindowListener {
   @override
   void onWindowResized() {
     windowManager.getSize().then((size) {
-      if (size.width >= 400 && size.height >= 720) {
+      // 与 minimumSize 使用同一组常量，保证"能拖到的尺寸"必然能被保存，
+      // 不会出现拖到 500 却因为阈值写死 720 而记不住的情况。
+      if (size.width >= _kMinWindowWidth && size.height >= _kMinWindowHeight) {
         StorageManager.setSetting(
           SettingBoxKey.windowSize,
           '${size.width.toInt()}×${size.height.toInt()}',

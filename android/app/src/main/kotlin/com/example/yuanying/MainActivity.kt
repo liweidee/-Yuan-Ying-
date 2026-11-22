@@ -1,5 +1,8 @@
 package com.example.yuanying
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.media.MediaScannerConnection
 import android.os.Environment
 import android.provider.Settings
 import android.net.Uri
@@ -17,6 +20,7 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.plugin.common.MethodChannel.Result
+import java.io.File
 
 class MainActivity : AudioServiceActivity(), MethodCallHandler {
 
@@ -26,6 +30,11 @@ class MainActivity : AudioServiceActivity(), MethodCallHandler {
     private lateinit var nodeJSManager: NodeJSManager
     private var pyBridge: PythonPluginBridge? = null
     private var pipChannel: MethodChannel? = null
+    private var pendingStoragePermissionResult: Result? = null
+
+    companion object {
+        private const val RECORDING_STORAGE_PERMISSION_REQUEST = 4201
+    }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
@@ -58,17 +67,54 @@ class MainActivity : AudioServiceActivity(), MethodCallHandler {
                     }
                 }
                 "requestAllFilesAccess" -> {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                        val appIntent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
-                            data = Uri.parse("package:$packageName")
-                        }
-                        if (appIntent.resolveActivity(packageManager) != null) {
-                            startActivity(appIntent)
+                    openAllFilesAccessSettings()
+                    result.success(null)
+                }
+                "hasRecordingStorageAccess" -> {
+                    result.success(hasRecordingStorageAccess())
+                }
+                "requestRecordingStorageAccess" -> {
+                    if (hasRecordingStorageAccess()) {
+                        result.success(true)
+                    } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        openAllFilesAccessSettings()
+                        result.success(false)
+                    } else {
+                        pendingStoragePermissionResult = result
+                        requestPermissions(
+                            arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE),
+                            RECORDING_STORAGE_PERMISSION_REQUEST
+                        )
+                    }
+                }
+                "getRecordingDirectory" -> {
+                    if (!hasRecordingStorageAccess()) {
+                        result.success(null)
+                    } else {
+                        val movies = Environment.getExternalStoragePublicDirectory(
+                            Environment.DIRECTORY_MOVIES
+                        )
+                        val directory = File(movies, "源影录制")
+                        if (!directory.exists() && !directory.mkdirs()) {
+                            result.success(null)
                         } else {
-                            startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+                            result.success(directory.absolutePath)
                         }
                     }
-                    result.success(null)
+                }
+                "scanRecordingFile" -> {
+                    val filePath = call.argument<String>("path")
+                    if (filePath.isNullOrBlank() || !File(filePath).exists()) {
+                        result.success(false)
+                    } else {
+                        MediaScannerConnection.scanFile(
+                            applicationContext,
+                            arrayOf(filePath),
+                            arrayOf("video/mp4")
+                        ) { _, uri ->
+                            runOnUiThread { result.success(uri != null) }
+                        }
+                    }
                 }
                 "isPackageInstalled" -> {
                     val pkgName = call.argument<String>("packageName")
@@ -359,6 +405,42 @@ class MainActivity : AudioServiceActivity(), MethodCallHandler {
                 else -> result.notImplemented()
             }
         }
+    }
+
+    private fun hasRecordingStorageAccess(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Environment.isExternalStorageManager()
+        } else if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            true
+        } else {
+            checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) ==
+                PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    private fun openAllFilesAccessSettings() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+        val appIntent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+            data = Uri.parse("package:$packageName")
+        }
+        if (appIntent.resolveActivity(packageManager) != null) {
+            startActivity(appIntent)
+        } else {
+            startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+        }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != RECORDING_STORAGE_PERMISSION_REQUEST) return
+        val granted = grantResults.isNotEmpty() &&
+            grantResults[0] == PackageManager.PERMISSION_GRANTED
+        pendingStoragePermissionResult?.success(granted)
+        pendingStoragePermissionResult = null
     }
 
     override fun onDestroy() {

@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'dart:io' show Platform;
+import 'dart:io' show File, Platform;
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:get/get.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
@@ -110,8 +110,14 @@ class _HeaderControlState extends State<HeaderControl> {
                   height: 34,
                   child: IconButton(
                     tooltip: '返回',
-                    style: const ButtonStyle(padding: WidgetStatePropertyAll(EdgeInsets.zero)),
-                    icon: const Icon(FontAwesomeIcons.arrowLeft, size: 15, color: Colors.white),
+                    style: const ButtonStyle(
+                      padding: WidgetStatePropertyAll(EdgeInsets.zero),
+                    ),
+                    icon: const Icon(
+                      FontAwesomeIcons.arrowLeft,
+                      size: 15,
+                      color: Colors.white,
+                    ),
                     onPressed: () {
                       if (playerController.isDesktopPip) {
                         playerController.exitDesktopPip();
@@ -128,7 +134,9 @@ class _HeaderControlState extends State<HeaderControl> {
                     height: 34,
                     child: IconButton(
                       tooltip: '返回主页',
-                      style: const ButtonStyle(padding: WidgetStatePropertyAll(EdgeInsets.zero)),
+                      style: const ButtonStyle(
+                        padding: WidgetStatePropertyAll(EdgeInsets.zero),
+                      ),
                       icon: const Icon(
                         FontAwesomeIcons.house,
                         size: 15,
@@ -143,7 +151,8 @@ class _HeaderControlState extends State<HeaderControl> {
                     key: _titleKey,
                     padding: const EdgeInsets.only(right: 10),
                     child: MarqueeText(
-                      controller.introController.videoDetail.value?.vodName ?? '',
+                      controller.introController.videoDetail.value?.vodName ??
+                          '',
                       spacing: 30,
                       velocity: 30,
                       style: const TextStyle(
@@ -151,7 +160,10 @@ class _HeaderControlState extends State<HeaderControl> {
                         fontSize: 16,
                         fontWeight: FontWeight.w500,
                       ),
-                      provider: ContextSingleTicker(context, autoStart: () => true),
+                      provider: ContextSingleTicker(
+                        context,
+                        autoStart: () => true,
+                      ),
                     ),
                   ),
                 ),
@@ -160,17 +172,32 @@ class _HeaderControlState extends State<HeaderControl> {
                   tooltip: '切换播放内核',
                   offset: const Offset(0, 40),
                   color: Colors.black.withOpacity(0.8),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
                   initialValue: PlayerPref.playerEngine,
                   itemBuilder: (context) => [
                     PopupMenuItem<PlayerEngineType>(
                       value: PlayerEngineType.mediaKit,
                       child: Row(
                         children: [
-                          Text('MPV', style: const TextStyle(color: Colors.white, fontSize: 13)),
-                          if (PlayerPref.playerEngine == PlayerEngineType.mediaKit) const Spacer(),
-                          if (PlayerPref.playerEngine == PlayerEngineType.mediaKit)
-                            const Icon(Icons.check, color: Colors.white, size: 16),
+                          Text(
+                            'MPV',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 13,
+                            ),
+                          ),
+                          if (PlayerPref.playerEngine ==
+                              PlayerEngineType.mediaKit)
+                            const Spacer(),
+                          if (PlayerPref.playerEngine ==
+                              PlayerEngineType.mediaKit)
+                            const Icon(
+                              Icons.check,
+                              color: Colors.white,
+                              size: 16,
+                            ),
                         ],
                       ),
                     ),
@@ -178,10 +205,21 @@ class _HeaderControlState extends State<HeaderControl> {
                       value: PlayerEngineType.fvp,
                       child: Row(
                         children: [
-                          Text('MDK', style: const TextStyle(color: Colors.white, fontSize: 13)),
-                          if (PlayerPref.playerEngine == PlayerEngineType.fvp) const Spacer(),
+                          Text(
+                            'MDK',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 13,
+                            ),
+                          ),
                           if (PlayerPref.playerEngine == PlayerEngineType.fvp)
-                            const Icon(Icons.check, color: Colors.white, size: 16),
+                            const Spacer(),
+                          if (PlayerPref.playerEngine == PlayerEngineType.fvp)
+                            const Icon(
+                              Icons.check,
+                              color: Colors.white,
+                              size: 16,
+                            ),
                         ],
                       ),
                     ),
@@ -193,10 +231,16 @@ class _HeaderControlState extends State<HeaderControl> {
                       mainAxisSize: MainAxisSize.min,
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const Icon(Icons.play_arrow, size: 14, color: Colors.white),
+                        const Icon(
+                          Icons.play_arrow,
+                          size: 14,
+                          color: Colors.white,
+                        ),
                         const SizedBox(width: 4),
                         Text(
-                          PlayerPref.playerEngine == PlayerEngineType.fvp ? 'MDK' : 'MPV',
+                          PlayerPref.playerEngine == PlayerEngineType.fvp
+                              ? 'MDK'
+                              : 'MPV',
                           style: const TextStyle(
                             color: Colors.white,
                             fontSize: 11,
@@ -207,10 +251,11 @@ class _HeaderControlState extends State<HeaderControl> {
                     ),
                   ),
                 ),
-                // 画中画：桌面端保持原有行为；Android 端新增系统 PiP 入口
-                // 位置、尺寸、图标风格不变，仅点击行为按平台分流。
+                // iOS/Android 都是系统级原生画中画，入口不受 Flutter
+                // 播放器内核影响；桌面端才依赖 media-kit 内核。
                 if (showIosPip ||
-                    ((PlatformUtils.isDesktop || Platform.isAndroid) &&
+                    Platform.isAndroid ||
+                    (PlatformUtils.isDesktop &&
                         PlayerPref.playerEngine != PlayerEngineType.fvp))
                   SizedBox(
                     width: 40,
@@ -290,7 +335,9 @@ class _HeaderControlState extends State<HeaderControl> {
                   height: 34,
                   child: IconButton(
                     tooltip: '投屏',
-                    style: const ButtonStyle(padding: WidgetStatePropertyAll(EdgeInsets.zero)),
+                    style: const ButtonStyle(
+                      padding: WidgetStatePropertyAll(EdgeInsets.zero),
+                    ),
                     onPressed: controller.onCast,
                     icon: const Icon(Icons.cast, size: 19, color: Colors.white),
                   ),
@@ -301,7 +348,7 @@ class _HeaderControlState extends State<HeaderControl> {
                 // 用第三方播放器打开（仅桌面端显示）
                 if (PlatformUtils.isDesktop)
                   _buildExternalPlayerEntry(controller),
-                
+
                 // 弹幕设置入口（点击打开设置面板）
                 SizedBox(
                   width: 40,
@@ -328,9 +375,15 @@ class _HeaderControlState extends State<HeaderControl> {
                   height: 34,
                   child: IconButton(
                     tooltip: '更多设置',
-                    style: const ButtonStyle(padding: WidgetStatePropertyAll(EdgeInsets.zero)),
+                    style: const ButtonStyle(
+                      padding: WidgetStatePropertyAll(EdgeInsets.zero),
+                    ),
                     onPressed: () => _showSettingSheet(context),
-                    icon: const Icon(Icons.more_vert_outlined, size: 19, color: Colors.white),
+                    icon: const Icon(
+                      Icons.more_vert_outlined,
+                      size: 19,
+                      color: Colors.white,
+                    ),
                   ),
                 ),
               ],
@@ -414,7 +467,8 @@ class _HeaderControlState extends State<HeaderControl> {
         isScrollControlled: true,
         useSafeArea: true,
         backgroundColor: Colors.transparent,
-        builder: (context) => SettingSheet(controller: controller, isWide: false),
+        builder: (context) =>
+            SettingSheet(controller: controller, isWide: false),
       );
     }
   }
@@ -435,7 +489,8 @@ class _HeaderControlState extends State<HeaderControl> {
   bool _shouldShowLegacyInfo(String info) {
     if (info.isEmpty) return false;
     if (!playerController.isFullScreen.value) return true;
-    final infoOverlayActive = PlayerPref.infoResolutionPosition != 0 ||
+    final infoOverlayActive =
+        PlayerPref.infoResolutionPosition != 0 ||
         PlayerPref.infoSpeedPosition != 0;
     return !infoOverlayActive;
   }
@@ -471,15 +526,21 @@ class _HeaderControlState extends State<HeaderControl> {
   Future<void> _toggleRecording(DetailController controller) async {
     if (controller.playerController.isRecording.value) {
       // 停止
-      controller.stopRecording();
-      SmartDialog.showToast('录制已停止，文件保存在「源影录制」目录');
+      final path = await controller.stopRecordingAndPublish();
+      if (Platform.isAndroid) {
+        if (path != null && await File(path).exists()) {
+          SmartDialog.showToast('录制已保存到 Movies/源影录制');
+        } else {
+          SmartDialog.showToast('录制已停止，但未找到录制文件');
+        }
+      } else {
+        SmartDialog.showToast('录制已停止，文件保存在「源影录制」目录');
+      }
     } else {
       // 开始
       final ok = await controller.startRecording();
       if (ok) {
         SmartDialog.showToast('录制已开始');
-      } else {
-        SmartDialog.showToast('录制启动失败，当前设备可能不支持');
       }
     }
   }

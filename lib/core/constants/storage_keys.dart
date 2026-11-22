@@ -122,6 +122,7 @@ abstract final class SettingBoxKey {
   static const String toastOpacity = 'toastOpacity';
   static const String displayMode = 'displayMode';
   static const String downloadPath = 'downloadPath';
+  static const String cacheDownloadPath = 'cacheDownloadPath';
 
   // ===== 外观设置相关 =====
   static const String appFontWeight = 'appFontWeight';

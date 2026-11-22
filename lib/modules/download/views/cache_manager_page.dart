@@ -87,6 +87,7 @@ class _CacheManagerPageState extends State<CacheManagerPage> {
     final theme = Theme.of(context);
     return Obx(() {
       final all = _service.entries;
+      final migrating = _service.isMigrating.value;
       final downloading = _filter(
         all.where((e) => !e.isCompleted).toList(),
       );
@@ -109,6 +110,19 @@ class _CacheManagerPageState extends State<CacheManagerPage> {
           appBar: _buildAppBar(downloading, completed),
           body: CustomScrollView(
             slivers: [
+              if (migrating)
+                const SliverToBoxAdapter(
+                  child: Padding(
+                    padding: EdgeInsets.only(top: 8),
+                    child: Column(
+                      children: [
+                        LinearProgressIndicator(),
+                        SizedBox(height: 6),
+                        Text('正在迁移下载目录，请保持应用运行…'),
+                      ],
+                    ),
+                  ),
+                ),
               // ===== 正在缓存 =====
               if (downloading.isNotEmpty) ...[
                 _buildSectionHeader(
@@ -240,6 +254,13 @@ class _CacheManagerPageState extends State<CacheManagerPage> {
       title: const Text('缓存管理'),
       actions: [
         IconButton(
+          tooltip: '存储空间与下载目录',
+          icon: const Icon(Icons.storage_rounded),
+          onPressed: _service.isMigrating.value
+              ? null
+              : () => Get.toNamed(AppPages.storageManagement),
+        ),
+        IconButton(
           tooltip: '搜索',
           icon: const Icon(Icons.search),
           onPressed: () => setState(() => _searching = true),
@@ -248,6 +269,14 @@ class _CacheManagerPageState extends State<CacheManagerPage> {
           tooltip: '多选',
           icon: const Icon(Icons.checklist),
           onPressed: () => setState(() => _multiSelect = true),
+        ),
+        IconButton(
+          tooltip: '清空全部缓存',
+          icon: const Icon(Icons.delete_sweep_outlined),
+          onPressed:
+              _service.entries.isEmpty || _service.isMigrating.value
+              ? null
+              : _clearAll,
         ),
         const SizedBox(width: 6),
       ],
@@ -364,6 +393,7 @@ class _CacheManagerPageState extends State<CacheManagerPage> {
   // 单条删除
   // ============================================================
   Future<void> _onDelete(CacheEntry entry) async {
+    if (_service.isMigrating.value) return;
     final confirm = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -391,6 +421,7 @@ class _CacheManagerPageState extends State<CacheManagerPage> {
   // 批量删除
   // ============================================================
   Future<void> _deleteSelected() async {
+    if (_service.isMigrating.value) return;
     final confirm = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -420,5 +451,33 @@ class _CacheManagerPageState extends State<CacheManagerPage> {
     if (!mounted) return;
     _exitMultiSelect();
     SmartDialog.showToast('已删除');
+  }
+
+  Future<void> _clearAll() async {
+    if (_service.entries.isEmpty || _service.isMigrating.value) return;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('清空全部缓存'),
+        content: Text(
+          '确定删除全部 ${_service.entries.length} 条离线缓存吗？'
+          '对应视频文件也会被删除，此操作不可撤销。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('全部删除'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    await _service.deleteAll();
+    if (!mounted) return;
+    SmartDialog.showToast('缓存已全部清空');
   }
 }

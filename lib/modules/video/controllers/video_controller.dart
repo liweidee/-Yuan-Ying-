@@ -51,6 +51,7 @@ import 'package:yuanying/utils/ios_pip_helper.dart';
 
 import 'package:yuanying/modules/download/models/cache_entry.dart';
 import 'package:yuanying/modules/download/services/cache_service.dart';
+import 'package:yuanying/modules/video/services/android_recording_storage.dart';
 
 import 'package:yuanying/modules/subtitle_translation/models/subtitle_entry.dart';
 import 'package:yuanying/modules/subtitle_translation/services/subtitle_srt_parser.dart';
@@ -115,6 +116,8 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
   Map<String, int>? Function()? _iosPipSourceRectProvider;
   int? _iosPipOriginalEpisodeIndex;
   bool _iosPipWasPlaying = false;
+  String? _activeRecordingPath;
+  bool _recordingPermissionPromptOpen = false;
 
   /// 当前播放源的 DASH 外挂音频直链（非 DASH 源为 null）
   ///
@@ -157,11 +160,11 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
   bool _isDirectMediaUrl(String url) {
     // 常见流媒体扩展名 + 带 .m3u8?xxx 参数 + .ts/.webm/.strm
     return RegExp(
-      r'\.(m3u8|mp4|flv|mpd|mkv|mov|m4v|ts|webm|strm)(\?|#|$)',
-      caseSensitive: false,
-    ).hasMatch(url) ||
-    // 兜底：任何 http(s) URL 且无 ".html"/".htm"/页面特征 → 视为直链候选
-    (url.startsWith('http') && !url.contains('.html'));
+          r'\.(m3u8|mp4|flv|mpd|mkv|mov|m4v|ts|webm|strm)(\?|#|$)',
+          caseSensitive: false,
+        ).hasMatch(url) ||
+        // 兜底：任何 http(s) URL 且无 ".html"/".htm"/页面特征 → 视为直链候选
+        (url.startsWith('http') && !url.contains('.html'));
   }
 
   // 播放完成监听器（保存函数引用，用于移除）
@@ -178,7 +181,8 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
   // ===== 轨道数据（代理播放器） =====
   List<AudioTrack> get audioTracks => playerController.availableAudioTracks;
   List<VideoTrack> get videoTracks => playerController.availableVideoTracks;
-  List<SubtitleTrack> get subtitleTracks => playerController.availableSubtitleTracks;
+  List<SubtitleTrack> get subtitleTracks =>
+      playerController.availableSubtitleTracks;
 
   int get currentAudioIndex {
     final current = playerController.currentAudioTrack.value;
@@ -305,7 +309,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
 
   // 跳过片头片尾（仅当次有效，详情页级别）
   final RxInt skipStartDuration = 0.obs; // 片头跳过秒数
-  final RxInt skipEndDuration = 0.obs;   // 片尾跳过秒数
+  final RxInt skipEndDuration = 0.obs; // 片尾跳过秒数
 
   // ===== 片头/片尾快捷标记 =====
   //
@@ -342,11 +346,20 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
           filePath = entry.id;
         }
         // 标记为 URI，FVP 会识别并加载
-        track = SubtitleTrack(filePath, subtitle.lanDoc, subtitle.lan, uri: true);
+        track = SubtitleTrack(
+          filePath,
+          subtitle.lanDoc,
+          subtitle.lan,
+          uri: true,
+        );
       } else {
         // media_kit 引擎
         if (entry.isData) {
-          track = SubtitleTrack.data(entry.id, title: subtitle.lanDoc, language: subtitle.lan);
+          track = SubtitleTrack.data(
+            entry.id,
+            title: subtitle.lanDoc,
+            language: subtitle.lan,
+          );
         } else {
           // 修复本地文件路径格式转换
           //
@@ -361,7 +374,12 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
           //     sub-add memory://<base64(id)>，把路径当内联字幕内容，
           //     导致完全无字幕、CC 按钮不出现
           final localPath = _toLocalPath(entry.id).replaceAll('\\', '/');
-          track = SubtitleTrack(localPath, subtitle.lanDoc, subtitle.lan, uri: true);
+          track = SubtitleTrack(
+            localPath,
+            subtitle.lanDoc,
+            subtitle.lan,
+            uri: true,
+          );
         }
       }
 
@@ -395,9 +413,18 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
 
         if (currentEngine == PlayerEngineType.fvp) {
           final filePath = await _writeSubtitleToTempFile(content, 'vtt');
-          track = SubtitleTrack(filePath, subtitle.lanDoc, subtitle.lan, uri: true);
+          track = SubtitleTrack(
+            filePath,
+            subtitle.lanDoc,
+            subtitle.lan,
+            uri: true,
+          );
         } else {
-          track = SubtitleTrack.data(content, title: subtitle.lanDoc, language: subtitle.lan);
+          track = SubtitleTrack.data(
+            content,
+            title: subtitle.lanDoc,
+            language: subtitle.lan,
+          );
         }
 
         // 缓存到 vttSubtitles（便于下次直接使用）
@@ -561,8 +588,10 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     // 用视频名做语境（百度大模型会用到）
     final contextTitle = introController.videoDetail.value?.vodName;
 
-    translationProgress.value =
-        SubtitleTranslationProgress(done: 0, total: entries.length);
+    translationProgress.value = SubtitleTranslationProgress(
+      done: 0,
+      total: entries.length,
+    );
 
     try {
       final translated = await SubtitleTranslationService.instance.translate(
@@ -572,8 +601,10 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
         targetLang: targetLang,
         contextTitle: contextTitle,
         onProgress: (done, total) {
-          translationProgress.value =
-              SubtitleTranslationProgress(done: done, total: total);
+          translationProgress.value = SubtitleTranslationProgress(
+            done: done,
+            total: total,
+          );
         },
       );
 
@@ -588,10 +619,12 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
       // 注册为一条新字幕
       final newIndex = subtitles.length + 1;
       final langName = TranslationLanguage.findByCode(targetLang).name;
-      subtitles.add(Subtitle(
-        lan: targetLang,
-        lanDoc: 'AI 翻译（$langName）',
-      ));
+      subtitles.add(
+        Subtitle(
+          lan: targetLang,
+          lanDoc: 'AI 翻译（$langName）',
+        ),
+      );
       vttSubtitles[subtitles.length - 1] = (
         isData: false,
         id: Uri.file(srtPath).toString(),
@@ -618,9 +651,13 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
   }
 
   /// 将字幕内容写入临时文件，返回文件路径
-  Future<String> _writeSubtitleToTempFile(String content, String extension) async {
+  Future<String> _writeSubtitleToTempFile(
+    String content,
+    String extension,
+  ) async {
     final dir = await getTemporaryDirectory();
-    final fileName = 'subtitle_${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(10000)}.$extension';
+    final fileName =
+        'subtitle_${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(10000)}.$extension';
     final file = File('${dir.path}/$fileName');
     await file.writeAsString(content, encoding: utf8);
     _tempSubtitleFiles.add(file.path);
@@ -645,11 +682,19 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
   Future<Directory?> _getRecordingDir() async {
     try {
       String basePath;
-      if (PlatformUtils.isDesktop) {
-        final home = Platform.environment['USERPROFILE'] ??
-            Platform.environment['HOME'];
+      if (Platform.isAndroid) {
+        final publicDirectory =
+            await AndroidRecordingStorage.getRecordingDirectory();
+        if (publicDirectory == null || publicDirectory.isEmpty) {
+          return null;
+        }
+        basePath = publicDirectory;
+      } else if (PlatformUtils.isDesktop) {
+        final home =
+            Platform.environment['USERPROFILE'] ?? Platform.environment['HOME'];
         if (home == null) return null;
-        basePath = '$home${Platform.pathSeparator}Downloads'
+        basePath =
+            '$home${Platform.pathSeparator}Downloads'
             '${Platform.pathSeparator}源影录制';
       } else {
         final docs = await getApplicationDocumentsDirectory();
@@ -666,10 +711,56 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     }
   }
 
+  Future<bool> _ensureAndroidRecordingStorageAccess() async {
+    if (!Platform.isAndroid) return true;
+    if (await AndroidRecordingStorage.hasAccess()) return true;
+    if (_recordingPermissionPromptOpen) return false;
+
+    final context = Get.context;
+    if (context == null) {
+      SmartDialog.showToast('请先允许文件访问后再录制');
+      return false;
+    }
+    if (!context.mounted) return false;
+
+    _recordingPermissionPromptOpen = true;
+    try {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('需要文件访问权限'),
+          content: const Text(
+            '录制视频需要保存到系统 Movies/源影录制 目录，'
+            '以便在文件管理和媒体库中查看。是否前往授权？',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('前往授权'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return false;
+
+      final granted = await AndroidRecordingStorage.requestAccess();
+      if (granted) return true;
+      SmartDialog.showToast('完成授权后，请再次点击录制');
+      return false;
+    } finally {
+      _recordingPermissionPromptOpen = false;
+    }
+  }
+
   /// 启动录制
   /// 返回 true 表示成功
   Future<bool> startRecording() async {
     if (playerController.isRecording.value) return false;
+    if (!await _ensureAndroidRecordingStorageAccess()) return false;
 
     final dir = await _getRecordingDir();
     if (dir == null) {
@@ -682,7 +773,8 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     final safeName = videoName.replaceAll(RegExp(r'[\\/:*?"<>|\s]'), '_');
 
     final now = DateTime.now();
-    final ts = '${now.year}'
+    final ts =
+        '${now.year}'
         '${now.month.toString().padLeft(2, '0')}'
         '${now.day.toString().padLeft(2, '0')}_'
         '${now.hour.toString().padLeft(2, '0')}'
@@ -693,20 +785,59 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
 
     final ok = playerController.startRecording(path);
     if (ok) {
+      _activeRecordingPath = path;
       debugPrint('[DetailController] 录制文件: $path');
+    } else {
+      SmartDialog.showToast('录制启动失败，当前设备可能不支持');
     }
     return ok;
   }
 
   /// 停止录制
   void stopRecording() {
+    if (playerController.isRecording.value || _activeRecordingPath != null) {
+      unawaited(stopRecordingAndPublish());
+    }
+  }
+
+  Future<String?> stopRecordingAndPublish() async {
+    final path = _activeRecordingPath;
+    _activeRecordingPath = null;
     playerController.stopRecording();
+    if (path != null && Platform.isAndroid) {
+      await _waitForRecordingFileReady(path);
+      final scanned = await AndroidRecordingStorage.scanFile(path);
+      if (!scanned) {
+        debugPrint('[DetailController] 录制文件媒体扫描失败: $path');
+      }
+    }
+    return path;
+  }
+
+  Future<void> _waitForRecordingFileReady(String path) async {
+    var lastSize = -1;
+    var stableCount = 0;
+    for (var attempt = 0; attempt < 24; attempt++) {
+      await Future.delayed(const Duration(milliseconds: 250));
+      try {
+        final file = File(path);
+        if (!await file.exists()) continue;
+        final size = await file.length();
+        if (size > 0 && size == lastSize) {
+          stableCount++;
+          if (stableCount >= 3) return;
+        } else {
+          stableCount = 0;
+        }
+        lastSize = size;
+      } catch (_) {}
+    }
   }
 
   /// 在 `_playEpisode` 顶部调用（切集前）
   void _stopRecordingIfActive() {
     if (playerController.isRecording.value) {
-      playerController.stopRecording();
+      stopRecording();
       SmartDialog.showToast('已切换剧集，录制自动停止');
     }
   }
@@ -855,7 +986,8 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
 
       // ---- 推送模式（直接播放，提前返回） ----
       if (args['isPush'] == true) {
-        if (args['directUrl'] != null && args['directUrl'].toString().isNotEmpty) {
+        if (args['directUrl'] != null &&
+            args['directUrl'].toString().isNotEmpty) {
           _initPushMode(args);
           return;
         }
@@ -864,19 +996,23 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
       // ---- 初始化 _apiService ----
       final independentSite = args['site'] as Map<String, dynamic>?;
       if (independentSite != null) {
-        _apiService = Get.find<SourceManager>().createIndependentService(independentSite);
-        _currentSiteConfig = independentSite;  // 新增
+        _apiService = Get.find<SourceManager>().createIndependentService(
+          independentSite,
+        );
+        _currentSiteConfig = independentSite; // 新增
         // 传递来源名称
         final siteName = independentSite['name']?.toString() ?? '未知来源';
         introController.setSourceName(siteName);
       } else {
         // 默认使用全局当前源
         _apiService = Get.find<SourceManager>().currentApiService;
-        _currentSiteConfig = Get.find<SourceManager>().currentSite.value;  // 新增
+        _currentSiteConfig = Get.find<SourceManager>().currentSite.value; // 新增
         // 传递当前源名称
         final currentSite = Get.find<SourceManager>().currentSite.value;
         if (currentSite != null) {
-          introController.setSourceName(currentSite['name']?.toString() ?? '未知来源');
+          introController.setSourceName(
+            currentSite['name']?.toString() ?? '未知来源',
+          );
         }
       }
 
@@ -891,16 +1027,17 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
       final effectiveSiteConfig = _currentSiteConfig;
       if (effectiveSiteConfig != null) {
         introController.setCurrentApiUrl(
-            effectiveSiteConfig['api']?.toString() ?? '');
+          effectiveSiteConfig['api']?.toString() ?? '',
+        );
         introController.setSiteConfig(effectiveSiteConfig);
       }
 
       // ===== 解析从历史恢复的播放信息 =====
-      final rEpIdx   = args['resumeEpisodeIndex'];
-      final rSrcIdx  = args['resumeSourceIndex'];
+      final rEpIdx = args['resumeEpisodeIndex'];
+      final rSrcIdx = args['resumeSourceIndex'];
       final rSrcName = args['resumeSourceName']?.toString();
-      final rEpName  = args['resumeEpisodeName']?.toString();
-      final rPos     = args['resumePositionSeconds'];
+      final rEpName = args['resumeEpisodeName']?.toString();
+      final rPos = args['resumePositionSeconds'];
       if (rEpIdx is int ||
           rSrcIdx is int ||
           rPos is num ||
@@ -913,12 +1050,14 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
           episodeName: rEpName,
           positionSeconds: rPos is num ? rPos.toInt() : null,
         );
-        debugPrint('[DetailController] 收到历史恢复参数: '
-            'epIdx=${_resumeInfo!.episodeIndex}, '
-            'srcIdx=${_resumeInfo!.sourceIndex}, '
-            'srcName=${_resumeInfo!.sourceName}, '
-            'epName=${_resumeInfo!.episodeName}, '
-            'pos=${_resumeInfo!.positionSeconds}');
+        debugPrint(
+          '[DetailController] 收到历史恢复参数: '
+          'epIdx=${_resumeInfo!.episodeIndex}, '
+          'srcIdx=${_resumeInfo!.sourceIndex}, '
+          'srcName=${_resumeInfo!.sourceName}, '
+          'epName=${_resumeInfo!.episodeName}, '
+          'pos=${_resumeInfo!.positionSeconds}',
+        );
       }
     } else {
       detailError.value = '参数错误';
@@ -968,7 +1107,8 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
   /// 推送模式初始化（只处理直链/解析，接口模式走 loadVideoDetail）
   void _initPushMode(Map args) {
     // 调用方显式传入 isDirectPushMode，或提供了完整的 VideoDetail
-    _isDirectPushMode = args['isDirectPushMode'] == true || args['videoDetail'] is VideoDetail;
+    _isDirectPushMode =
+        args['isDirectPushMode'] == true || args['videoDetail'] is VideoDetail;
 
     // 解析并保存请求头（WebDAV Basic Auth 等）
     final rawHeaders = args['headers'];
@@ -1028,8 +1168,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
         vodId: 'direct_${Uri.encodeComponent(url)}',
         vodName: title,
         vodPic: args['vodPic'] ?? '',
-        vodContent:
-            args['vodContent'] ?? (isParserMode ? '来自解析播放' : '来自推送播放'),
+        vodContent: args['vodContent'] ?? (isParserMode ? '来自解析播放' : '来自推送播放'),
         vodYear: args['vodYear'] ?? '',
         vodActor: args['vodActor'] ?? '',
         vodDirector: args['vodDirector'] ?? '',
@@ -1113,25 +1252,28 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
   /// - `_isDirectPushMode` 保持 false，走 getPlayUrl 换真实地址
   /// - 从 mergeStartVodId 定位起始集，然后自动播放
   void _initMergeListMode(Map args) {
-    _isMergeListMode = true;   // 开启标志
+    _isMergeListMode = true; // 开启标志
     final detail = args['mergeDetail'] as VideoDetail;
     final startVodId = args['mergeStartVodId']?.toString() ?? '';
 
     // ---- 1. _apiService + _currentSiteConfig ----
     final independentSite = args['site'] as Map<String, dynamic>?;
     if (independentSite != null) {
-      _apiService = Get.find<SourceManager>()
-          .createIndependentService(independentSite);
+      _apiService = Get.find<SourceManager>().createIndependentService(
+        independentSite,
+      );
       _currentSiteConfig = independentSite;
       introController.setSourceName(
-          independentSite['name']?.toString() ?? '未知来源');
+        independentSite['name']?.toString() ?? '未知来源',
+      );
     } else {
       _apiService = Get.find<SourceManager>().currentApiService;
       _currentSiteConfig = Get.find<SourceManager>().currentSite.value;
       final currentSite = Get.find<SourceManager>().currentSite.value;
       if (currentSite != null) {
         introController.setSourceName(
-            currentSite['name']?.toString() ?? '未知来源');
+          currentSite['name']?.toString() ?? '未知来源',
+        );
       }
     }
 
@@ -1143,7 +1285,8 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     final mergeEffectiveSite = _currentSiteConfig;
     if (mergeEffectiveSite != null) {
       introController.setCurrentApiUrl(
-          mergeEffectiveSite['api']?.toString() ?? '');
+        mergeEffectiveSite['api']?.toString() ?? '',
+      );
       introController.setSiteConfig(mergeEffectiveSite);
     }
 
@@ -1169,8 +1312,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     isLoadingDetail.value = false;
 
     // ---- 7. 空列表兜底 ----
-    if (detail.playSources.isEmpty ||
-        detail.playSources[0].episodes.isEmpty) {
+    if (detail.playSources.isEmpty || detail.playSources[0].episodes.isEmpty) {
       detailError.value = '合并列表为空';
       return;
     }
@@ -1260,13 +1402,13 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
 
     // ---- 未匹配到：保持原行为，不修改任何状态 ----
     if (foundEpisodeIdx < 0) {
-      debugPrint(
-          '[PushMode] 未匹配到 url=$url / title=$title，使用默认从第 0 集开始');
+      debugPrint('[PushMode] 未匹配到 url=$url / title=$title，使用默认从第 0 集开始');
       return;
     }
 
     debugPrint(
-        '[PushMode] 定位成功: source=$foundSourceIdx, episode=$foundEpisodeIdx');
+      '[PushMode] 定位成功: source=$foundSourceIdx, episode=$foundEpisodeIdx',
+    );
 
     // ---- 同步到 IntroController（驱动 UI 高亮 / 上下集计算） ----
     introController.switchPlaySource(foundSourceIdx);
@@ -1417,16 +1559,18 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     }
     if (!autoPlay) isLoadingDetail.value = false;
 
-    debugPrint('[DetailController] 历史恢复完成: '
-        'src=$sourceIdx/${detail.playSources.length}, '
-        'ep=$epIdx/${source.episodes.length}, '
-        'seek=${seekTo?.inSeconds}s');
+    debugPrint(
+      '[DetailController] 历史恢复完成: '
+      'src=$sourceIdx/${detail.playSources.length}, '
+      'ep=$epIdx/${source.episodes.length}, '
+      'seek=${seekTo?.inSeconds}s',
+    );
   }
 
   void _showPlayLoading() {
     // 先关闭可能残留的相同 tag 的加载对话框
     SmartDialog.dismiss(tag: 'play_loading', force: true);
-    
+
     SmartDialog.show(
       tag: 'play_loading', // 唯一标识
       maskColor: Colors.black54,
@@ -1506,11 +1650,11 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
   void checkAndHandlePushEpisode(Episode episode) {
     final url = episode.url;
     if (url.startsWith('push://')) {
-       // 先暂停当前播放
-        if (playerController.playerStatus.value.isPlaying) {
-          playerController.pause();
-        }
-    
+      // 先暂停当前播放
+      if (playerController.playerStatus.value.isPlaying) {
+        playerController.pause();
+      }
+
       String rawVodId = url.substring(7);
       try {
         final decoded = Uri.decodeComponent(rawVodId);
@@ -1707,8 +1851,8 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
       }
 
       final playUrl = await _apiService.getPlayUrl(
-        playParams: realPlayParams,     // 用真实 play 参数
-        flag: realFlag,                 // 用真实 flag
+        playParams: realPlayParams, // 用真实 play 参数
+        flag: realFlag, // 用真实 flag
         pwd: pwd,
       );
 
@@ -1797,13 +1941,20 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
         String? sniffUrl = playUrl.defaultUrl;
 
         if (sniffUrl != null && sniffUrl.isNotEmpty) {
-          if (!sniffUrl.startsWith('http://') && !sniffUrl.startsWith('https://')) {
+          if (!sniffUrl.startsWith('http://') &&
+              !sniffUrl.startsWith('https://')) {
             final apiBase = site?['api']?.toString() ?? '';
             if (apiBase.isNotEmpty) {
               final uri = Uri.parse(apiBase);
-              final baseWithoutQuery = uri.replace(query: '', fragment: '').toString();
-              final baseUrl = baseWithoutQuery.endsWith('/') ? baseWithoutQuery : '$baseWithoutQuery/';
-              final relativePath = sniffUrl.startsWith('/') ? sniffUrl.substring(1) : sniffUrl;
+              final baseWithoutQuery = uri
+                  .replace(query: '', fragment: '')
+                  .toString();
+              final baseUrl = baseWithoutQuery.endsWith('/')
+                  ? baseWithoutQuery
+                  : '$baseWithoutQuery/';
+              final relativePath = sniffUrl.startsWith('/')
+                  ? sniffUrl.substring(1)
+                  : sniffUrl;
               sniffUrl = baseUrl + relativePath;
             } else {
               _handlePlayFailure('无法获取播放地址');
@@ -1833,11 +1984,18 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
               mainAxisSize: MainAxisSize.min,
               children: [
                 SizedBox(
-                  width: 36, height: 36,
-                  child: CircularProgressIndicator(strokeWidth: 3, color: Colors.white),
+                  width: 36,
+                  height: 36,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 3,
+                    color: Colors.white,
+                  ),
                 ),
                 SizedBox(height: 14),
-                Text('正在嗅探播放地址...', style: TextStyle(color: Colors.white, fontSize: 14)),
+                Text(
+                  '正在嗅探播放地址...',
+                  style: TextStyle(color: Colors.white, fontSize: 14),
+                ),
               ],
             ),
           ),
@@ -1852,7 +2010,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
             useWebView: true,
           );
         } finally {
-          SmartDialog.dismiss(tag: sniffTag, force: true);   // ← 只关这一个
+          SmartDialog.dismiss(tag: sniffTag, force: true); // ← 只关这一个
         }
 
         if (isClosed) return;
@@ -1878,9 +2036,13 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     }
   }
 
-  Future<PlayUrl?> _processWithParser(PlayUrl playUrl, ParserSource parser) async {
+  Future<PlayUrl?> _processWithParser(
+    PlayUrl playUrl,
+    ParserSource parser,
+  ) async {
     try {
-      final fullUrl = '${parser.url}${Uri.encodeComponent(playUrl.defaultUrl ?? '')}';
+      final fullUrl =
+          '${parser.url}${Uri.encodeComponent(playUrl.defaultUrl ?? '')}';
 
       if (parser.type == 1) {
         final response = await Dio().get(
@@ -1893,7 +2055,8 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
         );
         final data = response.data;
         if (data is Map) {
-          final url = data['url']?.toString() ??
+          final url =
+              data['url']?.toString() ??
               data['playUrl']?.toString() ??
               data['play_url']?.toString();
           if (url != null && url.startsWith('http')) {
@@ -2154,15 +2317,17 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     try {
       final detail = introController.videoDetail.value;
       final site = _currentSiteConfig ?? _sourceManager.currentSite.value;
-      PlaybackContextRegistry.instance.set(PlaybackContext(
-        vodId: vodId,
-        vodName: detail?.vodName ?? '',
-        episodeName: _currentEpisode?.name ?? '',
-        siteKey: site?['key']?.toString() ?? '',
-        siteName: site?['name']?.toString() ??
-            introController.sourceName.value,
-        controllerTag: _tag ?? '',
-      ));
+      PlaybackContextRegistry.instance.set(
+        PlaybackContext(
+          vodId: vodId,
+          vodName: detail?.vodName ?? '',
+          episodeName: _currentEpisode?.name ?? '',
+          siteKey: site?['key']?.toString() ?? '',
+          siteName:
+              site?['name']?.toString() ?? introController.sourceName.value,
+          controllerTag: _tag ?? '',
+        ),
+      );
     } catch (e) {
       debugPrint('[DetailController] _recordPlaybackContext 失败: $e');
     }
@@ -2284,8 +2449,15 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
 
   bool _isCloudStorage(String domain) {
     const cloudDomains = [
-      'pikpak', 'pan.quark', 'aliyundrive', 'yunpan', 'xunlei',
-      'weiyun', 'baidu', '115.com', '123pan'
+      'pikpak',
+      'pan.quark',
+      'aliyundrive',
+      'yunpan',
+      'xunlei',
+      'weiyun',
+      'baidu',
+      '115.com',
+      '123pan',
     ];
     return cloudDomains.any((d) => domain.contains(d));
   }
@@ -2392,7 +2564,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
   }
 
   void _startProgressUpdater() {
-    _stopProgressUpdater();  // 先停止之前的
+    _stopProgressUpdater(); // 先停止之前的
     _progressTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
       _updateHistoryProgress();
     });
@@ -2472,8 +2644,9 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
       final duration = playerController.duration.value;
 
       final posStr = _formatDuration(position);
-      final durStr =
-          duration.inSeconds > 0 ? _formatDuration(duration) : '--:--';
+      final durStr = duration.inSeconds > 0
+          ? _formatDuration(duration)
+          : '--:--';
       final progress = '$posStr / $durStr';
 
       final historyList = GStorage.getHistory();
@@ -2486,9 +2659,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
       int index = -1;
       if (currentApiUrl.isNotEmpty) {
         index = historyList.indexWhere(
-          (item) =>
-              item['vod_id'] == vodId &&
-              item['api_url'] == currentApiUrl,
+          (item) => item['vod_id'] == vodId && item['api_url'] == currentApiUrl,
         );
         if (index == -1) {
           index = historyList.indexWhere(
@@ -2534,7 +2705,12 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     required int episodeIndex,
     bool autoPlay = true,
   }) async {
-    await _playEpisode(episode, sourceIndex: sourceIndex, episodeIndex: episodeIndex, autoPlay: autoPlay);
+    await _playEpisode(
+      episode,
+      sourceIndex: sourceIndex,
+      episodeIndex: episodeIndex,
+      autoPlay: autoPlay,
+    );
   }
 
   Future<void> switchQuality(PlayQuality quality) async {
@@ -2624,7 +2800,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
 
   Future<void> switchSource(int index) async {
     introController.switchDisplaySource(index);
-    
+
     // 切换线路时重置为自动模式
     isManualParser.value = false;
   }
@@ -2779,8 +2955,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     );
     final sourceSnapshot = introController.getCurrentPlaySource();
     final detailSnapshot = introController.videoDetail.value;
-    final siteSnapshot =
-        _currentSiteConfig ?? _sourceManager.currentSite.value;
+    final siteSnapshot = _currentSiteConfig ?? _sourceManager.currentSite.value;
     final result = await IosPipHelper.instance.enter(
       tag: _tag ?? 'detail',
       url: pipUrl,
@@ -3046,8 +3221,9 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     final strategy = PlayerPref.requestHeaderStrategy;
     if (strategy == 0 && headers.isEmpty) {
       final domain = _extractDomain(url);
-      headers['User-Agent'] =
-          _isCloudStorage(domain) ? BrowserUa.mob : BrowserUa.pc;
+      headers['User-Agent'] = _isCloudStorage(domain)
+          ? BrowserUa.mob
+          : BrowserUa.pc;
     } else if (strategy == 1) {
       headers['User-Agent'] = BrowserUa.pc;
     } else if (strategy == 2) {
@@ -3210,8 +3386,9 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     }
 
     // ---- 4. 启动第三方播放器 ----
-    final headers =
-        currentHeaders.value.isNotEmpty ? currentHeaders.value : null;
+    final headers = currentHeaders.value.isNotEmpty
+        ? currentHeaders.value
+        : null;
 
     final error = await ExternalPlayerService().launch(
       url: url,
@@ -3248,8 +3425,9 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     }
 
     // ---- 3. 启动指定类型的播放器 ----
-    final headers =
-        currentHeaders.value.isNotEmpty ? currentHeaders.value : null;
+    final headers = currentHeaders.value.isNotEmpty
+        ? currentHeaders.value
+        : null;
 
     final error = await ExternalPlayerService().launchWithType(
       type: type,
@@ -3277,7 +3455,8 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     // 拦截本地文件
     final currentUrl = currentPlayUrl.value;
     if (currentUrl.isNotEmpty) {
-      final isLocalFile = currentUrl.startsWith('file://') ||
+      final isLocalFile =
+          currentUrl.startsWith('file://') ||
           (Uri.tryParse(currentUrl)?.scheme == 'file') ||
           (File(currentUrl).existsSync());
 
@@ -3351,8 +3530,9 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     // 兜底：智能补充缺失的常见头
     if (!_hasHeader(headers, 'User-Agent')) {
       final domain = _extractDomain(selectedQuality.url);
-      headers['User-Agent'] =
-          _isCloudStorage(domain) ? BrowserUa.mob : BrowserUa.pc;
+      headers['User-Agent'] = _isCloudStorage(domain)
+          ? BrowserUa.mob
+          : BrowserUa.pc;
     }
     if (!_hasHeader(headers, 'Accept')) {
       headers['Accept'] = '*/*';
@@ -3381,8 +3561,16 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     );
 
     final service = Get.find<CacheService>();
-    await service.addDownload(entry);
-    SmartDialog.showToast('已加入缓存队列');
+    if (service.isMigrating.value) {
+      SmartDialog.showToast('正在迁移下载目录，请稍后再缓存');
+      return;
+    }
+    try {
+      await service.addDownload(entry);
+      SmartDialog.showToast('已加入缓存队列');
+    } catch (error) {
+      SmartDialog.showToast('缓存失败：$error');
+    }
   }
 
   /// 判断 headers 里是否存在某个 key（大小写不敏感）
@@ -3411,7 +3599,9 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
         // M3U8 走代理
         final proxyUrl = _wrapUrlIfNeeded(
           currentPlayUrl.value,
-          headers: currentHeaders.value.isNotEmpty ? currentHeaders.value : null,
+          headers: currentHeaders.value.isNotEmpty
+              ? currentHeaders.value
+              : null,
         );
         await playerController.setDataSource(
           NetworkSource(
@@ -3419,7 +3609,9 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
             // 复用 _startPlay 解析出的 DASH 外挂音频直链（非 DASH 源为 null），
             // 避免重载后只剩视频流（无声）
             audioSource: _currentAudioUrl,
-            headers: currentHeaders.value.isNotEmpty ? currentHeaders.value : null,
+            headers: currentHeaders.value.isNotEmpty
+                ? currentHeaders.value
+                : null,
           ),
           autoplay: true,
           seekTo: position,
@@ -3548,7 +3740,9 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
                   child: Container(
                     decoration: BoxDecoration(
                       color: Theme.of(context).colorScheme.surface,
-                      borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
+                      borderRadius: const BorderRadius.vertical(
+                        top: Radius.circular(18),
+                      ),
                     ),
                     // ===== 修改：传递 controllerTag =====
                     child: EpisodePanelDialog(
@@ -3563,13 +3757,16 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
         },
         transitionBuilder: (context, animation, secondaryAnimation, child) {
           return SlideTransition(
-            position: Tween<Offset>(
-              begin: const Offset(0, 1),
-              end: Offset.zero,
-            ).animate(CurvedAnimation(
-              parent: animation,
-              curve: Curves.easeOut,
-            )),
+            position:
+                Tween<Offset>(
+                  begin: const Offset(0, 1),
+                  end: Offset.zero,
+                ).animate(
+                  CurvedAnimation(
+                    parent: animation,
+                    curve: Curves.easeOut,
+                  ),
+                ),
             child: child,
           );
         },
@@ -3589,7 +3786,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     if (currentParser.value?.name == parser.name) return;
 
     currentParser.value = parser;
-    isManualParser.value = true;  // 标记为手动模式
+    isManualParser.value = true; // 标记为手动模式
 
     if (_currentEpisode != null) {
       await _playEpisode(
@@ -3601,8 +3798,11 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     }
   }
 
-  void _loadDanmakuOnPlay(String? originalDanmakuUrl, Map<String, String>? headers) {
-    if (_danmakuLoaded) return;   // 避免重复请求
+  void _loadDanmakuOnPlay(
+    String? originalDanmakuUrl,
+    Map<String, String>? headers,
+  ) {
+    if (_danmakuLoaded) return; // 避免重复请求
 
     // 记录当前剧集，防止异步回调覆盖新剧集
     final currentEpisode = _currentEpisode;
@@ -3644,7 +3844,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
 
     // 停止录制
     if (playerController.isRecording.value) {
-      playerController.stopRecording();
+      stopRecording();
     }
 
     _updateHistoryProgress();
@@ -3839,7 +4039,8 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     final headers = _initHeaders ?? <String, String>{};
     currentHeaders.value = headers;
 
-    final isLocalFile = url.startsWith('file://') ||
+    final isLocalFile =
+        url.startsWith('file://') ||
         (Uri.tryParse(url)?.scheme == 'file') ||
         (File(url).existsSync());
 
@@ -3895,7 +4096,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
         isLoadingDetail.value = false;
         return;
       }
-      
+
       await playerController.play();
       isPlaying.value = true;
 
@@ -3983,27 +4184,29 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
       }
 
       for (final parser in sources) {
-        _processWithParser(playUrl, parser).then((result) {
-          if (result != null) {
-            if (!completer.isCompleted) {
-              currentParser.value = parser;
-              completer.complete(result);
-            }
-          } else {
-            remaining--;
-            if (remaining == 0 && !completer.isCompleted) {
-              completer.complete(null);
-            }
-          }
-        }).catchError((_) {
-          // _processWithParser 内部已有 try-catch 兜底，实际不会抛。
-          // 这里保留 catchError 是为了防止未来改动后出现未捕获异常导致
-          // completer 永不完成（调用方挂起）。
-          remaining--;
-          if (remaining == 0 && !completer.isCompleted) {
-            completer.complete(null);
-          }
-        });
+        _processWithParser(playUrl, parser)
+            .then((result) {
+              if (result != null) {
+                if (!completer.isCompleted) {
+                  currentParser.value = parser;
+                  completer.complete(result);
+                }
+              } else {
+                remaining--;
+                if (remaining == 0 && !completer.isCompleted) {
+                  completer.complete(null);
+                }
+              }
+            })
+            .catchError((_) {
+              // _processWithParser 内部已有 try-catch 兜底，实际不会抛。
+              // 这里保留 catchError 是为了防止未来改动后出现未捕获异常导致
+              // completer 永不完成（调用方挂起）。
+              remaining--;
+              if (remaining == 0 && !completer.isCompleted) {
+                completer.complete(null);
+              }
+            });
       }
 
       return completer.future;
@@ -4101,13 +4304,16 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
         },
         transitionBuilder: (context, animation, secondaryAnimation, child) {
           return SlideTransition(
-            position: Tween<Offset>(
-              begin: const Offset(0, 1),
-              end: Offset.zero,
-            ).animate(CurvedAnimation(
-              parent: animation,
-              curve: Curves.easeOut,
-            )),
+            position:
+                Tween<Offset>(
+                  begin: const Offset(0, 1),
+                  end: Offset.zero,
+                ).animate(
+                  CurvedAnimation(
+                    parent: animation,
+                    curve: Curves.easeOut,
+                  ),
+                ),
             child: child,
           );
         },
@@ -4167,26 +4373,34 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
       }
     }
 
-    final uri = Uri.parse(normalized).replace(queryParameters: {
-      'name': title,
-      'episode': episode.toString(),
-    });
+    final uri = Uri.parse(normalized).replace(
+      queryParameters: {
+        'name': title,
+        'episode': episode.toString(),
+      },
+    );
     return uri.toString();
   }
 
   /// 尝试从设置中配置的弹幕 API 加载弹幕，成功返回 true
   Future<bool> _loadDanmakuFromUserApi() async {
     // 1. 检查自动匹配开关
-    final autoMatch = StorageManager.getSetting<bool>(SettingBoxKey.danmakuAutoMatch) ?? false;
+    final autoMatch =
+        StorageManager.getSetting<bool>(SettingBoxKey.danmakuAutoMatch) ??
+        false;
     if (!autoMatch) return false;
 
     // 2. 读取 API 列表和当前选中的 key
-    final apisJson = StorageManager.getSetting<List<dynamic>>(SettingBoxKey.danmakuApis) ?? [];
+    final apisJson =
+        StorageManager.getSetting<List<dynamic>>(SettingBoxKey.danmakuApis) ??
+        [];
     if (apisJson.isEmpty) {
       SmartDialog.showToast('未匹配到弹幕');
       return false;
     }
-    final currentKey = StorageManager.getSetting<String>(SettingBoxKey.danmakuCurrentKey) ?? '';
+    final currentKey =
+        StorageManager.getSetting<String>(SettingBoxKey.danmakuCurrentKey) ??
+        '';
     if (currentKey.isEmpty) {
       SmartDialog.showToast('未匹配到弹幕');
       return false;
@@ -4240,7 +4454,8 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
         fongmiUrl,
         options: Options(
           headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'User-Agent':
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
           },
           // 弹幕 API 无响应时快速失败，避免 loading 长时间转圈
           connectTimeout: const Duration(seconds: 15),
@@ -4255,7 +4470,10 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
       final data = response.data;
 
       // 6.1 检查是否为候选列表格式
-      if (data is List && data.isNotEmpty && data[0] is Map && (data[0] as Map).containsKey('url')) {
+      if (data is List &&
+          data.isNotEmpty &&
+          data[0] is Map &&
+          (data[0] as Map).containsKey('url')) {
         final firstUrl = data[0]['url'] as String?;
         if (firstUrl == null || firstUrl.isEmpty) {
           SmartDialog.showToast('未匹配到弹幕');
@@ -4320,14 +4538,14 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     // 1. 读取 API 配置
     final apisJson =
         StorageManager.getSetting<List<dynamic>>(SettingBoxKey.danmakuApis) ??
-            [];
+        [];
     if (apisJson.isEmpty) {
       SmartDialog.showToast('未配置弹幕API，请先在弹幕设置中添加');
       return;
     }
     final currentKey =
         StorageManager.getSetting<String>(SettingBoxKey.danmakuCurrentKey) ??
-            '';
+        '';
 
     Map<String, dynamic>? apiMap;
     if (currentKey.isNotEmpty) {
@@ -4364,7 +4582,8 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     final episodeNumber = introController.currentEpisodeIndex.value + 1;
     final fongmiUrl = _buildFongmiUrl(apiBase, trimmed, episodeNumber);
     debugPrint(
-        '[Danmaku] 手动加载: title=$trimmed, ep=$episodeNumber, url=$fongmiUrl');
+      '[Danmaku] 手动加载: title=$trimmed, ep=$episodeNumber, url=$fongmiUrl',
+    );
 
     // 3. loading（独立 tag，避免误关其它弹窗）
     const loadingTag = 'danmaku_manual_loading';

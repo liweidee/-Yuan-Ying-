@@ -642,93 +642,140 @@ class _DetailPageState extends State<DetailPage>
     final title = controller.introController.videoDetail.value?.vodName ?? '';
     final episode = controller.introController.currentPlayEpisode?.name ?? '';
     return Positioned.fill(
-      child: ColoredBox(
-        color: Colors.black.withValues(alpha: 0.94),
-        child: SafeArea(
-          child: Stack(
-            children: [
-              Positioned(
-                left: 8,
-                top: 8,
-                child: IconButton(
-                  tooltip: '返回',
-                  onPressed: () => Navigator.of(context).maybePop(),
-                  icon: const Icon(
-                    Icons.arrow_back_ios_new_rounded,
-                    color: Colors.white,
-                    size: 20,
-                  ),
-                ),
-              ),
-              Center(
-                child: Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 24),
-                  padding: const EdgeInsets.fromLTRB(24, 24, 24, 20),
-                  decoration: BoxDecoration(
-                    color: const Color(0xDD111111),
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(color: Colors.white24),
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(
-                        Icons.picture_in_picture_alt_rounded,
-                        color: Colors.white,
-                        size: 34,
+      child: ClipRect(
+        child: ColoredBox(
+          color: Colors.black.withValues(alpha: 0.94),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final isFullScreen =
+                  controller.playerController.isFullScreen.value;
+              // 竖屏非全屏视频区只有约 16:9 高，不能沿用整屏安全区
+              // 和全屏尺寸的卡片、按钮。
+              final compact = constraints.maxHeight < 320;
+              final cardPadding = compact ? 10.0 : 24.0;
+              final buttonStyle = compact
+                  ? ButtonStyle(
+                      minimumSize: const WidgetStatePropertyAll(Size(0, 30)),
+                      padding: const WidgetStatePropertyAll(
+                        EdgeInsets.symmetric(horizontal: 10),
                       ),
-                      const SizedBox(height: 14),
-                      Text(
-                        title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      visualDensity: VisualDensity.compact,
+                    )
+                  : null;
+
+              return SafeArea(
+                top: isFullScreen,
+                bottom: isFullScreen,
+                child: Stack(
+                  children: [
+                    Positioned(
+                      left: compact ? 2 : 8,
+                      top: compact ? 2 : 8,
+                      child: IconButton(
+                        tooltip: '返回',
+                        visualDensity: compact
+                            ? VisualDensity.compact
+                            : VisualDensity.standard,
+                        onPressed: () => Navigator.of(context).maybePop(),
+                        icon: Icon(
+                          Icons.arrow_back_ios_new_rounded,
                           color: Colors.white,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
+                          size: compact ? 16 : 20,
                         ),
                       ),
-                      if (episode.isNotEmpty) ...[
-                        const SizedBox(height: 4),
-                        Text(
-                          episode,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Colors.white70,
-                            fontSize: 12,
-                          ),
+                    ),
+                    Center(
+                      child: Container(
+                        margin: EdgeInsets.symmetric(
+                          horizontal: compact ? 10 : 24,
                         ),
-                      ],
-                      const SizedBox(height: 6),
-                      const Text(
-                        '正在画中画窗口中播放',
-                        style: TextStyle(color: Colors.white70, fontSize: 13),
+                        padding: EdgeInsets.fromLTRB(
+                          cardPadding,
+                          cardPadding,
+                          cardPadding,
+                          compact ? 8 : 20,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xDD111111),
+                          borderRadius: BorderRadius.circular(compact ? 12 : 18),
+                          border: Border.all(color: Colors.white24),
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.picture_in_picture_alt_rounded,
+                              color: Colors.white,
+                              size: compact ? 20 : 34,
+                            ),
+                            SizedBox(height: compact ? 2 : 14),
+                            Text(
+                              title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: compact ? 12 : 15,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            if (episode.isNotEmpty) ...[
+                              SizedBox(height: compact ? 1 : 4),
+                              Text(
+                                episode,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: compact ? 10 : 12,
+                                ),
+                              ),
+                            ],
+                            SizedBox(height: compact ? 1 : 6),
+                            Text(
+                              '正在画中画窗口中播放',
+                              style: TextStyle(
+                                color: Colors.white70,
+                                fontSize: compact ? 10 : 13,
+                              ),
+                            ),
+                            SizedBox(height: compact ? 5 : 18),
+                            Wrap(
+                              alignment: WrapAlignment.center,
+                              spacing: compact ? 6 : 10,
+                              runSpacing: compact ? 4 : 8,
+                              children: [
+                                FilledButton.icon(
+                                  style: buttonStyle,
+                                  onPressed: () => controller
+                                      .stopIosPictureInPictureAndRestore(),
+                                  icon: Icon(
+                                    Icons.fullscreen_rounded,
+                                    size: compact ? 14 : 18,
+                                  ),
+                                  label: Text('恢复应用内播放'),
+                                ),
+                                OutlinedButton.icon(
+                                  style: buttonStyle,
+                                  onPressed: () =>
+                                      Navigator.of(context).maybePop(),
+                                  icon: Icon(
+                                    Icons.close_rounded,
+                                    size: compact ? 14 : 18,
+                                  ),
+                                  label: const Text('退出播放'),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
                       ),
-                      const SizedBox(height: 18),
-                      Wrap(
-                        alignment: WrapAlignment.center,
-                        spacing: 10,
-                        runSpacing: 8,
-                        children: [
-                          FilledButton.icon(
-                            onPressed: () => controller
-                                .stopIosPictureInPictureAndRestore(),
-                            icon: const Icon(Icons.fullscreen_rounded, size: 18),
-                            label: const Text('恢复应用内播放'),
-                          ),
-                          OutlinedButton.icon(
-                            onPressed: () => Navigator.of(context).maybePop(),
-                            icon: const Icon(Icons.close_rounded, size: 18),
-                            label: const Text('退出播放'),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
-              ),
-            ],
+              );
+            },
           ),
         ),
       ),
