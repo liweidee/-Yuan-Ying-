@@ -43,6 +43,19 @@ class MainController extends GetxController {
 
   bool get needsCorrection => hideTopBar.value;
 
+  /// 首页内容需要避让的移动端底栏高度。
+  ///
+  /// 桌面端导航在左侧；全屏、自动隐藏或悬浮底栏不需要压缩首页内容区。
+  double get homeBottomContentInset {
+    if (!useBottomNav.value ||
+        isWebFullscreen.value ||
+        hideBottomBar.value ||
+        currentNavBarStyle == NavigationBarStyle.floating) {
+      return 0.0;
+    }
+    return bottomBarHeight.value;
+  }
+
   // ============================================================
   // Web Tab 全屏状态（供 MainPage 隐藏/恢复导航栏）
   // ============================================================

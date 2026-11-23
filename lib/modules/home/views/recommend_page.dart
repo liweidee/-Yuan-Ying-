@@ -57,7 +57,7 @@ class _RecommendPageState extends State<RecommendPage>
           padding: EdgeInsets.only(
             left: Style.safeSpace,
             right: Style.safeSpace,
-            bottom: 100,
+            bottom: 16,
           ),
           itemCount: widget.data.length,
           itemBuilder: (context, index) {
@@ -81,7 +81,7 @@ class _RecommendPageState extends State<RecommendPage>
         padding: EdgeInsets.only(
           left: Style.safeSpace,
           right: Style.safeSpace,
-          bottom: 100,
+          bottom: 16,
         ),
         gridDelegate: gridDelegate,
         itemCount: widget.data.length,

@@ -84,6 +84,7 @@ class SourceManager extends GetxController {
       <Map<String, dynamic>>[].obs;
   final RxString configLogo = ''.obs;
   final RxBool isConfigLoaded = false.obs;
+  final RxBool isSwitchingSite = false.obs;
   final RxString configSource = 'remote'.obs;
   final RxBool isConfigLoading = false.obs;
   final RxBool configLoadError = false.obs;
@@ -104,6 +105,8 @@ class SourceManager extends GetxController {
 
   bool _isRestoring = false;
   int _configLoadId = 0; // 防止异步竞态
+  int _siteSwitchId = 0; // 防止连续切源时旧任务提前解除新任务状态
+  Future<void> _siteSwitchQueue = Future<void>.value();
 
   String _currentJarSource = '';
   String _currentJarConfigBaseUrl = '';
@@ -1278,24 +1281,55 @@ class SourceManager extends GetxController {
       currentParses.clear();
       return;
     }
-    currentSite.value = target;
-    currentParses.value = List.from(parseList);
 
-    // 等待切换结果（所有分支都返回 SiteSwitchResult，异常已在 _switchToSite 内 catch）
-    final result = await _switchToSite(target);
+    final switchId = ++_siteSwitchId;
+    isSwitchingSite.value = true;
+    try {
+      currentSite.value = target;
+      currentParses.value = List.from(parseList);
 
-    _updatePushAgentCache();
-    _saveCurrentSiteKey();
+      // 等待切换结果（所有分支都返回 SiteSwitchResult，异常已在 _switchToSite 内 catch）
+      final result = await _switchToSiteSerial(target);
 
-    if (result.success) {
-      _notifyHomeController();
-    } else {
-      final raw = result.error;
-      final errorMsg = (raw != null && raw.isNotEmpty)
-          ? ErrorFormatter.formatSwitchError(raw) // 幂等，已带切源前缀原样返回
-          : '切换源失败：未知错误';
-      _notifyHomeControllerFailure(errorMsg);
+      // 连续切源时，只允许最新一次任务提交最终状态。
+      if (switchId != _siteSwitchId) return;
+
+      _updatePushAgentCache();
+      _saveCurrentSiteKey();
+
+      if (result.success) {
+        _notifyHomeController();
+      } else {
+        final raw = result.error;
+        final errorMsg = (raw != null && raw.isNotEmpty)
+            ? ErrorFormatter.formatSwitchError(raw) // 幂等，已带切源前缀原样返回
+            : '切换源失败：未知错误';
+        _notifyHomeControllerFailure(errorMsg);
+      }
+    } catch (e) {
+      // 即使切源之外的收尾逻辑异常，也必须结束首页的切源锁定状态。
+      if (switchId == _siteSwitchId) {
+        _notifyHomeControllerFailure(ErrorFormatter.formatSwitchError(e));
+      }
+      rethrow;
+    } finally {
+      // 只有最新一次切源任务可以结束 loading，避免旧任务覆盖新任务状态。
+      if (switchId == _siteSwitchId) {
+        isSwitchingSite.value = false;
+      }
     }
+  }
+
+  /// 串行执行底层切源。
+  ///
+  /// UI 始终以最后一次请求为准，但底层共享爬虫状态不能并发改写。
+  Future<SiteSwitchResult> _switchToSiteSerial(Map<String, dynamic> site) {
+    final operation = _siteSwitchQueue.then((_) => _switchToSite(site));
+    _siteSwitchQueue = operation.then<void>(
+      (_) {},
+      onError: (Object error, StackTrace stackTrace) {},
+    );
+    return operation;
   }
 
   Future<void> refreshSites() async {

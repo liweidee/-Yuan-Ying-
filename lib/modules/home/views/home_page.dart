@@ -1045,6 +1045,9 @@ class _HomePageState extends CommonPageState<HomePage>
 
   Widget _buildNormalContent(ThemeData theme) {
     final mainController = Get.find<MainController>();
+    // navigationBarStyle 本身来自 StorageManager，通过版本号建立响应式依赖。
+    final _ = mainController.navStyleVersion.value;
+    final bottomContentInset = mainController.homeBottomContentInset;
 
     // -------- 顶部栏 --------
     final Widget topBarContent = _buildTopBarContent(theme);
@@ -1260,7 +1263,12 @@ class _HomePageState extends CommonPageState<HomePage>
         topBar,
         tabBar,
         // const SizedBox(height: 8),
-        Expanded(child: wrappedTabView),
+        Expanded(
+          child: Padding(
+            padding: EdgeInsets.only(bottom: bottomContentInset),
+            child: wrappedTabView,
+          ),
+        ),
       ],
     );
   }
@@ -1432,7 +1440,8 @@ class _HomePageState extends CommonPageState<HomePage>
           );
         }
 
-        if (controller.isSwitchingSource.value) {
+        if (controller.isSwitchingSource.value ||
+            sourceManager.isSwitchingSite.value) {
           return Column(
             children: [
               _buildNormalTopBar(theme),

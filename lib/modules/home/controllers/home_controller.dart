@@ -44,6 +44,7 @@ class HomeController extends GetxController with GetTickerProviderStateMixin {
 
   // ===== 首页数据加载版本号，防止快速切站导致旧响应覆盖新 UI =====
   int _homeLoadId = 0;
+  bool _hasRequestedHomeData = false;
 
   // ===== 分类控制器缓存（仅非推荐分类） =====
   final Map<String, CategoryController> _categoryControllers = {};
@@ -77,17 +78,35 @@ class HomeController extends GetxController with GetTickerProviderStateMixin {
         _loadLayoutForCurrentSite();
         _loadFilterVisibilityForCurrentSite();
         _loadMergeListModeForCurrentSite();
-        _loadHomeData();
+        // 正常启动已由 _selectDefaultSite 通知发起加载；仅兜底
+        // HomeController 在通知之后、isConfigLoaded 置 true 之前创建的窗口。
+        if (!_hasRequestedHomeData) {
+          _loadHomeData();
+        }
       }
     });
 
-    if (_sourceManager.isConfigLoaded.value) {
+    ever<bool>(_sourceManager.isSwitchingSite, (switching) {
+      if (switching) {
+        _onSiteSwitchStarted();
+      }
+    });
+
+    // HomeController 可能在切源过程中才被创建，需要同步恢复开始状态。
+    if (_sourceManager.isSwitchingSite.value) {
+      _onSiteSwitchStarted();
+    }
+
+    if (_sourceManager.isConfigLoaded.value &&
+        !_sourceManager.isSwitchingSite.value) {
       _loadHomeData();
     }
 
     final drpy2Service = Get.find<Drpy2ApiService>();
     ever<bool>(drpy2Service.isReady, (ready) {
       if (!ready) return;
+      // 切源完成后会由 onSiteChanged 统一加载，避免运行时就绪通知提前请求。
+      if (_sourceManager.isSwitchingSite.value) return;
       final site = _sourceManager.currentSite.value;
       if (site == null) return;
       final siteKey = site['key']?.toString() ?? '';
@@ -194,6 +213,18 @@ class HomeController extends GetxController with GetTickerProviderStateMixin {
   }
 
   // ===== 切换源 =====
+  /// 在 SourceManager 发布新 currentSite 之前调用。
+  ///
+  /// 旧请求立即失效，同时由 isSwitchingSource 驱动页面进入 loading，
+  /// 防止切源期间继续点击上一源的卡片。
+  void _onSiteSwitchStarted() {
+    ++_homeLoadId;
+    isHomeLoading.value = false;
+    isHomeError.value = false;
+    errorMsg.value = '';
+    isSwitchingSource.value = true;
+  }
+
   void onSiteChanged() {
     for (var ctrl in _categoryControllers.values) {
       ctrl.dispose();
@@ -249,6 +280,7 @@ class HomeController extends GetxController with GetTickerProviderStateMixin {
   Future<void> _loadHomeData() async {
     // 捕获本次请求版本号
     final loadId = ++_homeLoadId;
+    _hasRequestedHomeData = true;
 
     _tabController?.dispose();
     _tabController = null;
