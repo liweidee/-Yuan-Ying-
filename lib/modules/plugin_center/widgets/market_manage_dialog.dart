@@ -1,6 +1,7 @@
 // lib/modules/plugin_center/widgets/market_manage_dialog.dart
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:get/get.dart';
 
@@ -22,6 +23,8 @@ const _globalProxyOptions = <(String, String)>[
   ('gh-proxy.playdreamer.cn', 'https://gh-proxy.playdreamer.cn/'),
   ('github.catvod.com', 'https://github.catvod.com/'),
 ];
+
+enum _MarketSourceAction { edit, copyUrl, delete }
 
 class _MarketManageDialog extends StatefulWidget {
   const _MarketManageDialog();
@@ -93,24 +96,27 @@ class _MarketManageDialogState extends State<_MarketManageDialog> {
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
-                children: _globalProxyOptions.map((opt) {
-                  final label = opt.$1;
-                  final value = opt.$2;
-                  final selected = _globalProxy == value;
-                  return _buildProxyChip(
-                    label: label,
-                    selected: selected,
-                    onTap: () => setState(() => _globalProxy = value),
-                  );
-                }).toList()
-                  ..add(
-                    _buildProxyChip(
-                      label: '自定义...',
-                      selected: _globalProxy.isNotEmpty &&
-                          !_globalProxyOptions.any((o) => o.$2 == _globalProxy),
-                      onTap: _showCustomProxyDialog,
+                children:
+                    _globalProxyOptions.map((opt) {
+                      final label = opt.$1;
+                      final value = opt.$2;
+                      final selected = _globalProxy == value;
+                      return _buildProxyChip(
+                        label: label,
+                        selected: selected,
+                        onTap: () => setState(() => _globalProxy = value),
+                      );
+                    }).toList()..add(
+                      _buildProxyChip(
+                        label: '自定义...',
+                        selected:
+                            _globalProxy.isNotEmpty &&
+                            !_globalProxyOptions.any(
+                              (o) => o.$2 == _globalProxy,
+                            ),
+                        onTap: _showCustomProxyDialog,
+                      ),
                     ),
-                  ),
               ),
               if (_globalProxy.isNotEmpty &&
                   !_globalProxyOptions.any((o) => o.$2 == _globalProxy)) ...[
@@ -159,6 +165,40 @@ class _MarketManageDialogState extends State<_MarketManageDialog> {
                   ),
                 ),
               ),
+              PopupMenuButton<_MarketSourceAction>(
+                tooltip: '更多',
+                icon: Icon(
+                  Icons.more_vert,
+                  size: 20,
+                  color: colorScheme.outline,
+                ),
+                padding: EdgeInsets.zero,
+                onSelected: (action) => _onSourceAction(source, action),
+                itemBuilder: (context) => [
+                  const PopupMenuItem(
+                    value: _MarketSourceAction.edit,
+                    child: _SourceMenuItem(
+                      icon: Icons.edit_outlined,
+                      label: '编辑配置',
+                    ),
+                  ),
+                  const PopupMenuItem(
+                    value: _MarketSourceAction.copyUrl,
+                    child: _SourceMenuItem(
+                      icon: Icons.link,
+                      label: '复制链接',
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: _MarketSourceAction.delete,
+                    child: _SourceMenuItem(
+                      icon: Icons.delete_outline,
+                      label: '删除',
+                      color: colorScheme.error,
+                    ),
+                  ),
+                ],
+              ),
               Switch(
                 value: source.enabled,
                 onChanged: (v) {
@@ -167,18 +207,6 @@ class _MarketManageDialogState extends State<_MarketManageDialog> {
                     if (i >= 0) {
                       _sources[i] = _sources[i].copyWith(enabled: v);
                     }
-                  });
-                },
-              ),
-              IconButton(
-                icon: Icon(
-                  Icons.delete_outline,
-                  size: 18,
-                  color: colorScheme.error,
-                ),
-                onPressed: () {
-                  setState(() {
-                    _sources.removeWhere((e) => e.id == source.id);
                   });
                 },
               ),
@@ -193,6 +221,27 @@ class _MarketManageDialogState extends State<_MarketManageDialog> {
         ],
       ),
     );
+  }
+
+  Future<void> _onSourceAction(
+    MarketSource source,
+    _MarketSourceAction action,
+  ) async {
+    switch (action) {
+      case _MarketSourceAction.edit:
+        await _showSourceEditor(source: source);
+        break;
+      case _MarketSourceAction.copyUrl:
+        await Clipboard.setData(ClipboardData(text: source.url));
+        SmartDialog.showToast('链接已复制');
+        break;
+      case _MarketSourceAction.delete:
+        setState(() {
+          _sources.removeWhere((e) => e.id == source.id);
+        });
+        SmartDialog.showToast('已从列表移除，保存后生效');
+        break;
+    }
   }
 
   Widget _buildProxyChip({
@@ -278,14 +327,14 @@ class _MarketManageDialogState extends State<_MarketManageDialog> {
     );
   }
 
-  void _addSource() {
-    final nameCtrl = TextEditingController();
-    final urlCtrl = TextEditingController();
+  Future<void> _showSourceEditor({MarketSource? source}) async {
+    final nameCtrl = TextEditingController(text: source?.name ?? '');
+    final urlCtrl = TextEditingController(text: source?.url ?? '');
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: Style.mdRadius),
-        title: const Text('添加市场源'),
+        title: Text(source == null ? '添加市场源' : '编辑市场源'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -323,20 +372,36 @@ class _MarketManageDialogState extends State<_MarketManageDialog> {
               }
               Navigator.pop(ctx);
               setState(() {
-                _sources.add(MarketSource(
-                  id: 'custom_${DateTime.now().millisecondsSinceEpoch}',
-                  name: name,
-                  url: url,
-                  enabled: true,
-                  proxy: _globalProxy,
-                ));
+                if (source == null) {
+                  _sources.add(
+                    MarketSource(
+                      id: 'custom_${DateTime.now().millisecondsSinceEpoch}',
+                      name: name,
+                      url: url,
+                      enabled: true,
+                      proxy: _globalProxy,
+                    ),
+                  );
+                } else {
+                  final index = _sources.indexWhere((e) => e.id == source.id);
+                  if (index >= 0) {
+                    _sources[index] = _sources[index].copyWith(
+                      name: name,
+                      url: url,
+                    );
+                  }
+                }
               });
             },
-            child: const Text('添加'),
+            child: Text(source == null ? '添加' : '保存'),
           ),
         ],
       ),
     );
+  }
+
+  void _addSource() {
+    _showSourceEditor();
   }
 
   Future<void> _save() async {
@@ -348,5 +413,28 @@ class _MarketManageDialogState extends State<_MarketManageDialog> {
     if (mounted) Navigator.pop(context);
     await _controller.loadMarket(forceRefresh: true);
     SmartDialog.showToast('已保存并刷新');
+  }
+}
+
+class _SourceMenuItem extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color? color;
+
+  const _SourceMenuItem({
+    required this.icon,
+    required this.label,
+    this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, size: 18, color: color),
+        const SizedBox(width: 10),
+        Text(label, style: TextStyle(color: color)),
+      ],
+    );
   }
 }

@@ -1,5 +1,6 @@
 // lib/modules/plugin_center/controllers/plugin_center_controller.dart
 
+import 'dart:async';
 import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:get/get.dart';
@@ -68,21 +69,48 @@ class PluginCenterController extends GetxController {
   final RxString serviceTabFilterLabel = ''.obs;
 
   void Function()? onJumpToServiceTab;
+  StreamSubscription<void>? _serviceChangeSubscription;
 
   @override
   void onInit() {
     super.onInit();
     reloadInstalled();
     reloadServices();
-    ServiceManager.instance.onChange.listen((_) => reloadServices());
+    _serviceChangeSubscription = ServiceManager.instance.onChange.listen(
+      (_) => reloadServices(),
+    );
+  }
+
+  @override
+  void onClose() {
+    final subscription = _serviceChangeSubscription;
+    _serviceChangeSubscription = null;
+    if (subscription != null) {
+      unawaited(subscription.cancel());
+    }
+    onJumpToServiceTab = null;
+    super.onClose();
   }
 
   Future<void> loadMarket({bool forceRefresh = false}) async {
     marketLoading.value = true;
     marketError.value = '';
     try {
-      final entries = await MarketManager.instance
-          .fetchAll(forceRefresh: forceRefresh);
+      final enabledSources = getSources()
+          .where((source) => source.enabled)
+          .toList();
+      final failures = <String>[];
+      final entries = await MarketManager.instance.fetchAll(
+        forceRefresh: forceRefresh,
+        onSourceError: (source, error) {
+          failures.add('${source.name}：$error');
+        },
+      );
+      if (entries.isEmpty &&
+          enabledSources.isNotEmpty &&
+          failures.length == enabledSources.length) {
+        throw Exception('所有市场源加载失败\n${failures.join('\n')}');
+      }
       marketEntries.assignAll(entries);
       await InstallManager.instance.backfillFromMarket(entries);
       reloadInstalled();
@@ -223,7 +251,8 @@ class PluginCenterController extends GetxController {
           await SandboxServiceManager.instance.stopAll();
         } catch (e) {
           debugPrint(
-              '[PluginCenterController] stop sandbox services failed: $e');
+            '[PluginCenterController] stop sandbox services failed: $e',
+          );
         }
       }
 
@@ -290,7 +319,7 @@ class PluginCenterController extends GetxController {
   }
 
   int get serviceCount =>
-    serviceIds.where((id) => !_hiddenServiceIds.contains(id)).length;
+      serviceIds.where((id) => !_hiddenServiceIds.contains(id)).length;
 
   int get runningServiceCount {
     int n = 0;
@@ -322,7 +351,8 @@ class PluginCenterController extends GetxController {
 
       if (runtime.isNotEmpty && cfg.runtime != runtime) return false;
       if (query.isNotEmpty) {
-        final hay = '${cfg.name} ${cfg.runtime} ${cfg.port ?? ''}'.toLowerCase();
+        final hay = '${cfg.name} ${cfg.runtime} ${cfg.port ?? ''}'
+            .toLowerCase();
         if (!hay.contains(query)) return false;
       }
       return true;

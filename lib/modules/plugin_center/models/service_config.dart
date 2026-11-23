@@ -43,6 +43,21 @@ class ServiceConfig {
   /// PID 文件路径（仅自定义环境用；空 = 自动生成）
   final String? pidFile;
 
+  /// 服务包安装根目录；仅由插件中心管理的服务包使用。
+  ///
+  /// 该目录与运行工作目录分离。删除服务包时以本字段为唯一所有权依据，
+  /// 不能从 cwd 反推，避免只删除 workDir 子目录而留下 server.json。
+  final String? packageRoot;
+
+  /// 服务包对应的稳定插件 ID（不含版本号）。
+  final String? packagePluginId;
+
+  /// server.json 声明的包内版本，仅用于诊断，不参与市场身份。
+  final String? packageVersion;
+
+  /// 身份来源：market / serviceId / filename 等。
+  final String? packageIdentitySource;
+
   ServiceConfig({
     required this.id,
     required this.name,
@@ -58,6 +73,10 @@ class ServiceConfig {
     this.healthType = 'process',
     this.healthPath = '/',
     this.pidFile,
+    this.packageRoot,
+    this.packagePluginId,
+    this.packageVersion,
+    this.packageIdentitySource,
   });
 
   factory ServiceConfig.fromJson(Map<String, dynamic> json) {
@@ -84,25 +103,33 @@ class ServiceConfig {
       healthType: json['healthType']?.toString() ?? 'process',
       healthPath: json['healthPath']?.toString() ?? '/',
       pidFile: json['pidFile']?.toString(),
+      packageRoot: json['packageRoot']?.toString(),
+      packagePluginId: json['packagePluginId']?.toString(),
+      packageVersion: json['packageVersion']?.toString(),
+      packageIdentitySource: json['packageIdentitySource']?.toString(),
     );
   }
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'name': name,
-        'port': port,
-        'runtime': runtime,
-        'args': args,
-        'cwd': cwd,
-        'autostart': autostart,
-        'keepForeground': keepForeground,
-        'env': env,
-        'maxRestart': maxRestart,
-        'executable': executable,
-        'healthType': healthType,
-        'healthPath': healthPath,
-        'pidFile': pidFile,
-      };
+    'id': id,
+    'name': name,
+    'port': port,
+    'runtime': runtime,
+    'args': args,
+    'cwd': cwd,
+    'autostart': autostart,
+    'keepForeground': keepForeground,
+    'env': env,
+    'maxRestart': maxRestart,
+    'executable': executable,
+    'healthType': healthType,
+    'healthPath': healthPath,
+    'pidFile': pidFile,
+    'packageRoot': packageRoot,
+    'packagePluginId': packagePluginId,
+    'packageVersion': packageVersion,
+    'packageIdentitySource': packageIdentitySource,
+  };
 
   ServiceConfig copyWith({
     String? name,
@@ -118,6 +145,10 @@ class ServiceConfig {
     String? healthType,
     String? healthPath,
     String? pidFile,
+    String? packageRoot,
+    String? packagePluginId,
+    String? packageVersion,
+    String? packageIdentitySource,
   }) {
     return ServiceConfig(
       id: id,
@@ -134,6 +165,11 @@ class ServiceConfig {
       healthType: healthType ?? this.healthType,
       healthPath: healthPath ?? this.healthPath,
       pidFile: pidFile ?? this.pidFile,
+      packageRoot: packageRoot ?? this.packageRoot,
+      packagePluginId: packagePluginId ?? this.packagePluginId,
+      packageVersion: packageVersion ?? this.packageVersion,
+      packageIdentitySource:
+          packageIdentitySource ?? this.packageIdentitySource,
     );
   }
 }

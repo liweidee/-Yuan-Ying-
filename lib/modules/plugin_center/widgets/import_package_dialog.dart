@@ -7,17 +7,21 @@ import 'package:archive/archive.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
+import 'package:get/get.dart';
 import 'package:path/path.dart' as p;
 
-import 'package:yuanying/core/constants/storage_keys.dart';
 import 'package:yuanying/core/theme/style.dart';
-import 'package:yuanying/models/live/live_config.dart';
+import 'package:yuanying/modules/plugin_center/controllers/plugin_center_controller.dart';
 import 'package:yuanying/modules/plugin_center/models/installed_plugin.dart';
+import 'package:yuanying/modules/plugin_center/models/manual_import_identity.dart';
+import 'package:yuanying/modules/plugin_center/models/market_entry.dart';
 import 'package:yuanying/modules/plugin_center/models/service_config.dart';
 import 'package:yuanying/modules/plugin_center/services/install_manager.dart';
+import 'package:yuanying/modules/plugin_center/services/live_source_manager.dart';
 import 'package:yuanying/modules/plugin_center/services/plugin_paths.dart';
+import 'package:yuanying/modules/plugin_center/services/resource_install_transaction.dart';
+import 'package:yuanying/modules/plugin_center/services/server_package_resolver.dart';
 import 'package:yuanying/modules/plugin_center/services/service_manager.dart';
-import 'package:yuanying/utils/storage_manager.dart';
 
 Future<void> showImportPackageDialog(BuildContext context) async {
   await showDialog<void>(
@@ -72,7 +76,7 @@ class _ImportPackageDialogState extends State<_ImportPackageDialog> {
                 '解压到 plugins 同级目录',
               ]),
               _section('直播源包（.json，含 lives）', colorScheme, [
-                '直接追加到直播配置',
+                '匿名包只追加；声明 id + version 时可覆盖同名线路',
               ]),
               _section('APK 直装型', colorScheme, [
                 'Python 爬虫引擎 / IJK 内核 / FFmpeg 软解',
@@ -133,17 +137,19 @@ class _ImportPackageDialogState extends State<_ImportPackageDialog> {
             ),
           ),
           const SizedBox(height: 2),
-          ...bullets.map((b) => Padding(
-                padding: const EdgeInsets.only(left: 8, top: 2),
-                child: Text(
-                  '· $b',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: colorScheme.onSurfaceVariant,
-                    height: 1.4,
-                  ),
+          ...bullets.map(
+            (b) => Padding(
+              padding: const EdgeInsets.only(left: 8, top: 2),
+              child: Text(
+                '· $b',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: colorScheme.onSurfaceVariant,
+                  height: 1.4,
                 ),
-              )),
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -169,7 +175,9 @@ class _ImportPackageDialogState extends State<_ImportPackageDialog> {
       final name = p.basename(path).toLowerCase();
 
       if (name.endsWith('.apk')) {
-        SmartDialog.showToast('APK 请直接双击安装');
+        await InstallManager.instance.installLocalApk(path);
+        SmartDialog.showToast('已交给系统安装器，完成后返回插件页进行固化');
+        if (mounted) Navigator.pop(context);
         return;
       }
       if (name.endsWith('.json')) {
@@ -205,64 +213,72 @@ class _ImportPackageDialogState extends State<_ImportPackageDialog> {
       return;
     }
 
-    final added = await _appendLives(lives);
-    if (added > 0) {
-      SmartDialog.showToast('直播配置导入成功，共新增 $added 个');
+    final identity = ManualImportIdentity.fromJson(decoded);
+    final linkedIdentity = _isUsableIdentity(identity) ? identity : null;
+    final existing = linkedIdentity == null
+        ? null
+        : InstallManager.instance.findInstalled(linkedIdentity.id);
+    if (linkedIdentity != null && existing != null) {
+      final confirmed = await _confirmLiveOverwrite(
+        linkedIdentity.id,
+        existing.version,
+      );
+      if (confirmed != true) return;
+    }
+
+    final previousKeys = <String>{
+      if (existing?.extras['liveKeys'] is List)
+        ...(existing!.extras['liveKeys'] as List).map((key) => key.toString()),
+    };
+    final transaction = LiveConfigTransaction.capture();
+    try {
+      final result = await LiveSourceManager.applyPackage(
+        lives: lives,
+        previousManagedKeys: previousKeys,
+        replaceManaged: linkedIdentity != null && existing != null,
+        claimExistingNames: linkedIdentity != null && existing == null,
+        overwriteExistingNames: linkedIdentity != null,
+      );
+      if (!result.hasChanges) {
+        transaction.commit();
+        SmartDialog.showToast('没有新增直播源（可能已存在）');
+        return;
+      }
+
+      if (linkedIdentity != null) {
+        await InstallManager.instance.register(
+          InstalledPlugin(
+            id: linkedIdentity.id,
+            version: linkedIdentity.version,
+            source: '手动导入',
+            installPath: '',
+            enabled: true,
+            pinned: false,
+            installedAtMs: DateTime.now().millisecondsSinceEpoch,
+            type: 'live',
+            extras: {'liveKeys': result.managedKeys},
+          ),
+        );
+      }
+      transaction.commit();
+
+      if (linkedIdentity != null) {
+        _refreshPluginCenter();
+        SmartDialog.showToast(
+          '直播配置导入成功：新增 ${result.added} 个，'
+          '更新 ${result.updated} 个，移除 ${result.removed} 个，'
+          '已关联市场插件',
+        );
+      } else {
+        SmartDialog.showToast(
+          '直播配置导入成功，共新增 ${result.added} 个（未声明插件身份，未关联市场）',
+        );
+      }
       if (mounted) Navigator.pop(context);
-    } else {
-      SmartDialog.showToast('没有新增直播源（可能已存在）');
+    } catch (_) {
+      await transaction.rollback();
+      rethrow;
     }
-  }
-
-  Future<int> _appendLives(List<dynamic> lives) async {
-    final existingRaw =
-        StorageManager.getSetting<List<dynamic>>(SettingBoxKey.liveConfigs) ??
-            [];
-    final existing = existingRaw
-        .map((e) => LiveConfig.fromJson(Map<String, dynamic>.from(e)))
-        .toList();
-    final existingNames = existing.map((c) => c.name).toSet();
-    int added = 0;
-    for (final item in lives) {
-      if (item is! Map) continue;
-      final name = item['name']?.toString() ?? '';
-      if (name.isEmpty) continue;
-      if (existingNames.contains(name)) continue;
-      final newConfig = LiveConfig(
-        key: _generateLiveKey(name, existing),
-        name: name,
-        url: item['url']?.toString() ?? '',
-        ua: item['ua']?.toString(),
-        epg: item['epg']?.toString(),
-        logo: item['logo']?.toString(),
-      );
-      existing.add(newConfig);
-      existingNames.add(name);
-      added++;
-    }
-    if (added > 0) {
-      await StorageManager.setSetting(
-        SettingBoxKey.liveConfigs,
-        existing.map((c) => c.toJson()).toList(),
-      );
-    }
-    return added;
-  }
-
-  String _generateLiveKey(String name, List<LiveConfig> existing) {
-    String base = name
-        .toLowerCase()
-        .replaceAll(' ', '_')
-        .replaceAll(RegExp(r'[^\w]'), '');
-    if (base.isEmpty) base = 'live';
-    String key = base;
-    int index = 1;
-    final keys = existing.map((c) => c.key).toSet();
-    while (keys.contains(key)) {
-      key = '${base}_$index';
-      index++;
-    }
-    return key;
   }
 
   // ============================================================
@@ -304,7 +320,9 @@ class _ImportPackageDialogState extends State<_ImportPackageDialog> {
         await _importComponentPackage(tempDir, pluginJson, path);
         return;
       }
-      SmartDialog.showToast('包内未找到 plugin.json / server.json / source.json，不支持此类型');
+      SmartDialog.showToast(
+        '包内未找到 plugin.json / server.json / source.json，不支持此类型',
+      );
     } catch (e) {
       SmartDialog.showToast('导入失败：$e');
     } finally {
@@ -320,8 +338,9 @@ class _ImportPackageDialogState extends State<_ImportPackageDialog> {
   bool _isSafeImportPath(String targetDir, String entryName) {
     try {
       final normalizedTarget = p.normalize(p.absolute(targetDir));
-      final normalizedOut =
-          p.normalize(p.absolute(p.join(targetDir, entryName)));
+      final normalizedOut = p.normalize(
+        p.absolute(p.join(targetDir, entryName)),
+      );
       return p.isWithin(normalizedTarget, normalizedOut) ||
           normalizedOut == normalizedTarget;
     } catch (_) {
@@ -339,38 +358,47 @@ class _ImportPackageDialogState extends State<_ImportPackageDialog> {
     String path,
   ) async {
     String? target;
+    ManualImportIdentity? linkedIdentity;
     try {
       final content = await sourceJson.readAsString();
       final j = jsonDecode(content) as Map;
       target = j['target']?.toString();
+      final identity = ManualImportIdentity.fromJson(j);
+      linkedIdentity = _isUsableIdentity(identity) ? identity : null;
     } catch (_) {}
 
     final dataRoot = await PluginPaths.dataRoot();
-    await _copyDirContents(tempDir, dataRoot);
-
-    // 删掉 source.json（不保留）
-    final targetSourceJson = File(p.join(dataRoot.path, 'source.json'));
-    if (targetSourceJson.existsSync()) {
-      await targetSourceJson.delete();
-    }
-
-    final id = p.basenameWithoutExtension(path).toLowerCase();
-    final installed = InstalledPlugin(
-      id: id,
-      version: '1.0.0',
-      source: '手动导入',
-      installPath: dataRoot.path,
-      enabled: true,
-      pinned: false,
-      installedAtMs: DateTime.now().millisecondsSinceEpoch,
-      type: 'source',
-      extras: {
-        if (target != null) 'sourceTarget': target,
+    await SourcePackageTransaction.run<void>(
+      tag: 'manual-${linkedIdentity?.id ?? 'anonymous'}',
+      staging: tempDir,
+      dataRoot: dataRoot,
+      isCancelled: () => false,
+      afterFilesCommitted: () async {
+        if (linkedIdentity == null) return;
+        await InstallManager.instance.register(
+          InstalledPlugin(
+            id: linkedIdentity.id,
+            version: linkedIdentity.version,
+            source: '手动导入',
+            installPath: dataRoot.path,
+            enabled: true,
+            pinned: false,
+            installedAtMs: DateTime.now().millisecondsSinceEpoch,
+            type: 'source',
+            extras: {
+              if (target != null) 'sourceTarget': target,
+            },
+          ),
+        );
       },
     );
-    await InstallManager.instance.register(installed);
 
-    SmartDialog.showToast('源码包导入成功');
+    if (linkedIdentity != null) {
+      _refreshPluginCenter();
+      SmartDialog.showToast('源码包导入成功，已关联市场插件');
+    } else {
+      SmartDialog.showToast('源码包导入成功（未声明插件身份，未关联市场）');
+    }
     if (mounted) Navigator.pop(context);
   }
 
@@ -393,62 +421,46 @@ class _ImportPackageDialogState extends State<_ImportPackageDialog> {
   // ============================================================
 
   Future<void> _importServerPackage(Directory tempDir, String path) async {
-    final id = p.basenameWithoutExtension(path).toLowerCase();
-    final serviceId = 'svc-mkt-$id';
-
-    final servicesRoot = await PluginPaths.servicesRoot();
-    final baseDir = Directory(p.join(servicesRoot.path, serviceId));
-    if (baseDir.existsSync()) {
-      await baseDir.delete(recursive: true);
-    }
-    await _copyDirContents(tempDir, baseDir);
-
-    final serverJsonFile = File(p.join(baseDir.path, 'server.json'));
+    final serverJsonFile = File(p.join(tempDir.path, 'server.json'));
     if (!serverJsonFile.existsSync()) {
       throw Exception('包内未找到 server.json');
     }
-    final manifest = jsonDecode(await serverJsonFile.readAsString()) as Map;
-    final workDir = manifest['workDir']?.toString() ?? '';
-    final entryFile = manifest['entry']?.toString() ?? '';
-    final port = (manifest['port'] is num)
-        ? (manifest['port'] as num).toInt()
-        : null;
-    final cwd =
-        workDir.isNotEmpty ? p.join(baseDir.path, workDir) : baseDir.path;
-
-    // C7：与 InstallManager._createServiceFromManifest 共用同一推断逻辑。
-    // 原实现硬编码 `-win` 后缀，Android 上手动导入 server 包会创建指向
-    // 不存在的运行时（如 nodejs-win）的服务，启动必然失败。
-    final runtime = InstallManager.resolveRuntimeForEntryFile(
-      entryFile,
-      isWindows: Platform.isWindows,
+    final decoded = jsonDecode(await serverJsonFile.readAsString());
+    if (decoded is! Map) {
+      throw Exception('server.json 不是有效对象');
+    }
+    final servicesRoot = await PluginPaths.servicesRoot();
+    final marketEntries = Get.isRegistered<PluginCenterController>()
+        ? Get.find<PluginCenterController>().marketEntries
+        : const <MarketEntry>[];
+    final plan = ServerPackageResolver.resolve(
+      manifest: decoded,
+      fileName: p.basename(path),
+      servicesRootPath: servicesRoot.path,
+      marketEntries: marketEntries,
     );
+    final baseDir = Directory(plan.packageRoot);
 
-    final config = ServiceConfig(
-      id: serviceId,
-      name: manifest['serviceName']?.toString() ?? id,
-      port: port,
-      runtime: runtime,
-      args: [entryFile],
-      cwd: cwd,
-      autostart: false,
-      keepForeground: false,
+    final exists =
+        baseDir.existsSync() ||
+        InstallManager.instance.findInstalled(plan.pluginId) != null ||
+        ServiceManager.instance.find(plan.serviceId) != null;
+    if (exists) {
+      final confirmed = await _confirmServerOverwrite(plan.pluginId);
+      if (confirmed != true) return;
+    }
+
+    await InstallManager.instance.installServerPackagePlan(
+      plan: plan,
+      sourceDir: tempDir,
+      marketName: '手动导入',
     );
-    await ServiceManager.instance.addOrUpdate(config);
-
-    final installed = InstalledPlugin(
-      id: id,
-      version: manifest['version']?.toString() ?? '0.0.0',
-      source: '手动导入',
-      installPath: baseDir.path,
-      enabled: true,
-      pinned: false,
-      installedAtMs: DateTime.now().millisecondsSinceEpoch,
-      type: 'server',
+    _refreshPluginCenter();
+    SmartDialog.showToast(
+      plan.linkedToMarket
+          ? '服务包导入成功，已关联市场插件'
+          : '服务包导入成功（本地服务 ${plan.serviceId}）',
     );
-    await InstallManager.instance.register(installed);
-
-    SmartDialog.showToast('服务包导入成功');
     if (mounted) Navigator.pop(context);
   }
 
@@ -472,6 +484,8 @@ class _ImportPackageDialogState extends State<_ImportPackageDialog> {
 
     final id = j['name']?.toString() ?? p.basenameWithoutExtension(path);
     final version = j['version']?.toString() ?? '0.0.0';
+    PluginPaths.ensureSafePathSegment(id, '组件包 ID');
+    PluginPaths.ensureSafePathSegment(version, '组件包版本');
     final binaries = j['binaries'];
     final runtime = j['runtime']?.toString() ?? '';
     final binariesKey = Platform.isWindows ? 'win32' : 'android';
@@ -487,10 +501,14 @@ class _ImportPackageDialogState extends State<_ImportPackageDialog> {
     //   1. "bin/node.exe"（带 bin/ 前缀）
     //   2. "quickjs_bridge.dll"（不带前缀，但实际在 bin/ 下）
     final rel = (binaries[binariesKey] as String).replaceAll('\\', '/');
+    if (!_isSafeImportPath(tempDir.path, rel)) {
+      SmartDialog.showToast('插件二进制路径非法：$rel');
+      return;
+    }
     final candidates = <String>[
-      p.join(tempDir.path, rel),                    // tempDir/bin/node.exe
-      p.join(tempDir.path, 'bin', rel),             // tempDir/bin/quickjs_bridge.dll
-      p.join(tempDir.path, p.basename(rel)),        // tempDir/quickjs_bridge.dll
+      p.join(tempDir.path, rel), // tempDir/bin/node.exe
+      p.join(tempDir.path, 'bin', rel), // tempDir/bin/quickjs_bridge.dll
+      p.join(tempDir.path, p.basename(rel)), // tempDir/quickjs_bridge.dll
     ];
     bool found = false;
     for (final c in candidates) {
@@ -510,32 +528,60 @@ class _ImportPackageDialogState extends State<_ImportPackageDialog> {
       return;
     }
 
+    final root = await PluginPaths.root();
+    final targetDir = Directory(p.join(root.path, id));
     final existing = InstallManager.instance.findInstalled(id);
-    if (existing != null) {
+    if (existing != null || targetDir.existsSync()) {
       final ok = await _confirmOverwrite(id);
       if (ok != true) return;
     }
 
-    final targetDir = await PluginPaths.pluginDir(id, version);
-    if (targetDir.existsSync()) {
-      await targetDir.delete(recursive: true);
-    }
-    await _copyDirContents(tempDir, targetDir);
+    await _stopRuntimeServices(id);
 
-    final installed = InstalledPlugin(
-      id: id,
-      version: version,
-      source: '手动导入',
-      installPath: targetDir.path,
-      enabled: true,
-      pinned: false,
-      installedAtMs: DateTime.now().millisecondsSinceEpoch,
-      type: 'import',
+    final staging = Directory(
+      p.join(
+        root.path,
+        '.manual-component-stage-$id-'
+        '${DateTime.now().microsecondsSinceEpoch}',
+      ),
     );
-    await InstallManager.instance.register(installed);
+    try {
+      await staging.create(recursive: true);
+      await _copyDirContents(tempDir, staging);
 
-    SmartDialog.showToast('组件包导入成功');
-    if (mounted) Navigator.pop(context);
+      final swap = await PluginPaths.swapInDirectory(
+        staging: staging,
+        finalDir: targetDir,
+        allowedRoot: root,
+        tag: 'manual-component-$id',
+      );
+      try {
+        await InstallManager.instance.register(
+          InstalledPlugin(
+            id: id,
+            version: version,
+            source: '手动导入',
+            installPath: targetDir.path,
+            enabled: true,
+            pinned: false,
+            installedAtMs: DateTime.now().millisecondsSinceEpoch,
+            type: 'import',
+          ),
+        );
+        await swap.commit();
+      } catch (_) {
+        await swap.rollback();
+        rethrow;
+      }
+
+      _refreshPluginCenter();
+      SmartDialog.showToast('组件包导入成功');
+      if (mounted) Navigator.pop(context);
+    } finally {
+      if (staging.existsSync()) {
+        await staging.delete(recursive: true);
+      }
+    }
   }
 
   Future<bool?> _confirmOverwrite(String id) {
@@ -543,7 +589,7 @@ class _ImportPackageDialogState extends State<_ImportPackageDialog> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('覆盖安装'),
-        content: Text('「$id」已安装，是否覆盖？运行中的服务会先停止。'),
+        content: Text('「$id」已安装，是否覆盖？相关运行中服务会先停止。'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -556,5 +602,66 @@ class _ImportPackageDialogState extends State<_ImportPackageDialog> {
         ],
       ),
     );
+  }
+
+  Future<bool?> _confirmServerOverwrite(String id) {
+    return showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('覆盖服务包'),
+        content: Text('「$id」已有服务或本地数据，覆盖会先停止服务并替换目录。继续吗？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('停止并覆盖'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<bool?> _confirmLiveOverwrite(String id, String version) {
+    return showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('覆盖直播包'),
+        content: Text(
+          '「$id」已安装（v$version）。'
+          '覆盖将替换包内同名线路，并移除该包旧记录中已不再包含的线路；'
+          '其他线路会保留。继续吗？',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('覆盖导入'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _stopRuntimeServices(String runtimeId) async {
+    await InstallManager.instance.stopRuntimeConsumers(runtimeId);
+  }
+
+  bool _isUsableIdentity(ManualImportIdentity? identity) {
+    return identity != null &&
+        PluginPaths.isSafePathSegment(identity.id) &&
+        PluginPaths.isSafePathSegment(identity.version);
+  }
+
+  void _refreshPluginCenter() {
+    if (!Get.isRegistered<PluginCenterController>()) return;
+    final controller = Get.find<PluginCenterController>();
+    controller.reloadInstalled();
+    controller.reloadServices();
   }
 }

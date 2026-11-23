@@ -61,6 +61,9 @@ class PortOccupant {
 
 /// 端口清理器
 abstract final class PortCleaner {
+  /// 查询监听指定端口的 PID（当前仅 Windows 支持）。
+  static Future<int?> findPidByPort(int port) => _findPidByPort(port);
+
   /// 检测所有已配置服务的端口占用
   static Future<List<PortOccupant>> scan() async {
     final services = ServiceManager.instance.getAll();
@@ -79,13 +82,15 @@ abstract final class PortCleaner {
 
       // 1. 自身进程 → 冲突（绝对不杀）
       if (foundPid == selfPid) {
-        result.add(PortOccupant(
-          port: s.port!,
-          serviceName: s.name,
-          pid: foundPid,
-          processName: procName,
-          type: PortOccupancyType.conflict,
-        ));
+        result.add(
+          PortOccupant(
+            port: s.port!,
+            serviceName: s.name,
+            pid: foundPid,
+            processName: procName,
+            type: PortOccupancyType.conflict,
+          ),
+        );
         continue;
       }
 
@@ -94,22 +99,26 @@ abstract final class PortCleaner {
         final runtimePid = ServiceManager.instance.getPid(s.id);
         if (runtimePid == foundPid) {
           // 我们启动的，正常
-          result.add(PortOccupant(
-            port: s.port!,
-            serviceName: s.name,
-            pid: foundPid,
-            processName: procName,
-            type: PortOccupancyType.running,
-          ));
+          result.add(
+            PortOccupant(
+              port: s.port!,
+              serviceName: s.name,
+              pid: foundPid,
+              processName: procName,
+              type: PortOccupancyType.running,
+            ),
+          );
         } else {
           // 服务运行中但端口被别的进程占 → 冲突
-          result.add(PortOccupant(
-            port: s.port!,
-            serviceName: s.name,
-            pid: foundPid,
-            processName: procName,
-            type: PortOccupancyType.conflict,
-          ));
+          result.add(
+            PortOccupant(
+              port: s.port!,
+              serviceName: s.name,
+              pid: foundPid,
+              processName: procName,
+              type: PortOccupancyType.conflict,
+            ),
+          );
         }
         continue;
       }
@@ -117,21 +126,25 @@ abstract final class PortCleaner {
       // 3. 服务已停止
       final isOurPath = await _isOurProcessPath(foundPid);
       if (isOurPath) {
-        result.add(PortOccupant(
-          port: s.port!,
-          serviceName: s.name,
-          pid: foundPid,
-          processName: procName,
-          type: PortOccupancyType.residual,
-        ));
+        result.add(
+          PortOccupant(
+            port: s.port!,
+            serviceName: s.name,
+            pid: foundPid,
+            processName: procName,
+            type: PortOccupancyType.residual,
+          ),
+        );
       } else {
-        result.add(PortOccupant(
-          port: s.port!,
-          serviceName: s.name,
-          pid: foundPid,
-          processName: procName,
-          type: PortOccupancyType.others,
-        ));
+        result.add(
+          PortOccupant(
+            port: s.port!,
+            serviceName: s.name,
+            pid: foundPid,
+            processName: procName,
+            type: PortOccupancyType.others,
+          ),
+        );
       }
     }
     return result;

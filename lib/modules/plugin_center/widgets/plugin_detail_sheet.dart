@@ -3,14 +3,15 @@
 import 'package:flutter/material.dart';
 
 import 'package:yuanying/core/theme/style.dart';
+import 'package:yuanying/modules/plugin_center/controllers/plugin_center_controller.dart';
 import 'package:yuanying/modules/plugin_center/models/market_entry.dart';
-import 'package:yuanying/modules/plugin_center/services/install_manager.dart';
 
 /// 展示插件详情，可带安装动作
 /// [onInstall] 为空时只展示（不显示安装按钮）
 Future<void> showPluginDetailSheet(
   BuildContext context, {
   required MarketEntry entry,
+  required MarketInstallState installState,
   VoidCallback? onInstall,
 }) async {
   await showModalBottomSheet<void>(
@@ -19,35 +20,28 @@ Future<void> showPluginDetailSheet(
     backgroundColor: Colors.transparent,
     builder: (_) => _PluginDetailSheet(
       entry: entry,
+      installState: installState,
       onInstall: onInstall,
     ),
   );
 }
 
-class _PluginDetailSheet extends StatefulWidget {
+class _PluginDetailSheet extends StatelessWidget {
   final MarketEntry entry;
+  final MarketInstallState installState;
   final VoidCallback? onInstall;
 
-  const _PluginDetailSheet({required this.entry, this.onInstall});
-
-  @override
-  State<_PluginDetailSheet> createState() => _PluginDetailSheetState();
-}
-
-class _PluginDetailSheetState extends State<_PluginDetailSheet> {
-  Future<bool>? _installedFuture;
-
-  @override
-  void initState() {
-    super.initState();
-    _installedFuture = InstallManager.instance.isInstalled(widget.entry);
-  }
+  const _PluginDetailSheet({
+    required this.entry,
+    required this.installState,
+    this.onInstall,
+  });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    final entry = widget.entry;
+    final entry = this.entry;
 
     return Container(
       constraints: BoxConstraints(
@@ -181,8 +175,7 @@ class _PluginDetailSheetState extends State<_PluginDetailSheet> {
                   child: const Text('关闭'),
                 ),
                 const Spacer(),
-                if (widget.onInstall != null)
-                  _buildActionButton(context),
+                if (onInstall != null) _buildActionButton(context),
               ],
             ),
           ),
@@ -194,56 +187,58 @@ class _PluginDetailSheetState extends State<_PluginDetailSheet> {
   Widget _buildActionButton(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
 
-    if (!widget.entry.supportsWindows &&
-        !widget.entry.supportsCurrentPlatform) {
+    if (installState == MarketInstallState.unsupported) {
       return const FilledButton(
         onPressed: null,
         child: Text('当前平台不支持'),
       );
     }
 
-    return FutureBuilder<bool>(
-      future: _installedFuture,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const FilledButton(
-            onPressed: null,
-            child: Text('检查中…'),
+    switch (installState) {
+      case MarketInstallState.installed:
+        if (_supportsReinstall) {
+          return Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              FilledButton(onPressed: null, child: const Text('已安装')),
+              const SizedBox(width: 8),
+              OutlinedButton(
+                onPressed: () => _runInstall(context),
+                child: const Text('重装'),
+              ),
+            ],
           );
         }
-        final installed = snapshot.data ?? false;
-        final reg = InstallManager.instance.findInstalled(widget.entry.id);
-        final installedSameVersion =
-            installed && reg != null && reg.version == widget.entry.version;
-        final updatable =
-            installed && reg != null && reg.version != widget.entry.version;
-
-        if (installedSameVersion) {
-          return const FilledButton(
-            onPressed: null,
-            child: Text('已安装'),
-          );
-        }
-
-        if (updatable) {
-          return FilledButton(
-            onPressed: () {
-              Navigator.pop(context);
-              widget.onInstall?.call();
-            },
-            child: const Text('更新'),
-          );
-        }
-
-        return FilledButton(
-          onPressed: () {
-            Navigator.pop(context);
-            widget.onInstall?.call();
-          },
-          child: Text(widget.entry.type == 'live' ? '导入' : '安装'),
+        return const FilledButton(
+          onPressed: null,
+          child: Text('已安装'),
         );
-      },
-    );
+
+      case MarketInstallState.updatable:
+        return FilledButton(
+          onPressed: () => _runInstall(context),
+          child: const Text('更新'),
+        );
+
+      case MarketInstallState.notInstalled:
+        return FilledButton(
+          onPressed: () => _runInstall(context),
+          child: Text(entry.type == 'live' ? '导入' : '安装'),
+        );
+
+      case MarketInstallState.unsupported:
+        return const FilledButton(
+          onPressed: null,
+          child: Text('当前平台不支持'),
+        );
+    }
+  }
+
+  bool get _supportsReinstall => entry.type == 'source' || entry.type == 'live';
+
+  void _runInstall(BuildContext context) {
+    Navigator.pop(context);
+    onInstall?.call();
   }
 
   Widget _chip(String text, ColorScheme colorScheme) {

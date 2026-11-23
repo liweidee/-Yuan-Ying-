@@ -1843,7 +1843,11 @@ class _NovelReaderPageState extends State<NovelReaderPage>
       if (_ttsActive) _stopTts();
       await Get.toNamed(AppPages.novelTtsVoices);
     } else {
+      final wasActive = _ttsActive;
       await _ttsService.setNetworkVoice(action);
+      if (wasActive && mounted) {
+        SmartDialog.showToast('音色已切换，将在当前及预加载片段后生效');
+      }
     }
     if (mounted) setSheet(() {});
   }

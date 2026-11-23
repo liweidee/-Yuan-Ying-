@@ -15,6 +15,7 @@ import 'package:yuanying/modules/plugin_center/models/installed_plugin.dart';
 import 'package:yuanying/modules/plugin_center/models/service_config.dart';
 import 'package:yuanying/modules/plugin_center/services/install_manager.dart';
 import 'package:yuanying/modules/plugin_center/services/plugin_paths.dart';
+import 'package:yuanying/modules/plugin_center/services/service_package_cleanup.dart';
 import 'package:yuanying/modules/plugin_center/services/port_cleaner.dart';
 
 /// 服务事件类型
@@ -63,6 +64,7 @@ class ServiceManager {
 
   final Map<String, ServiceRuntimeState> _runtimeStates = {};
   final Map<String, Process> _processes = {};
+  final Map<String, int> _externalPids = {};
   final Map<String, Timer> _healthCheckTimers = {};
   final Map<String, int> _restartCounts = {};
   bool _isShuttingDown = false;
@@ -194,7 +196,8 @@ class ServiceManager {
   void _appendLog(String serviceId, String line) {
     final buf = _serviceLogs.putIfAbsent(serviceId, () => []);
     final now = DateTime.now();
-    final ts = '${now.hour.toString().padLeft(2, '0')}:'
+    final ts =
+        '${now.hour.toString().padLeft(2, '0')}:'
         '${now.minute.toString().padLeft(2, '0')}:'
         '${now.second.toString().padLeft(2, '0')}.'
         '${now.millisecond.toString().padLeft(3, '0')}';
@@ -213,8 +216,7 @@ class ServiceManager {
     final raw = _box.get(PluginStorageKeys.serviceList);
     if (raw is! List) return [];
     return raw
-        .map((e) =>
-            ServiceConfig.fromJson(Map<String, dynamic>.from(e as Map)))
+        .map((e) => ServiceConfig.fromJson(Map<String, dynamic>.from(e as Map)))
         .toList();
   }
 
@@ -234,6 +236,7 @@ class ServiceManager {
   }
 
   Future<void> addOrUpdate(ServiceConfig config) async {
+    PluginPaths.ensureSafePathSegment(config.id, '服务 ID');
     final list = getAll();
     final idx = list.indexWhere((e) => e.id == config.id);
     if (idx >= 0) {
@@ -261,9 +264,14 @@ class ServiceManager {
   Future<void> removeWithDir(String id) async {
     final config = find(id);
     if (config == null) return;
-    final cwd = config.cwd;
 
     await stop(id);
+
+    final servicesRoot = await PluginPaths.servicesRoot();
+    await ServicePackageCleanup.deleteManagedRoot(
+      config: config,
+      servicesRoot: servicesRoot,
+    );
 
     final list = getAll();
     list.removeWhere((e) => e.id == id);
@@ -275,21 +283,6 @@ class ServiceManager {
     _startLocks.remove(id);
     await _releasePort(id);
     _notifyChange();
-
-    try {
-      final servicesRoot = await PluginPaths.servicesRoot();
-      final cwdPath = p.normalize(cwd);
-      final rootPath = p.normalize(servicesRoot.path);
-      if (cwdPath != rootPath &&
-          cwdPath.startsWith('$rootPath${p.separator}')) {
-        final d = Directory(cwd);
-        if (d.existsSync()) {
-          await d.delete(recursive: true);
-        }
-      }
-    } catch (e) {
-      debugPrint('[ServiceManager] delete cwd failed: $e');
-    }
   }
 
   // ============================================================
@@ -302,23 +295,52 @@ class ServiceManager {
 
   int? getPid(String id) => _runtimeStates[id]?.pid;
   String? getLastError(String id) => _runtimeStates[id]?.lastError;
+  bool _hasLiveProcess(String id) =>
+      _processes.containsKey(id) || _externalPids.containsKey(id);
+  Future<bool> _hasLiveProcessAsync(String id) async {
+    if (_processes.containsKey(id)) return true;
+    final externalPid = _externalPids[id];
+    return externalPid != null && await _isPidAlive(externalPid);
+  }
 
   void _setStatus(
     String id,
     ServiceStatus status, {
     int? pid,
     String? lastError,
+    bool clearPid = false,
+    bool clearLastError = false,
   }) {
     final state = _runtimeStates.putIfAbsent(id, () => ServiceRuntimeState());
     state.status = status;
-    if (pid != null) state.pid = pid;
+    if (clearPid) {
+      state.pid = null;
+    } else if (pid != null) {
+      state.pid = pid;
+    }
+    if (clearLastError) state.lastError = null;
     if (lastError != null) state.lastError = lastError;
     _notifyChange();
   }
 
-  void resetToStopped(String id) {
+  Future<void> resetToStopped(String id) async {
     if (_processes.containsKey(id)) return;
-    _setStatus(id, ServiceStatus.stopped, pid: null);
+    final externalPid = _externalPids.remove(id);
+    if (externalPid != null && !await _terminateExternalPid(externalPid)) {
+      _externalPids[id] = externalPid;
+      _setStatus(
+        id,
+        ServiceStatus.error,
+        lastError: '无法终止已收养的进程',
+      );
+      return;
+    }
+    _setStatus(
+      id,
+      ServiceStatus.stopped,
+      clearPid: true,
+      clearLastError: true,
+    );
     // 兜底：状态重置为 stopped 时释放端口（防止僵尸登记阻塞后续启动）
     _releasePort(id);
   }
@@ -342,44 +364,52 @@ class ServiceManager {
     if (config == null) throw Exception('服务不存在：$serviceId');
 
     final current = getStatus(serviceId);
-    if (current == ServiceStatus.running ||
-        current == ServiceStatus.starting) {
+    if (current == ServiceStatus.running || current == ServiceStatus.starting) {
       return;
     }
 
     // 运行时插件检查（custom 不检查）
     if (config.runtime != 'custom') {
-      final runtimePlugin =
-          InstallManager.instance.findInstalled(config.runtime);
+      final runtimePlugin = InstallManager.instance.findInstalled(
+        config.runtime,
+      );
       if (runtimePlugin == null) {
         final msg = '依赖插件 ${config.runtime} 未安装，请先从市场安装';
         _appendLog(serviceId, '[error] $msg');
         _setStatus(serviceId, ServiceStatus.error, lastError: msg);
-        _emitEvent(ServiceEvent(
-          serviceId: serviceId,
-          serviceName: config.name,
-          type: ServiceEventType.failed,
-          message: '依赖插件未安装',
-          detail: msg,
-        ));
+        _emitEvent(
+          ServiceEvent(
+            serviceId: serviceId,
+            serviceName: config.name,
+            type: ServiceEventType.failed,
+            message: '依赖插件未安装',
+            detail: msg,
+          ),
+        );
         throw Exception(msg);
       }
       if (!runtimePlugin.enabled) {
         final msg = '依赖插件 ${config.runtime} 已关闭，请先在插件 Tab 开启';
         _appendLog(serviceId, '[error] $msg');
         _setStatus(serviceId, ServiceStatus.error, lastError: msg);
-        _emitEvent(ServiceEvent(
-          serviceId: serviceId,
-          serviceName: config.name,
-          type: ServiceEventType.failed,
-          message: '依赖插件已关闭',
-          detail: msg,
-        ));
+        _emitEvent(
+          ServiceEvent(
+            serviceId: serviceId,
+            serviceName: config.name,
+            type: ServiceEventType.failed,
+            message: '依赖插件已关闭',
+            detail: msg,
+          ),
+        );
         throw Exception(msg);
       }
     }
 
-    _setStatus(serviceId, ServiceStatus.starting);
+    _setStatus(
+      serviceId,
+      ServiceStatus.starting,
+      clearLastError: true,
+    );
 
     // ===== 端口预检（spawn 前） =====
     if (config.port != null && config.port! > 0) {
@@ -395,13 +425,15 @@ class ServiceManager {
             : '端口 $port 已被占用，请更换端口';
         _appendLog(serviceId, '[error] $msg');
         _setStatus(serviceId, ServiceStatus.error, lastError: msg);
-        _emitEvent(ServiceEvent(
-          serviceId: serviceId,
-          serviceName: config.name,
-          type: ServiceEventType.failed,
-          message: '端口冲突',
-          detail: msg,
-        ));
+        _emitEvent(
+          ServiceEvent(
+            serviceId: serviceId,
+            serviceName: config.name,
+            type: ServiceEventType.failed,
+            message: '端口冲突',
+            detail: msg,
+          ),
+        );
         throw Exception(msg);
       }
 
@@ -417,13 +449,15 @@ class ServiceManager {
             final msg = '端口 $port 已被其他应用占用，请更换端口';
             _appendLog(serviceId, '[error] $msg');
             _setStatus(serviceId, ServiceStatus.error, lastError: msg);
-            _emitEvent(ServiceEvent(
-              serviceId: serviceId,
-              serviceName: config.name,
-              type: ServiceEventType.failed,
-              message: '端口被占用',
-              detail: msg,
-            ));
+            _emitEvent(
+              ServiceEvent(
+                serviceId: serviceId,
+                serviceName: config.name,
+                type: ServiceEventType.failed,
+                message: '端口被占用',
+                detail: msg,
+              ),
+            );
             throw Exception(msg);
           }
         } else {
@@ -431,13 +465,15 @@ class ServiceManager {
           final msg = '端口 $port 已被占用，请更换端口或重启应用';
           _appendLog(serviceId, '[error] $msg');
           _setStatus(serviceId, ServiceStatus.error, lastError: msg);
-          _emitEvent(ServiceEvent(
-            serviceId: serviceId,
-            serviceName: config.name,
-            type: ServiceEventType.failed,
-            message: '端口被占用',
-            detail: msg,
-          ));
+          _emitEvent(
+            ServiceEvent(
+              serviceId: serviceId,
+              serviceName: config.name,
+              type: ServiceEventType.failed,
+              message: '端口被占用',
+              detail: msg,
+            ),
+          );
           throw Exception(msg);
         }
       }
@@ -449,66 +485,70 @@ class ServiceManager {
       await _releasePort(serviceId);
       _appendLog(serviceId, '[error] 找不到可执行文件');
       _setStatus(serviceId, ServiceStatus.error, lastError: '找不到可执行文件');
-      _emitEvent(ServiceEvent(
-        serviceId: serviceId,
-        serviceName: config.name,
-        type: ServiceEventType.failed,
-        message: '找不到可执行文件',
-        detail: config.executable ?? config.runtime,
-      ));
+      _emitEvent(
+        ServiceEvent(
+          serviceId: serviceId,
+          serviceName: config.name,
+          type: ServiceEventType.failed,
+          message: '找不到可执行文件',
+          detail: config.executable ?? config.runtime,
+        ),
+      );
       throw Exception('找不到可执行文件');
     }
 
-    // 占位符替换
-    final resolvedExe = await _resolvePlaceholders(executable);
-    final resolvedArgs =
-        await Future.wait(config.args.map(_resolvePlaceholders));
-    final resolvedCwd = await _resolvePlaceholders(config.cwd);
-    final resolvedEnv = <String, String>{};
-    for (final e in config.env.entries) {
-      resolvedEnv[e.key] = await _resolvePlaceholders(e.value);
-    }
+    // 从占位符解析到 spawn 前的任意异常都必须完整收尾，避免状态
+    // 停留在 starting 或端口登记残留。
+    late final Process process;
+    try {
+      final resolvedExe = await _resolvePlaceholders(executable);
+      final resolvedArgs = await Future.wait(
+        config.args.map(_resolvePlaceholders),
+      );
+      final resolvedCwd = await _resolvePlaceholders(config.cwd);
+      final resolvedEnv = <String, String>{};
+      for (final e in config.env.entries) {
+        resolvedEnv[e.key] = await _resolvePlaceholders(e.value);
+      }
 
-    final cwdDir = Directory(resolvedCwd);
-    if (!cwdDir.existsSync()) {
-      await cwdDir.create(recursive: true);
-    }
+      final cwdDir = Directory(resolvedCwd);
+      if (!cwdDir.existsSync()) {
+        await cwdDir.create(recursive: true);
+      }
 
-    _appendLog(
-      serviceId,
-      '[start] spawn $resolvedExe ${resolvedArgs.join(' ')}',
-    );
+      _appendLog(
+        serviceId,
+        '[start] spawn $resolvedExe ${resolvedArgs.join(' ')}',
+      );
 
-    final env = <String, String>{
-      ...Platform.environment,
-      ...resolvedEnv,
-    };
-    if (config.runtime.startsWith('python')) {
-      env['PYTHONIOENCODING'] = 'utf-8';
-      env['PYTHONUTF8'] = '1';
+      final env = <String, String>{
+        ...Platform.environment,
+        ...resolvedEnv,
+      };
+      if (config.runtime.startsWith('python')) {
+        env['PYTHONIOENCODING'] = 'utf-8';
+        env['PYTHONUTF8'] = '1';
 
-      // 注入 pyRuntime.env（PYTHONHOME / LD_LIBRARY_PATH 等，musl python 必需）
-      final installed = InstallManager.instance.findInstalled(config.runtime);
-      if (installed != null) {
-        final pluginJson = File(p.join(installed.installPath, 'plugin.json'));
-        if (pluginJson.existsSync()) {
-          try {
-            final j = jsonDecode(await pluginJson.readAsString()) as Map;
-            final pyEnv = j['pyRuntime']?['env'];
-            if (pyEnv is Map) {
-              for (final e in pyEnv.entries) {
-                final k = e.key.toString();
-                final v = await _resolvePlaceholders(e.value.toString());
-                env[k] = v;
+        // 注入 pyRuntime.env（PYTHONHOME / LD_LIBRARY_PATH 等，musl python 必需）
+        final installed = InstallManager.instance.findInstalled(config.runtime);
+        if (installed != null) {
+          final pluginJson = File(p.join(installed.installPath, 'plugin.json'));
+          if (pluginJson.existsSync()) {
+            try {
+              final j = jsonDecode(await pluginJson.readAsString()) as Map;
+              final pyEnv = j['pyRuntime']?['env'];
+              if (pyEnv is Map) {
+                for (final e in pyEnv.entries) {
+                  final k = e.key.toString();
+                  final v = await _resolvePlaceholders(e.value.toString());
+                  env[k] = v;
+                }
               }
-            }
-          } catch (_) {}
+            } catch (_) {}
+          }
         }
       }
-    }
 
-    Process process;
-    try {
       process = await Process.start(
         resolvedExe,
         resolvedArgs,
@@ -517,15 +557,24 @@ class ServiceManager {
       );
     } catch (e) {
       await _releasePort(serviceId);
+      await _deletePidFile(config);
       _appendLog(serviceId, '[error] $e');
-      _setStatus(serviceId, ServiceStatus.error, lastError: '启动失败：$e');
-      _emitEvent(ServiceEvent(
-        serviceId: serviceId,
-        serviceName: config.name,
-        type: ServiceEventType.failed,
-        message: '启动进程失败',
-        detail: '$e',
-      ));
+      _setStatus(
+        serviceId,
+        ServiceStatus.error,
+        clearPid: true,
+        clearLastError: true,
+        lastError: '启动失败：$e',
+      );
+      _emitEvent(
+        ServiceEvent(
+          serviceId: serviceId,
+          serviceName: config.name,
+          type: ServiceEventType.failed,
+          message: '启动进程失败',
+          detail: '$e',
+        ),
+      );
       throw Exception('启动进程失败：$e');
     }
 
@@ -533,7 +582,7 @@ class ServiceManager {
     _appendLog(serviceId, '[proc] pid=${process.pid}');
     _setStatus(serviceId, ServiceStatus.starting, pid: process.pid);
 
-    // 写 PID 文件（仅自定义环境）
+    // 写 PID 文件，供常驻服务在下次启动时恢复/停止真实进程
     await _writePidFile(config, process.pid);
 
     final stdoutDecoder = const Utf8Codec(allowMalformed: true).decoder;
@@ -543,14 +592,14 @@ class ServiceManager {
         .transform(stdoutDecoder)
         .transform(const LineSplitter())
         .listen((line) {
-      _appendLog(serviceId, line);
-    });
+          _appendLog(serviceId, line);
+        });
     process.stderr
         .transform(stderrDecoder)
         .transform(const LineSplitter())
         .listen((line) {
-      _appendLog(serviceId, '[err] $line');
-    });
+          _appendLog(serviceId, '[err] $line');
+        });
 
     final startedProcess = process;
     startedProcess.exitCode.then((code) {
@@ -558,7 +607,12 @@ class ServiceManager {
       _appendLog(serviceId, '[proc] exited ($code)');
       _processes.remove(serviceId);
       _stopHealthCheck(serviceId);
-      _setStatus(serviceId, ServiceStatus.stopped, pid: null);
+      _setStatus(
+        serviceId,
+        ServiceStatus.stopped,
+        clearPid: true,
+        clearLastError: true,
+      );
       _deletePidFile(config);
       _releasePort(serviceId);
 
@@ -568,13 +622,15 @@ class ServiceManager {
       if (restartCount >= config.maxRestart) {
         _appendLog(serviceId, '[state] 已达重启上限，不再重启');
         _setStatus(serviceId, ServiceStatus.error, lastError: '进程异常退出');
-        _emitEvent(ServiceEvent(
-          serviceId: serviceId,
-          serviceName: config.name,
-          type: ServiceEventType.restartFailed,
-          message: '重启 $restartCount 次仍失败，已停止自动重启',
-          detail: '退出码：$code',
-        ));
+        _emitEvent(
+          ServiceEvent(
+            serviceId: serviceId,
+            serviceName: config.name,
+            type: ServiceEventType.restartFailed,
+            message: '重启 $restartCount 次仍失败，已停止自动重启',
+            detail: '退出码：$code',
+          ),
+        );
         return;
       }
 
@@ -607,7 +663,7 @@ class ServiceManager {
       bool ok = false;
       switch (config.healthType) {
         case 'process':
-          ok = _processes.containsKey(serviceId);
+          ok = _hasLiveProcess(serviceId);
           break;
         case 'tcp':
           if (config.port != null && config.port! > 0) {
@@ -622,15 +678,21 @@ class ServiceManager {
       }
 
       if (ok) {
-        _setStatus(serviceId, ServiceStatus.running);
+        _setStatus(
+          serviceId,
+          ServiceStatus.running,
+          clearLastError: true,
+        );
         _appendLog(serviceId, '[health] ${config.healthType} → OK');
         _startHealthCheck(serviceId, config);
-        _emitEvent(ServiceEvent(
-          serviceId: serviceId,
-          serviceName: config.name,
-          type: ServiceEventType.started,
-          message: config.port != null ? '端口 ${config.port}' : null,
-        ));
+        _emitEvent(
+          ServiceEvent(
+            serviceId: serviceId,
+            serviceName: config.name,
+            type: ServiceEventType.started,
+            message: config.port != null ? '端口 ${config.port}' : null,
+          ),
+        );
         return;
       }
     }
@@ -649,13 +711,15 @@ class ServiceManager {
     } catch (_) {}
     await _releasePort(serviceId);
     _setStatus(serviceId, ServiceStatus.error, lastError: '探活超时（15 秒）');
-    _emitEvent(ServiceEvent(
-      serviceId: serviceId,
-      serviceName: config.name,
-      type: ServiceEventType.portTimeout,
-      message: '探活超时（15 秒）',
-      detail: '请查看运行日志',
-    ));
+    _emitEvent(
+      ServiceEvent(
+        serviceId: serviceId,
+        serviceName: config.name,
+        type: ServiceEventType.portTimeout,
+        message: '探活超时（15 秒）',
+        detail: '请查看运行日志',
+      ),
+    );
   }
 
   Future<bool> _probePort(int port) async {
@@ -697,7 +761,7 @@ class ServiceManager {
         bool ok = false;
         switch (config.healthType) {
           case 'process':
-            ok = _processes.containsKey(serviceId);
+            ok = await _hasLiveProcessAsync(serviceId);
             break;
           case 'tcp':
             if (config.port != null && config.port! > 0) {
@@ -712,6 +776,7 @@ class ServiceManager {
         }
         if (!ok) {
           _appendLog(serviceId, '[health] 探活失败');
+          await stop(serviceId);
           _setStatus(serviceId, ServiceStatus.error, lastError: '探活失败');
           timer.cancel();
         }
@@ -729,7 +794,6 @@ class ServiceManager {
   // ============================================================
 
   Future<void> _writePidFile(ServiceConfig config, int pid) async {
-    if (config.runtime != 'custom') return;
     final path = await _resolvePidFilePath(config);
     if (path == null) return;
     try {
@@ -742,7 +806,6 @@ class ServiceManager {
   }
 
   Future<void> _deletePidFile(ServiceConfig config) async {
-    if (config.runtime != 'custom') return;
     final path = await _resolvePidFilePath(config);
     if (path == null) return;
     try {
@@ -757,37 +820,82 @@ class ServiceManager {
     }
     try {
       final dir = await PluginPaths.servicesRoot();
+      if (!PluginPaths.isSafePathSegment(config.id)) return null;
       return p.join(dir.path, '${config.id}.pid');
     } catch (_) {
       return null;
     }
   }
 
-  Future<bool> _probePidFile(ServiceConfig config) async {
-    if (config.runtime != 'custom') return false;
+  Future<int?> _readLivePidFromFile(ServiceConfig config) async {
     final path = await _resolvePidFilePath(config);
-    if (path == null) return false;
+    if (path == null) return null;
     try {
       final file = File(path);
-      if (!file.existsSync()) return false;
+      if (!file.existsSync()) return null;
       final pid = int.tryParse((await file.readAsString()).trim());
-      if (pid == null || pid <= 0) return false;
-      if (Platform.isWindows) {
+      if (pid == null || pid <= 0) return null;
+      return await _isPidAlive(pid) ? pid : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<bool> _isPidAlive(int pid) async {
+    if (pid <= 0) return false;
+    if (Platform.isWindows) {
+      try {
         final r = await Process.run(
           'tasklist',
           ['/FI', 'PID eq $pid', '/FO', 'CSV', '/NH'],
           stdoutEncoding: const SystemEncoding(),
           stderrEncoding: const SystemEncoding(),
-        );
+        ).timeout(const Duration(seconds: 3));
         final out = r.stdout.toString().trim();
-        return out.isNotEmpty && !out.toLowerCase().contains('no tasks');
-      } else if (Platform.isAndroid) {
-        return Directory('/proc/$pid').existsSync();
+        return out.isNotEmpty &&
+            !out.toLowerCase().contains('no tasks') &&
+            !out.contains('没有运行的任务');
+      } catch (_) {
+        return false;
       }
-      return false;
+    }
+    if (Platform.isAndroid || Platform.isLinux || Platform.isMacOS) {
+      try {
+        final result = await Process.run(
+          'kill',
+          ['-0', '$pid'],
+          stdoutEncoding: const SystemEncoding(),
+          stderrEncoding: const SystemEncoding(),
+        ).timeout(const Duration(seconds: 3));
+        return result.exitCode == 0;
+      } catch (_) {
+        return false;
+      }
+    }
+    return false;
+  }
+
+  Future<bool> _terminateExternalPid(int pid) async {
+    if (!await _isPidAlive(pid)) return true;
+    try {
+      Process.killPid(pid, ProcessSignal.sigterm);
     } catch (_) {
       return false;
     }
+    for (var i = 0; i < 4; i++) {
+      await Future.delayed(const Duration(milliseconds: 150));
+      if (!await _isPidAlive(pid)) return true;
+    }
+    if (Platform.isWindows) {
+      return PortCleaner.killPid(pid);
+    }
+    try {
+      Process.killPid(pid, ProcessSignal.sigkill);
+    } catch (_) {
+      return false;
+    }
+    await Future.delayed(const Duration(milliseconds: 250));
+    return !await _isPidAlive(pid);
   }
 
   // ============================================================
@@ -796,17 +904,51 @@ class ServiceManager {
 
   Future<void> stop(String serviceId) async {
     _stopHealthCheck(serviceId);
+    final previousStatus = getStatus(serviceId);
     final process = _processes.remove(serviceId);
+    final externalPid = _externalPids.remove(serviceId);
     final config = find(serviceId);
 
     if (process == null) {
-      _setStatus(serviceId, ServiceStatus.stopped, pid: null);
+      if (externalPid != null && !await _terminateExternalPid(externalPid)) {
+        _externalPids[serviceId] = externalPid;
+        _setStatus(
+          serviceId,
+          ServiceStatus.error,
+          lastError: '无法终止已收养的进程',
+        );
+        return;
+      }
+      _setStatus(
+        serviceId,
+        ServiceStatus.stopped,
+        clearPid: true,
+        clearLastError: true,
+      );
       if (config != null) await _deletePidFile(config);
       await _releasePort(serviceId);
+      final shouldEmitStopped =
+          externalPid != null ||
+          previousStatus == ServiceStatus.running ||
+          previousStatus == ServiceStatus.starting;
+      if (config != null && shouldEmitStopped) {
+        _emitEvent(
+          ServiceEvent(
+            serviceId: serviceId,
+            serviceName: config.name,
+            type: ServiceEventType.stopped,
+          ),
+        );
+      }
       return;
     }
 
-    _setStatus(serviceId, ServiceStatus.stopped, pid: null);
+    _setStatus(
+      serviceId,
+      ServiceStatus.stopped,
+      clearPid: true,
+      clearLastError: true,
+    );
 
     try {
       process.kill(ProcessSignal.sigterm);
@@ -845,13 +987,15 @@ class ServiceManager {
             lastError: '无法终止进程',
           );
           if (config != null) {
-            _emitEvent(ServiceEvent(
-              serviceId: serviceId,
-              serviceName: config.name,
-              type: ServiceEventType.abnormalExit,
-              message: '无法终止进程',
-              detail: '进程可能仍占用端口，请重启应用后清理',
-            ));
+            _emitEvent(
+              ServiceEvent(
+                serviceId: serviceId,
+                serviceName: config.name,
+                type: ServiceEventType.abnormalExit,
+                message: '无法终止进程',
+                detail: '进程可能仍占用端口，请重启应用后清理',
+              ),
+            );
           }
           return;
         }
@@ -861,11 +1005,13 @@ class ServiceManager {
     _appendLog(serviceId, '[proc] stopped');
     if (config != null) {
       await _deletePidFile(config);
-      _emitEvent(ServiceEvent(
-        serviceId: serviceId,
-        serviceName: config.name,
-        type: ServiceEventType.stopped,
-      ));
+      _emitEvent(
+        ServiceEvent(
+          serviceId: serviceId,
+          serviceName: config.name,
+          type: ServiceEventType.stopped,
+        ),
+      );
     }
     await _releasePort(serviceId);
   }
@@ -885,16 +1031,30 @@ class ServiceManager {
   Future<void> _stopWithoutWaiting(String serviceId) async {
     _stopHealthCheck(serviceId);
     final process = _processes.remove(serviceId);
+    final externalPid = _externalPids.remove(serviceId);
     final config = find(serviceId);
 
     if (process == null) {
-      _setStatus(serviceId, ServiceStatus.stopped, pid: null);
+      if (externalPid != null) {
+        await _terminateExternalPid(externalPid);
+      }
+      _setStatus(
+        serviceId,
+        ServiceStatus.stopped,
+        clearPid: true,
+        clearLastError: true,
+      );
       if (config != null) await _deletePidFile(config);
       await _releasePort(serviceId);
       return;
     }
 
-    _setStatus(serviceId, ServiceStatus.stopped, pid: null);
+    _setStatus(
+      serviceId,
+      ServiceStatus.stopped,
+      clearPid: true,
+      clearLastError: true,
+    );
 
     // 发 sigterm，让进程有机会优雅退出
     try {
@@ -930,8 +1090,9 @@ class ServiceManager {
       try {
         // 运行时插件检查（custom 跳过）
         if (config.runtime != 'custom') {
-          final runtimePlugin =
-              InstallManager.instance.findInstalled(config.runtime);
+          final runtimePlugin = InstallManager.instance.findInstalled(
+            config.runtime,
+          );
           if (runtimePlugin == null || !runtimePlugin.enabled) {
             continue;
           }
@@ -940,12 +1101,22 @@ class ServiceManager {
         // 常驻服务收养
         if (config.keepForeground) {
           bool alive = false;
-          if (config.runtime == 'custom') {
-            alive = await _probePidFile(config);
-          } else if (config.healthType == 'tcp' && config.port != null) {
+          int? adoptedPid;
+          adoptedPid = await _readLivePidFromFile(config);
+          alive = adoptedPid != null;
+          if (!alive && config.healthType == 'tcp' && config.port != null) {
             alive = await _probePort(config.port!);
-          } else if (config.healthType == 'http' && config.port != null) {
+          } else if (!alive &&
+              config.healthType == 'http' &&
+              config.port != null) {
             alive = await _probeHttp(config.port!, config.healthPath);
+          }
+          if (alive &&
+              adoptedPid == null &&
+              Platform.isWindows &&
+              config.port != null &&
+              config.port! > 0) {
+            adoptedPid = await PortCleaner.findPidByPort(config.port!);
           }
           if (alive) {
             // 收养时登记端口；若端口已被其他活跃服务占用 → 记日志 + error
@@ -953,8 +1124,9 @@ class ServiceManager {
               final claimed = await _claimPort(config.port!, config.id);
               if (!claimed) {
                 final owner = getPortOwner(config.port!);
-                final ownerName =
-                    owner != null ? (find(owner)?.name ?? owner) : '';
+                final ownerName = owner != null
+                    ? (find(owner)?.name ?? owner)
+                    : '';
                 final msg = ownerName.isNotEmpty
                     ? '端口 ${config.port} 已被服务「$ownerName」占用，收养失败'
                     : '端口 ${config.port} 已被占用，收养失败';
@@ -963,7 +1135,15 @@ class ServiceManager {
                 continue;
               }
             }
-            _setStatus(config.id, ServiceStatus.running);
+            if (adoptedPid != null && adoptedPid > 0) {
+              _externalPids[config.id] = adoptedPid;
+            }
+            _setStatus(
+              config.id,
+              ServiceStatus.running,
+              pid: adoptedPid,
+              clearLastError: true,
+            );
             _appendLog(config.id, '[adopt] 已收养');
             _startHealthCheck(config.id, config);
             continue;
@@ -992,11 +1172,12 @@ class ServiceManager {
     final list = getAll();
     final futures = <Future<void>>[];
     for (final config in list) {
-      final runtimePlugin =
-          InstallManager.instance.findInstalled(config.runtime);
+      final runtimePlugin = InstallManager.instance.findInstalled(
+        config.runtime,
+      );
       final pluginActive =
           config.runtime == 'custom' ||
-              (runtimePlugin != null && runtimePlugin.enabled);
+          (runtimePlugin != null && runtimePlugin.enabled);
 
       // keepForeground 且运行时插件仍活跃 → 用户刻意保留的常驻服务，跳过
       if (config.keepForeground && pluginActive) continue;
@@ -1004,11 +1185,13 @@ class ServiceManager {
       final future = waitForExit
           ? stop(config.id).catchError((e) {
               debugPrint(
-                  '[ServiceManager] shutdown stop ${config.id} failed: $e');
+                '[ServiceManager] shutdown stop ${config.id} failed: $e',
+              );
             })
           : _stopWithoutWaiting(config.id).catchError((e) {
               debugPrint(
-                  '[ServiceManager] shutdown stop ${config.id} failed: $e');
+                '[ServiceManager] shutdown stop ${config.id} failed: $e',
+              );
             });
       futures.add(future);
     }

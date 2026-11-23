@@ -22,8 +22,11 @@ import 'package:yuanying/models/live/live_config.dart';
 import 'package:yuanying/modules/plugin_center/models/installed_plugin.dart';
 import 'package:yuanying/modules/plugin_center/models/market_entry.dart';
 import 'package:yuanying/modules/plugin_center/models/service_config.dart';
+import 'package:yuanying/modules/plugin_center/services/live_source_manager.dart';
 import 'package:yuanying/modules/plugin_center/services/market_manager.dart';
 import 'package:yuanying/modules/plugin_center/services/plugin_paths.dart';
+import 'package:yuanying/modules/plugin_center/services/resource_install_transaction.dart';
+import 'package:yuanying/modules/plugin_center/services/server_package_resolver.dart';
 import 'package:yuanying/modules/plugin_center/services/service_manager.dart';
 import 'package:yuanying/utils/storage_manager.dart';
 import 'package:yuanying/t4/services/python_runtime.dart';
@@ -81,20 +84,32 @@ class InstallProgress {
 
 class InstallCancelToken {
   bool _cancelled = false;
+  bool _commitStarted = false;
   CancelToken _dioToken = CancelToken();
 
   bool get isCancelled => _cancelled;
+  bool get isCommitStarted => _commitStarted;
   CancelToken get dioToken => _dioToken;
 
-  void cancel() {
+  bool beginCommit() {
+    if (_cancelled) return false;
+    _commitStarted = true;
+    return true;
+  }
+
+  bool cancel() {
+    if (_cancelled) return true;
+    if (_commitStarted) return false;
     _cancelled = true;
     if (!_dioToken.isCancelled) {
       _dioToken.cancel('用户取消');
     }
+    return true;
   }
 
   void reset() {
     _cancelled = false;
+    _commitStarted = false;
     _dioToken = CancelToken();
   }
 }
@@ -216,8 +231,9 @@ class InstallManager {
     final raw = _box.get(PluginStorageKeys.installedList);
     if (raw is! List) return [];
     return raw
-        .map((e) =>
-            InstalledPlugin.fromJson(Map<String, dynamic>.from(e as Map)))
+        .map(
+          (e) => InstalledPlugin.fromJson(Map<String, dynamic>.from(e as Map)),
+        )
         .toList();
   }
 
@@ -241,7 +257,25 @@ class InstallManager {
       final list = getAllInstalled();
       final idx = list.indexWhere((e) => e.id == plugin.id);
       if (idx >= 0) {
-        list[idx] = plugin;
+        final previous = list[idx];
+        list[idx] = InstalledPlugin(
+          id: plugin.id,
+          version: plugin.version,
+          source: plugin.source,
+          installPath: plugin.installPath,
+          enabled: previous.enabled,
+          pinned: previous.pinned,
+          pinnedAtMs: previous.pinnedAtMs,
+          installedAtMs: previous.installedAtMs,
+          type: plugin.type,
+          desc: plugin.desc ?? previous.desc,
+          changelog: plugin.changelog ?? previous.changelog,
+          icon: plugin.icon ?? previous.icon,
+          extras: {
+            ...previous.extras,
+            ...plugin.extras,
+          },
+        );
       } else {
         list.add(plugin);
       }
@@ -255,6 +289,35 @@ class InstallManager {
       list.removeWhere((e) => e.id == id);
       await _saveAll(list);
     });
+  }
+
+  /// 停止指定运行时的所有消费者，供手动覆盖安装复用。
+  Future<void> stopRuntimeConsumers(String runtimeId) async {
+    if (runtimeId == 'python-win') {
+      try {
+        await PythonRuntime.shutdown();
+      } catch (e) {
+        debugPrint('[InstallManager] shutdown py worker failed: $e');
+      }
+    }
+    if (runtimeId == 'nodejs-win') {
+      try {
+        await NodeJSService.instance.stopForPluginDisabled();
+      } catch (e) {
+        debugPrint('[InstallManager] stop nodejs worker failed: $e');
+      }
+    }
+    if (runtimeId == 'proot') {
+      try {
+        await SandboxServiceManager.instance.stopAll();
+      } catch (e) {
+        debugPrint('[InstallManager] stop sandbox services failed: $e');
+      }
+    }
+    for (final service in ServiceManager.instance.getAll()) {
+      if (service.runtime != runtimeId) continue;
+      await ServiceManager.instance.stop(service.id);
+    }
   }
 
   Future<void> setEnabled(String id, bool enabled) async {
@@ -275,8 +338,7 @@ class InstallManager {
       if (idx >= 0) {
         final updated = list[idx].copyWith(
           pinned: pinned,
-          pinnedAtMs:
-              pinned ? DateTime.now().millisecondsSinceEpoch : null,
+          pinnedAtMs: pinned ? DateTime.now().millisecondsSinceEpoch : null,
           clearPinnedAt: !pinned,
         );
         list[idx] = updated;
@@ -303,9 +365,13 @@ class InstallManager {
       bool changed = false;
       for (int i = 0; i < list.length; i++) {
         final plugin = list[i];
+        final iconIsAbsolute =
+            plugin.icon?.startsWith('http://') == true ||
+            plugin.icon?.startsWith('https://') == true;
         if (plugin.desc != null &&
             plugin.changelog != null &&
-            plugin.icon != null) {
+            plugin.icon != null &&
+            iconIsAbsolute) {
           continue;
         }
         MarketEntry? matched;
@@ -316,10 +382,21 @@ class InstallManager {
           }
         }
         if (matched == null) continue;
+        final resolvedIcon = _resolvedIcon(matched);
+        final nextDesc = plugin.desc ?? matched.desc;
+        final nextChangelog = plugin.changelog ?? matched.changelog;
+        final nextIcon = iconIsAbsolute
+            ? plugin.icon
+            : resolvedIcon ?? plugin.icon;
+        if (nextDesc == plugin.desc &&
+            nextChangelog == plugin.changelog &&
+            nextIcon == plugin.icon) {
+          continue;
+        }
         list[i] = plugin.copyWith(
-          desc: plugin.desc ?? matched.desc,
-          changelog: plugin.changelog ?? matched.changelog,
-          icon: plugin.icon ?? matched.icon,
+          desc: nextDesc,
+          changelog: nextChangelog,
+          icon: nextIcon,
         );
         changed = true;
       }
@@ -498,13 +575,15 @@ class InstallManager {
       final id = pkgToId[pkg] ?? pkg;
       if (findInstalled(id) != null) continue;
       final version = await _getPackageVersion(pkg) ?? '';
-      result.add(SystemInstalledPlugin(
-        packageName: pkg,
-        pluginId: id,
-        title: pkgToTitle[pkg] ?? id,
-        version: version,
-        installMode: pkgToMode[pkg] ?? 'import',
-      ));
+      result.add(
+        SystemInstalledPlugin(
+          packageName: pkg,
+          pluginId: id,
+          title: pkgToTitle[pkg] ?? id,
+          version: version,
+          installMode: pkgToMode[pkg] ?? 'import',
+        ),
+      );
     }
     return result;
   }
@@ -543,25 +622,29 @@ class InstallManager {
       // 无法固化到应用内。这里只做"登记"，让插件中心能识别到；
       // 卸载时必须走系统卸载（ACTION_UNINSTALL_PACKAGE）。
       if (installMode == 'apk') {
-        await register(InstalledPlugin(
-          id: info.pluginId,
-          version: info.version.isEmpty ? '0.0.0' : info.version,
-          source: '系统应用',
-          installPath: '',
-          enabled: true,
-          pinned: false,
-          installedAtMs: DateTime.now().millisecondsSinceEpoch,
-          type: 'apk',
-          desc: pluginJson['desc']?.toString() ??
-              '系统安装型插件（通过 APK 安装，卸载需走系统卸载）',
-          extras: {
-            'platform': 'android',
-            'installMode': 'apk',
-            'apkPackage': info.packageName,
-          },
-        ));
-        debugPrint('[InstallManager] 已登记系统安装型插件：${info.pluginId} '
-            '(pkg=${info.packageName}, v=${info.version})');
+        await register(
+          InstalledPlugin(
+            id: info.pluginId,
+            version: info.version.isEmpty ? '0.0.0' : info.version,
+            source: '系统应用',
+            installPath: '',
+            enabled: true,
+            pinned: false,
+            installedAtMs: DateTime.now().millisecondsSinceEpoch,
+            type: 'apk',
+            desc:
+                pluginJson['desc']?.toString() ?? '系统安装型插件（通过 APK 安装，卸载需走系统卸载）',
+            extras: {
+              'platform': 'android',
+              'installMode': 'apk',
+              'apkPackage': info.packageName,
+            },
+          ),
+        );
+        debugPrint(
+          '[InstallManager] 已登记系统安装型插件：${info.pluginId} '
+          '(pkg=${info.packageName}, v=${info.version})',
+        );
         return true;
       }
 
@@ -576,8 +659,8 @@ class InstallManager {
       // 当前 qjs(1.0.5) / agent(1.1.0) / mpv(1.0.2) 三包两值恰好一致，
       // 此改动对现有场景零行为变化；仅在未来版本号分叉时防止错判。
       final pluginVersionInJson = pluginJson['pluginVersion']?.toString();
-      final effectiveVersion = (pluginVersionInJson != null &&
-              pluginVersionInJson.isNotEmpty)
+      final effectiveVersion =
+          (pluginVersionInJson != null && pluginVersionInJson.isNotEmpty)
           ? pluginVersionInJson
           : (info.version.isEmpty ? '0.0.0' : info.version);
 
@@ -602,6 +685,22 @@ class InstallManager {
   // 安装主流程
   // ============================================================
 
+  /// 手动导入 APK：交给系统安装器，不在此时登记插件。
+  /// 安装完成后由插件页扫描系统应用并通过“固化”提取资源。
+  Future<void> installLocalApk(String apkPath) async {
+    if (!Platform.isAndroid) {
+      throw Exception('APK 仅支持 Android 平台');
+    }
+    final file = File(apkPath);
+    if (!file.existsSync()) {
+      throw Exception('APK 文件不存在');
+    }
+    final result = await InstallPlugin.install(file.path);
+    if (result['isSuccess'] != true) {
+      throw Exception('APK 安装失败：${result['errorMessage'] ?? ''}');
+    }
+  }
+
   Future<void> install(
     MarketEntry entry, {
     required String indexBaseUrl,
@@ -609,12 +708,24 @@ class InstallManager {
     InstallCancelToken? cancelToken,
     void Function(InstallProgress)? onProgress,
   }) async {
+    PluginPaths.ensureSafePathSegment(entry.id, '插件 ID');
+    PluginPaths.ensureSafePathSegment(entry.version, '插件版本');
     final token = cancelToken ?? InstallCancelToken();
-    token.reset();
+    if (cancelToken == null) token.reset();
 
     void emit(InstallStage stage, {int r = 0, int t = 0}) {
       onProgress?.call(InstallProgress(stage: stage, received: r, total: t));
     }
+
+    // 市场归并后，每个条目可能来自不同市场。优先使用条目自身携带的
+    // 索引前缀和来源名称，参数仅作为旧调用方及手动构造条目的兜底。
+    final effectiveIndexBaseUrl = entry.indexBaseUrl.isNotEmpty
+        ? entry.indexBaseUrl
+        : indexBaseUrl;
+    final effectiveMarketName = entry.marketName.isNotEmpty
+        ? entry.marketName
+        : marketName;
+    _throwIfCancelled(token);
 
     // ===== type=apk 分支（仅 Android） =====
     // 系统直装型 APK：跳系统安装器。_installApkPackage 内部还会按 APK 内
@@ -627,11 +738,12 @@ class InstallManager {
       emit(InstallStage.downloading, r: 0, t: entry.sizeBytes);
       await _installApkPackage(
         entry,
-        indexBaseUrl: indexBaseUrl,
-        marketName: marketName,
+        indexBaseUrl: effectiveIndexBaseUrl,
+        marketName: effectiveMarketName,
         cancelToken: token,
         onProgress: (r, t) => emit(InstallStage.downloading, r: r, t: t),
       );
+      _throwIfCancelled(token);
       emit(InstallStage.done);
       return;
     }
@@ -641,20 +753,26 @@ class InstallManager {
       emit(InstallStage.downloading, r: 0, t: entry.sizeBytes);
       await _installLivePackage(
         entry,
-        indexBaseUrl: indexBaseUrl,
-        marketName: marketName,
+        indexBaseUrl: effectiveIndexBaseUrl,
+        marketName: effectiveMarketName,
         cancelToken: token,
         onProgress: (r, t) => emit(InstallStage.downloading, r: r, t: t),
       );
+      _throwIfCancelled(token);
       emit(InstallStage.done);
       return;
     }
 
-    final downloadUrl = MarketManager.resolveUrl(entry.url, indexBaseUrl);
-    final finalUrl = _applyGithubProxyIfNeeded(downloadUrl);
+    final downloadUrl = MarketManager.resolveUrl(
+      entry.url,
+      effectiveIndexBaseUrl,
+    );
+    final finalUrl = _applyGithubProxyIfNeeded(downloadUrl, entry);
 
-    final tempPath =
-        await PluginPaths.downloadFilePath(entry.id, entry.version);
+    final tempPath = await PluginPaths.downloadFilePath(
+      entry.id,
+      entry.version,
+    );
     emit(InstallStage.downloading, r: 0, t: entry.sizeBytes);
 
     try {
@@ -676,7 +794,6 @@ class InstallManager {
       emit(InstallStage.failed);
       throw Exception('已取消');
     }
-
     emit(InstallStage.verifying);
     if (entry.md5 != null && entry.md5!.isNotEmpty) {
       try {
@@ -695,16 +812,25 @@ class InstallManager {
         rethrow;
       }
     }
+    if (token.isCancelled) {
+      await _safeDeleteFile(tempPath);
+      emit(InstallStage.failed);
+      throw _CancelledException();
+    }
 
     // ===== type=server 分支 =====
     if (entry.type == 'server') {
       emit(InstallStage.extracting);
-      await _installServerPackage(
-        entry,
-        tempPath,
-        marketName: marketName,
-      );
-      await _safeDeleteFile(tempPath);
+      try {
+        await _installServerPackage(
+          entry,
+          tempPath,
+          marketName: effectiveMarketName,
+          cancelToken: token,
+        );
+      } finally {
+        await _safeDeleteFile(tempPath);
+      }
       emit(InstallStage.done);
       return;
     }
@@ -712,12 +838,16 @@ class InstallManager {
     // ===== type=source 分支 =====
     if (entry.type == 'source') {
       emit(InstallStage.extracting);
-      await _installSourcePackage(
-        entry,
-        tempPath,
-        marketName: marketName,
-      );
-      await _safeDeleteFile(tempPath);
+      try {
+        await _installSourcePackage(
+          entry,
+          tempPath,
+          marketName: effectiveMarketName,
+          cancelToken: token,
+        );
+      } finally {
+        await _safeDeleteFile(tempPath);
+      }
       emit(InstallStage.done);
       return;
     }
@@ -744,8 +874,11 @@ class InstallManager {
     final root = await PluginPaths.root();
     final finalDir = p.join(root.path, entry.id);
     final tmpDir = Directory(
-      p.join(root.path, '.tmp-${entry.id}-${entry.version}-'
-          '${DateTime.now().millisecondsSinceEpoch}'),
+      p.join(
+        root.path,
+        '.tmp-${entry.id}-${entry.version}-'
+        '${DateTime.now().millisecondsSinceEpoch}',
+      ),
     );
 
     emit(InstallStage.extracting);
@@ -767,14 +900,16 @@ class InstallManager {
     final format2Manifest = await _findFormat2Manifest(tmpDir.path);
     if (format2Manifest != null) {
       try {
+        _throwIfCancelled(token);
         await _installFormat2Package(
           manifestFile: format2Manifest.file,
           manifest: format2Manifest.json,
           tmpDir: tmpDir,
           entry: entry,
-          marketName: marketName,
+          marketName: effectiveMarketName,
           root: root,
           finalDir: finalDir,
+          cancelToken: token,
           onRegistering: () => emit(InstallStage.registering),
         );
       } catch (e) {
@@ -788,8 +923,7 @@ class InstallManager {
 
     // ===== 解压型 APK：按 kind 提取 =====
     if (isApkContainer) {
-      final apkPluginJson =
-          File(p.join(tmpDir.path, 'assets', 'plugin.json'));
+      final apkPluginJson = File(p.join(tmpDir.path, 'assets', 'plugin.json'));
       if (!apkPluginJson.existsSync()) {
         // .apk 后缀但内容不是 APK 结构 → 明确的打包错误，暴露而不是掩盖
         await _safeDeleteDir(tmpDir.path);
@@ -801,8 +935,9 @@ class InstallManager {
 
       Map<String, dynamic> pluginJson;
       try {
-        pluginJson = jsonDecode(await apkPluginJson.readAsString())
-            as Map<String, dynamic>;
+        pluginJson =
+            jsonDecode(await apkPluginJson.readAsString())
+                as Map<String, dynamic>;
       } catch (e) {
         await _safeDeleteDir(tmpDir.path);
         emit(InstallStage.failed);
@@ -821,73 +956,63 @@ class InstallManager {
       }
 
       final kind = pluginJson['kind']?.toString() ?? '';
+      final apkStage = Directory(
+        p.join(
+          root.path,
+          '.apk-stage-${entry.id}-'
+          '${DateTime.now().microsecondsSinceEpoch}',
+        ),
+      );
 
       try {
-        await _cleanupOldVersions(entry.id, entry.version);
-        final finalDirObj = Directory(finalDir);
-        if (finalDirObj.existsSync()) {
-          await finalDirObj.delete(recursive: true);
-        }
-        await finalDirObj.create(recursive: true);
-        await _extractApkContainer(tmpDir.path, finalDirObj.path, kind);
+        _throwIfCancelled(token);
+        await apkStage.create(recursive: true);
+        await _extractApkContainer(tmpDir.path, apkStage.path, kind);
+        await _commitStagedDirectory(
+          root: root,
+          staging: apkStage,
+          finalDir: finalDir,
+          tag: 'apk-${entry.id}',
+          writeRegistry: () => register(
+            InstalledPlugin(
+              id: entry.id,
+              version: entry.version,
+              source: effectiveMarketName,
+              installPath: finalDir,
+              enabled: true,
+              pinned: false,
+              installedAtMs: DateTime.now().millisecondsSinceEpoch,
+              type: entry.type,
+              desc: entry.desc,
+              changelog: entry.changelog,
+              icon: _resolvedIcon(entry),
+              extras: {
+                'platform': Platform.isWindows ? 'win32' : 'android',
+                'installMode': 'import',
+                if (kind.isNotEmpty) 'kind': kind,
+              },
+            ),
+          ),
+          onRegistering: () => emit(InstallStage.registering),
+          isCancelled: () => token.isCancelled,
+        );
       } catch (e) {
+        await _safeDeleteDir(apkStage.path);
         await _safeDeleteDir(tmpDir.path);
         emit(InstallStage.failed);
         throw Exception('APK 容器提取失败：$e');
       }
       await _safeDeleteDir(tmpDir.path);
 
-      emit(InstallStage.registering);
-      await register(InstalledPlugin(
-        id: entry.id,
-        version: entry.version,
-        source: marketName,
-        installPath: finalDir,
-        enabled: true,
-        pinned: false,
-        installedAtMs: DateTime.now().millisecondsSinceEpoch,
-        type: entry.type,
-        desc: entry.desc,
-        changelog: entry.changelog,
-        icon: entry.icon,
-        extras: {
-          'platform': Platform.isWindows ? 'win32' : 'android',
-          'installMode': 'import',
-          if (kind.isNotEmpty) 'kind': kind,
-        },
-      ));
       emit(InstallStage.done);
       return;
     }
 
     // ===== 普通 zip：原样替换 =====
-    try {
-      await _cleanupOldVersions(entry.id, entry.version);
-      final finalDirObj = Directory(finalDir);
-      if (finalDirObj.existsSync()) {
-        // _cleanupOldVersions 已删除同路径，这里理论上不会存在；
-        // 若存在（并发/异常），先删掉再 rename，保证 rename 成功。
-        await finalDirObj.delete(recursive: true);
-      }
-      try {
-        await tmpDir.rename(finalDir);
-      } on FileSystemException {
-        // 跨卷 fallback：理论上同卷不会走到这里
-        await finalDirObj.create(recursive: true);
-        await _copyDirContents(tmpDir, finalDirObj);
-        await _safeDeleteDir(tmpDir.path);
-      }
-    } catch (e) {
-      await _safeDeleteDir(tmpDir.path);
-      emit(InstallStage.failed);
-      throw Exception('替换目录失败：$e');
-    }
-
-    emit(InstallStage.registering);
     final installed = InstalledPlugin(
       id: entry.id,
       version: entry.version,
-      source: marketName,
+      source: effectiveMarketName,
       installPath: finalDir,
       enabled: true,
       pinned: false,
@@ -895,12 +1020,28 @@ class InstallManager {
       type: entry.type,
       desc: entry.desc,
       changelog: entry.changelog,
-      icon: entry.icon,
+      icon: _resolvedIcon(entry),
       extras: {
         'platform': Platform.isWindows ? 'win32' : 'android',
       },
     );
-    await register(installed);
+    try {
+      _throwIfCancelled(token);
+      await _commitStagedDirectory(
+        root: root,
+        staging: tmpDir,
+        finalDir: finalDir,
+        tag: 'zip-${entry.id}',
+        writeRegistry: () => register(installed),
+        onRegistering: () => emit(InstallStage.registering),
+        isCancelled: () => token.isCancelled,
+      );
+    } catch (e) {
+      await _safeDeleteDir(tmpDir.path);
+      emit(InstallStage.failed);
+      throw Exception('替换目录失败：$e');
+    }
+
     emit(InstallStage.done);
   }
 
@@ -932,11 +1073,12 @@ class InstallManager {
     void Function(int received, int total)? onProgress,
   }) async {
     final downloadUrl = MarketManager.resolveUrl(entry.url, indexBaseUrl);
-    final finalUrl = _applyGithubProxyIfNeeded(downloadUrl);
+    final finalUrl = _applyGithubProxyIfNeeded(downloadUrl, entry);
 
-    final tempPath =
-        (await PluginPaths.downloadFilePath(entry.id, entry.version))
-            .replaceAll('.zip', '.apk');
+    final tempPath = (await PluginPaths.downloadFilePath(
+      entry.id,
+      entry.version,
+    )).replaceAll('.zip', '.apk');
     final file = File(tempPath);
     if (file.existsSync()) await file.delete();
 
@@ -998,10 +1140,17 @@ class InstallManager {
       final installMode = pluginJson?['installMode']?.toString() ?? 'apk';
 
       if (installMode == 'import') {
-        await _installApkAsImport(entry, archive, pluginJson!, marketName);
+        await _installApkAsImport(
+          entry,
+          archive,
+          pluginJson!,
+          marketName,
+          cancelToken: cancelToken,
+        );
         return;
       }
 
+      _throwIfCancelled(cancelToken);
       final res = await InstallPlugin.install(tempPath);
       if (res['isSuccess'] != true) {
         throw Exception('安装失败：${res['errorMessage'] ?? ''}');
@@ -1022,24 +1171,27 @@ class InstallManager {
           'apkPackage 将登记为空，isInstalled 判定会始终为 false',
         );
       }
-      await register(InstalledPlugin(
-        id: entry.id,
-        version: entry.version,
-        source: marketName,
-        installPath: tempPath,
-        enabled: true,
-        pinned: false,
-        installedAtMs: DateTime.now().millisecondsSinceEpoch,
-        type: 'apk',
-        desc: entry.desc,
-        changelog: entry.changelog,
-        icon: entry.icon,
-        extras: {
-          'platform': 'android',
-          'installMode': 'apk',
-          if (apkPackage != null) 'apkPackage': apkPackage,
-        },
-      ));
+      _throwIfCancelled(cancelToken);
+      await register(
+        InstalledPlugin(
+          id: entry.id,
+          version: entry.version,
+          source: marketName,
+          installPath: '',
+          enabled: true,
+          pinned: false,
+          installedAtMs: DateTime.now().millisecondsSinceEpoch,
+          type: 'apk',
+          desc: entry.desc,
+          changelog: entry.changelog,
+          icon: _resolvedIcon(entry),
+          extras: {
+            'platform': 'android',
+            'installMode': 'apk',
+            if (apkPackage != null) 'apkPackage': apkPackage,
+          },
+        ),
+      );
     } finally {
       await _safeDeleteFile(tempPath);
     }
@@ -1050,15 +1202,21 @@ class InstallManager {
     MarketEntry entry,
     Archive archive,
     Map<String, dynamic> pluginJson,
-    String marketName,
-  ) async {
+    String marketName, {
+    InstallCancelToken? cancelToken,
+  }) async {
     final kind = pluginJson['kind']?.toString() ?? '';
 
+    final root = await PluginPaths.root();
     final targetDir = await PluginPaths.pluginDir(entry.id, entry.version);
-    if (targetDir.existsSync()) {
-      await targetDir.delete(recursive: true);
-    }
-    await targetDir.create(recursive: true);
+    final staging = Directory(
+      p.join(
+        root.path,
+        '.apk-import-stage-${entry.id}-'
+        '${DateTime.now().microsecondsSinceEpoch}',
+      ),
+    );
+    await staging.create(recursive: true);
 
     String? abiDir;
     if (Platform.isAndroid) {
@@ -1074,77 +1232,91 @@ class InstallManager {
       }
     }
 
-    for (final f in archive) {
-      if (!f.isFile) continue;
+    try {
+      for (final f in archive) {
+        if (!f.isFile) continue;
 
-      // H1：Zip Slip 防护——目标路径必须落在 targetDir 内
-      if (!_isSafeArchivePath(targetDir.path, f.name)) {
-        debugPrint('[InstallManager] 跳过非法 entry: ${f.name}');
-        continue;
-      }
-
-      if (f.name.startsWith('META-INF/')) continue;
-      if (f.name == 'AndroidManifest.xml') continue;
-      if (f.name == 'resources.arsc') continue;
-      if (f.name.startsWith('kotlin/')) continue;
-      if (f.name == 'classes.dex') continue;
-      if (f.name.startsWith('classes') && f.name.endsWith('.dex')) continue;
-
-      if (kind == 'qjs-engine') {
-        if (f.name == 'assets/plugin.json') {
-          await _writeArchiveFile(f, targetDir.path, 'plugin.json');
+        // H1：Zip Slip 防护——目标路径必须落在 staging 内
+        if (!_isSafeArchivePath(staging.path, f.name)) {
+          debugPrint('[InstallManager] 跳过非法 entry: ${f.name}');
           continue;
         }
-        if (abiDir != null && f.name.startsWith('lib/$abiDir/')) {
-          final fileName = p.basename(f.name);
-          await _writeArchiveFile(f, targetDir.path, fileName);
-        }
-        continue;
-      }
 
-      if (kind == 'agent-ui') {
-        if (f.name == 'assets/plugin.json') {
-          await _writeArchiveFile(f, targetDir.path, 'plugin.json');
+        if (f.name.startsWith('META-INF/')) continue;
+        if (f.name == 'AndroidManifest.xml') continue;
+        if (f.name == 'resources.arsc') continue;
+        if (f.name.startsWith('kotlin/')) continue;
+        if (f.name == 'classes.dex') continue;
+        if (f.name.startsWith('classes') && f.name.endsWith('.dex')) continue;
+
+        if (kind == 'qjs-engine') {
+          if (f.name == 'assets/plugin.json') {
+            await _writeArchiveFile(f, staging.path, 'plugin.json');
+            continue;
+          }
+          if (abiDir != null && f.name.startsWith('lib/$abiDir/')) {
+            final fileName = p.basename(f.name);
+            await _writeArchiveFile(f, staging.path, fileName);
+          }
           continue;
         }
-        if (f.name.startsWith('assets/www/')) {
-          final rel = f.name.substring('assets/www/'.length);
+
+        if (kind == 'agent-ui') {
+          if (f.name == 'assets/plugin.json') {
+            await _writeArchiveFile(f, staging.path, 'plugin.json');
+            continue;
+          }
+          if (f.name.startsWith('assets/www/')) {
+            final rel = f.name.substring('assets/www/'.length);
+            if (rel.isEmpty) continue;
+            await _writeArchiveFile(f, staging.path, rel);
+          }
+          continue;
+        }
+
+        if (f.name == 'assets/plugin.json') {
+          await _writeArchiveFile(f, staging.path, 'plugin.json');
+        } else if (f.name.startsWith('assets/')) {
+          final rel = f.name.substring('assets/'.length);
           if (rel.isEmpty) continue;
-          await _writeArchiveFile(f, targetDir.path, rel);
+          await _writeArchiveFile(f, staging.path, rel);
+        } else if (abiDir != null && f.name.startsWith('lib/$abiDir/')) {
+          final fileName = p.basename(f.name);
+          await _writeArchiveFile(f, staging.path, fileName);
         }
-        continue;
       }
 
-      if (f.name == 'assets/plugin.json') {
-        await _writeArchiveFile(f, targetDir.path, 'plugin.json');
-      } else if (f.name.startsWith('assets/')) {
-        final rel = f.name.substring('assets/'.length);
-        if (rel.isEmpty) continue;
-        await _writeArchiveFile(f, targetDir.path, rel);
-      } else if (abiDir != null && f.name.startsWith('lib/$abiDir/')) {
-        final fileName = p.basename(f.name);
-        await _writeArchiveFile(f, targetDir.path, fileName);
-      }
+      await _commitStagedDirectory(
+        root: root,
+        staging: staging,
+        finalDir: targetDir.path,
+        tag: 'apk-import-${entry.id}',
+        isCancelled: () => cancelToken?.isCancelled ?? false,
+        writeRegistry: () => register(
+          InstalledPlugin(
+            id: entry.id,
+            version: entry.version,
+            source: marketName,
+            installPath: targetDir.path,
+            enabled: true,
+            pinned: false,
+            installedAtMs: DateTime.now().millisecondsSinceEpoch,
+            type: 'apk',
+            desc: entry.desc,
+            changelog: entry.changelog,
+            icon: _resolvedIcon(entry),
+            extras: {
+              'platform': 'android',
+              'installMode': 'import',
+              if (kind.isNotEmpty) 'kind': kind,
+            },
+          ),
+        ),
+      );
+    } catch (_) {
+      await _safeDeleteDir(staging.path);
+      rethrow;
     }
-
-    await register(InstalledPlugin(
-      id: entry.id,
-      version: entry.version,
-      source: marketName,
-      installPath: targetDir.path,
-      enabled: true,
-      pinned: false,
-      installedAtMs: DateTime.now().millisecondsSinceEpoch,
-      type: 'apk',
-      desc: entry.desc,
-      changelog: entry.changelog,
-      icon: entry.icon,
-      extras: {
-        'platform': 'android',
-        'installMode': 'import',
-        if (kind.isNotEmpty) 'kind': kind,
-      },
-    ));
   }
 
   /// 判断下载 URL 是否为 .apk 后缀（忽略 query/fragment/代理前缀）。
@@ -1193,8 +1365,7 @@ class InstallManager {
     final srcRoot = Directory(srcDir);
     await for (final entity in srcRoot.list(recursive: true)) {
       if (entity is! File) continue;
-      final rel =
-          p.relative(entity.path, from: srcDir).replaceAll('\\', '/');
+      final rel = p.relative(entity.path, from: srcDir).replaceAll('\\', '/');
 
       // 统一过滤：APK 自身元数据一律丢弃
       if (rel.startsWith('META-INF/')) continue;
@@ -1281,13 +1452,14 @@ class InstallManager {
     required String marketName,
     required Directory root,
     required String finalDir,
+    required InstallCancelToken cancelToken,
     required void Function() onRegistering,
   }) async {
     final platformKey = Platform.isWindows
         ? 'win32'
         : Platform.isAndroid
-            ? 'android'
-            : '';
+        ? 'android'
+        : '';
     if (platformKey.isEmpty) {
       throw Exception('format:2 仅支持 Android / Windows');
     }
@@ -1307,12 +1479,7 @@ class InstallManager {
     final staging = Directory(
       p.join(root.path, '.format2-stage-${entry.id}-$stamp'),
     );
-    final backup = Directory(
-      p.join(root.path, '.format2-backup-${entry.id}-$stamp'),
-    );
     final usedTargets = <String>{};
-    bool oldMoved = false;
-    bool newMoved = false;
 
     try {
       await staging.create(recursive: true);
@@ -1406,56 +1573,35 @@ class InstallManager {
         throw Exception('format:2 包没有可提取的已知制品');
       }
 
-      final finalDirObj = Directory(finalDir);
-      if (finalDirObj.existsSync()) {
-        if (backup.existsSync()) await backup.delete(recursive: true);
-        await finalDirObj.rename(backup.path);
-        oldMoved = true;
-      }
-
-      await staging.rename(finalDir);
-      newMoved = true;
-      onRegistering();
-
       final kind = manifest['kind']?.toString() ?? '';
-      await register(
-        InstalledPlugin(
-          id: entry.id,
-          version: entry.version,
-          source: marketName,
-          installPath: finalDir,
-          enabled: true,
-          pinned: false,
-          installedAtMs: DateTime.now().millisecondsSinceEpoch,
-          type: entry.type,
-          desc: entry.desc,
-          changelog: entry.changelog,
-          icon: entry.icon,
-          extras: {
-            'platform': platformKey,
-            'installMode': 'import',
-            if (kind.isNotEmpty) 'kind': kind,
-          },
+      await _commitStagedDirectory(
+        root: root,
+        staging: staging,
+        finalDir: finalDir,
+        tag: 'format2-${entry.id}',
+        onRegistering: onRegistering,
+        isCancelled: () => cancelToken.isCancelled,
+        writeRegistry: () => register(
+          InstalledPlugin(
+            id: entry.id,
+            version: entry.version,
+            source: marketName,
+            installPath: finalDir,
+            enabled: true,
+            pinned: false,
+            installedAtMs: DateTime.now().millisecondsSinceEpoch,
+            type: entry.type,
+            desc: entry.desc,
+            changelog: entry.changelog,
+            icon: _resolvedIcon(entry),
+            extras: {
+              'platform': platformKey,
+              'installMode': 'import',
+              if (kind.isNotEmpty) 'kind': kind,
+            },
+          ),
         ),
       );
-
-      if (backup.existsSync()) {
-        await _safeDeleteDir(backup.path);
-      }
-    } catch (e) {
-      if (newMoved) {
-        await _safeDeleteDir(finalDir);
-      }
-      if (oldMoved && backup.existsSync()) {
-        try {
-          await backup.rename(finalDir);
-        } catch (restoreError) {
-          debugPrint(
-            '[InstallManager] format:2 rollback restore failed: $restoreError',
-          );
-        }
-      }
-      rethrow;
     } finally {
       await _safeDeleteDir(staging.path);
       await _safeDeleteDir(tmpDir.path);
@@ -1597,7 +1743,7 @@ class InstallManager {
     void Function(int received, int total)? onProgress,
   }) async {
     final downloadUrl = MarketManager.resolveUrl(entry.url, indexBaseUrl);
-    final finalUrl = _applyGithubProxyIfNeeded(downloadUrl);
+    final finalUrl = _applyGithubProxyIfNeeded(downloadUrl, entry);
 
     final dio = HttpClientFactory.dio;
     final response = await dio.get<String>(
@@ -1613,6 +1759,7 @@ class InstallManager {
     if (response.statusCode != 200) {
       throw Exception('直播源下载失败：HTTP ${response.statusCode}');
     }
+    _throwIfCancelled(cancelToken);
 
     if (entry.md5 != null && entry.md5!.isNotEmpty) {
       final bytes = utf8.encode(response.data ?? '');
@@ -1637,73 +1784,50 @@ class InstallManager {
       throw Exception('直播源 JSON 缺少 lives 数组或为空');
     }
 
-    final existingRaw =
-        StorageManager.getSetting<List<dynamic>>(SettingBoxKey.liveConfigs) ??
-            [];
-    final existing = existingRaw
-        .map((e) => LiveConfig.fromJson(Map<String, dynamic>.from(e)))
-        .toList();
-
-    final existingNames = existing.map((c) => c.name).toSet();
-    final addedKeys = <String>[];
-    for (final item in lives) {
-      if (item is! Map) continue;
-      final name = item['name']?.toString() ?? '';
-      if (name.isEmpty) continue;
-      if (existingNames.contains(name)) continue;
-      final newConfig = LiveConfig(
-        key: _generateLiveKey(name, existing),
-        name: name,
-        url: item['url']?.toString() ?? '',
-        ua: item['ua']?.toString(),
-        epg: item['epg']?.toString(),
-        logo: item['logo']?.toString(),
+    final existingPlugin = findInstalled(entry.id);
+    final previousKeys = <String>{
+      if (existingPlugin?.extras['liveKeys'] is List)
+        ...(existingPlugin!.extras['liveKeys'] as List).map(
+          (key) => key.toString(),
+        ),
+    };
+    _throwIfCancelled(cancelToken);
+    final transaction = LiveConfigTransaction.capture();
+    try {
+      final result = await LiveSourceManager.applyPackage(
+        lives: lives,
+        previousManagedKeys: previousKeys,
+        replaceManaged: existingPlugin != null,
+        claimExistingNames: existingPlugin == null,
+        overwriteExistingNames: true,
       );
-      existing.add(newConfig);
-      existingNames.add(name);
-      addedKeys.add(newConfig.key);
+      if (!result.hasChanges) {
+        throw Exception('没有新增或需要更新的直播源');
+      }
+      if (!cancelToken.beginCommit()) {
+        throw _CancelledException();
+      }
+
+      final installed = InstalledPlugin(
+        id: entry.id,
+        version: entry.version,
+        source: marketName,
+        installPath: '',
+        enabled: true,
+        pinned: false,
+        installedAtMs: DateTime.now().millisecondsSinceEpoch,
+        type: 'live',
+        desc: entry.desc,
+        changelog: entry.changelog,
+        icon: _resolvedIcon(entry),
+        extras: {'liveKeys': result.managedKeys},
+      );
+      await register(installed);
+      transaction.commit();
+    } catch (_) {
+      await transaction.rollback();
+      rethrow;
     }
-
-    if (addedKeys.isEmpty) {
-      throw Exception('没有新增直播源（可能全部已存在）');
-    }
-
-    await StorageManager.setSetting(
-      SettingBoxKey.liveConfigs,
-      existing.map((c) => c.toJson()).toList(),
-    );
-
-    final installed = InstalledPlugin(
-      id: entry.id,
-      version: entry.version,
-      source: marketName,
-      installPath: '',
-      enabled: true,
-      pinned: false,
-      installedAtMs: DateTime.now().millisecondsSinceEpoch,
-      type: 'live',
-      desc: entry.desc,
-      changelog: entry.changelog,
-      icon: entry.icon,
-      extras: {'liveKeys': addedKeys},
-    );
-    await register(installed);
-  }
-
-  String _generateLiveKey(String name, List<LiveConfig> existing) {
-    String base = name
-        .toLowerCase()
-        .replaceAll(' ', '_')
-        .replaceAll(RegExp(r'[^\w]'), '');
-    if (base.isEmpty) base = 'live';
-    String key = base;
-    int index = 1;
-    final existingKeys = existing.map((c) => c.key).toSet();
-    while (existingKeys.contains(key)) {
-      key = '${base}_$index';
-      index++;
-    }
-    return key;
   }
 
   // ============================================================
@@ -1714,10 +1838,11 @@ class InstallManager {
     MarketEntry entry,
     String tempPath, {
     required String marketName,
+    required InstallCancelToken cancelToken,
   }) async {
-    final tempDir =
-        await Directory.systemTemp.createTemp('source_install_');
+    final tempDir = await Directory.systemTemp.createTemp('source_install_');
     try {
+      _throwIfCancelled(cancelToken);
       await _extractZip(tempPath, tempDir.path);
 
       final sourceJsonFile = File(p.join(tempDir.path, 'source.json'));
@@ -1733,13 +1858,6 @@ class InstallManager {
       final dataRoot = await PluginPaths.dataRoot();
       final extractRoot = dataRoot.path;
 
-      await _copyDirContents(tempDir, Directory(extractRoot));
-
-      final targetSourceJson = File(p.join(extractRoot, 'source.json'));
-      if (targetSourceJson.existsSync()) {
-        await targetSourceJson.delete();
-      }
-
       final installed = InstalledPlugin(
         id: entry.id,
         version: entry.version,
@@ -1751,12 +1869,23 @@ class InstallManager {
         type: 'source',
         desc: entry.desc,
         changelog: entry.changelog,
-        icon: entry.icon,
+        icon: _resolvedIcon(entry),
         extras: {
           if (target != null) 'sourceTarget': target,
         },
       );
-      await register(installed);
+      await SourcePackageTransaction.run<void>(
+        tag: 'market-${entry.id}',
+        staging: tempDir,
+        dataRoot: Directory(extractRoot),
+        isCancelled: () => cancelToken.isCancelled,
+        afterFilesCommitted: () async {
+          if (!cancelToken.beginCommit()) {
+            throw _CancelledException();
+          }
+          await register(installed);
+        },
+      );
     } finally {
       try {
         if (tempDir.existsSync()) {
@@ -1806,7 +1935,7 @@ class InstallManager {
     if (plugin.type == 'live') {
       final existingRaw =
           StorageManager.getSetting<List<dynamic>>(SettingBoxKey.liveConfigs) ??
-              [];
+          [];
       final existing = existingRaw
           .map((e) => LiveConfig.fromJson(Map<String, dynamic>.from(e)))
           .toList();
@@ -1828,7 +1957,7 @@ class InstallManager {
       if (ServiceManager.instance.find(serviceId) != null) {
         await ServiceManager.instance.remove(serviceId);
       }
-      await _safeDeleteDir(plugin.installPath);
+      await _deleteInstalledPath(plugin.installPath);
       await unregister(plugin.id);
       return;
     }
@@ -1848,7 +1977,7 @@ class InstallManager {
         return;
       }
       // import 型：删私有目录 + 清登记
-      await _safeDeleteDir(plugin.installPath);
+      await _deleteInstalledPath(plugin.installPath);
       await unregister(plugin.id);
       return;
     }
@@ -1877,7 +2006,7 @@ class InstallManager {
     if (stoppedAny && Platform.isWindows) {
       await Future.delayed(const Duration(milliseconds: 500));
     }
-    await _safeDeleteDir(plugin.installPath);
+    await _deleteInstalledPath(plugin.installPath);
     await unregister(plugin.id);
   }
 
@@ -1889,104 +2018,198 @@ class InstallManager {
     MarketEntry entry,
     String tempPath, {
     required String marketName,
+    required InstallCancelToken cancelToken,
   }) async {
-    final serviceId = 'svc-mkt-${entry.id}';
-    final baseDir = await PluginPaths.serverDir(serviceId);
-    await _extractZip(tempPath, baseDir.path);
-
-    final serverJsonFile = File(p.join(baseDir.path, 'server.json'));
-    if (serverJsonFile.existsSync()) {
-      return _createServiceFromManifest(
-          serverJsonFile, entry, baseDir, marketName);
-    }
-    final all = baseDir.listSync(recursive: true);
-    for (final e in all) {
-      if (e is File && p.basename(e.path) == 'server.json') {
-        return _createServiceFromManifest(e, entry, baseDir, marketName);
+    final extractDir = await Directory.systemTemp.createTemp('server_install_');
+    try {
+      _throwIfCancelled(cancelToken);
+      await _extractZip(tempPath, extractDir.path);
+      final serverJson = File(p.join(extractDir.path, 'server.json'));
+      if (!serverJson.existsSync()) {
+        throw Exception('server 包根目录缺少 server.json');
       }
+      final decoded = jsonDecode(await serverJson.readAsString());
+      if (decoded is! Map) {
+        throw Exception('server.json 不是有效对象');
+      }
+      final servicesRoot = await PluginPaths.servicesRoot();
+      final plan = ServerPackageResolver.resolve(
+        manifest: decoded,
+        fileName: p.basename(entry.url),
+        servicesRootPath: servicesRoot.path,
+        marketEntry: entry,
+      );
+      await installServerPackagePlan(
+        plan: plan,
+        sourceDir: extractDir,
+        marketName: marketName,
+        cancelToken: cancelToken,
+      );
+    } finally {
+      await _safeDeleteDir(extractDir.path);
     }
-    throw Exception('server 包内未找到 server.json');
   }
 
-  /// 创建/更新服务配置
-  /// 已存在时：保留用户自定义（autostart/keepForeground/env/maxRestart/pidFile/port），
-  ///         更新 manifest 决定项（name/runtime/args/cwd/healthType/healthPath）
-  Future<void> _createServiceFromManifest(
-    File serverJsonFile,
-    MarketEntry entry,
-    Directory baseDir,
-    String marketName,
-  ) async {
-    final raw = jsonDecode(await serverJsonFile.readAsString());
-    final manifest = Map<String, dynamic>.from(raw as Map);
+  /// 统一安装/更新服务包。
+  ///
+  /// 市场和手动导入都先生成 [ServerPackagePlan]，避免两套身份推断。
+  Future<void> installServerPackagePlan({
+    required ServerPackagePlan plan,
+    required Directory sourceDir,
+    required String marketName,
+    InstallCancelToken? cancelToken,
+  }) async {
+    final token = cancelToken ?? InstallCancelToken();
+    _throwIfCancelled(token);
+    final servicesRoot = await PluginPaths.servicesRoot();
+    if (!PluginPaths.isWithin(servicesRoot, plan.packageRoot) ||
+        p.equals(plan.packageRoot, servicesRoot.path)) {
+      throw FormatException('服务包根目录越界：${plan.packageRoot}');
+    }
 
-    final serviceName = manifest['serviceName']?.toString() ?? entry.name;
-    final workDir = manifest['workDir']?.toString() ?? '';
-    final entryFile = manifest['entry']?.toString() ?? '';
-    final manifestPort = (manifest['port'] is num)
-        ? (manifest['port'] as num).toInt()
-        : null;
-
-    // C7：runtime 推断抽到静态方法，与 ImportPackageDialog 共用同一逻辑，
-    // 消除两处硬编码不一致（原来 Android 上会错误指向 *-win）。
-    final runtime = resolveRuntimeForEntryFile(
-      entryFile,
-      isWindows: Platform.isWindows,
+    final packageRoot = Directory(plan.packageRoot);
+    final staging = Directory(
+      p.join(
+        servicesRoot.path,
+        '.server-stage-${plan.pluginId}-'
+        '${DateTime.now().microsecondsSinceEpoch}',
+      ),
     );
+    final existingConfig = ServiceManager.instance.find(plan.serviceId);
+    final existingRegistry = findInstalled(plan.pluginId);
 
-    final cwd =
-        workDir.isNotEmpty ? p.join(baseDir.path, workDir) : baseDir.path;
+    try {
+      await staging.create(recursive: true);
+      await _copyDirContents(sourceDir, staging);
+      _throwIfCancelled(token);
 
-    final serviceId = 'svc-mkt-${entry.id}';
+      await ServiceManager.instance.stop(plan.serviceId);
+      final swap = await PluginPaths.swapInDirectory(
+        staging: staging,
+        finalDir: packageRoot,
+        allowedRoot: servicesRoot,
+        tag: 'server-${plan.pluginId}',
+      );
+      try {
+        _throwIfCancelled(token);
+        final cwd = plan.workDir.isEmpty
+            ? packageRoot.path
+            : p.join(packageRoot.path, plan.workDir);
+        final config = ServiceConfig(
+          id: plan.serviceId,
+          name: plan.serviceName,
+          port: existingConfig?.port ?? plan.port,
+          runtime: plan.runtime,
+          args: [plan.entry],
+          cwd: cwd,
+          autostart: existingConfig?.autostart ?? plan.autoStart,
+          keepForeground: existingConfig?.keepForeground ?? false,
+          env: existingConfig?.env ?? const {},
+          maxRestart: existingConfig?.maxRestart ?? 1,
+          executable: existingConfig?.executable,
+          healthType: existingConfig?.healthType ?? plan.healthType,
+          healthPath: existingConfig?.healthPath ?? plan.healthPath,
+          pidFile: existingConfig?.pidFile,
+          packageRoot: packageRoot.path,
+          packagePluginId: plan.pluginId,
+          packageVersion: plan.manifestVersion,
+          packageIdentitySource: plan.identitySource,
+        );
+        final registryVersion = plan.registryVersion.isNotEmpty
+            ? plan.registryVersion
+            : existingRegistry?.version ?? '0.0.0';
+        final installed = InstalledPlugin(
+          id: plan.pluginId,
+          version: registryVersion,
+          source: marketName,
+          installPath: packageRoot.path,
+          enabled: true,
+          pinned: false,
+          installedAtMs: DateTime.now().millisecondsSinceEpoch,
+          type: 'server',
+          desc: plan.description,
+          changelog: plan.marketEntry?.changelog,
+          icon: _resolvedIconOrNull(plan.marketEntry),
+          extras: {
+            'serviceId': plan.serviceId,
+            'packageRoot': packageRoot.path,
+            'manifestVersion': plan.manifestVersion,
+            'identitySource': plan.identitySource,
+            'linkedToMarket': plan.linkedToMarket,
+          },
+        );
 
-    // 已存在时保留用户自定义项
-    final existing = ServiceManager.instance.find(serviceId);
+        await ServiceManager.instance.addOrUpdate(config);
+        await register(installed);
+        await swap.commit();
+      } catch (_) {
+        if (existingConfig == null) {
+          if (ServiceManager.instance.find(plan.serviceId) != null) {
+            await ServiceManager.instance.remove(plan.serviceId);
+          }
+        } else {
+          await ServiceManager.instance.addOrUpdate(existingConfig);
+        }
+        if (existingRegistry == null) {
+          await unregister(plan.pluginId);
+        } else {
+          await register(existingRegistry);
+        }
+        await swap.rollback();
+        rethrow;
+      }
+    } finally {
+      await _safeDeleteDir(staging.path);
+    }
+  }
 
-    final config = ServiceConfig(
-      id: serviceId,
-      name: serviceName,
-      port: existing?.port ?? manifestPort,
-      runtime: runtime,
-      args: [entryFile],
-      cwd: cwd,
-      autostart: existing?.autostart ?? false,
-      keepForeground: existing?.keepForeground ?? false,
-      env: existing?.env ?? const {},
-      maxRestart: existing?.maxRestart ?? 1,
-      executable: existing?.executable,
-      healthType: 'process',
-      healthPath: '/',
-      pidFile: existing?.pidFile,
-    );
-    await ServiceManager.instance.addOrUpdate(config);
-
-    final installed = InstalledPlugin(
-      id: entry.id,
-      version: entry.version,
-      source: marketName,
-      installPath: baseDir.path,
-      enabled: true,
-      pinned: false,
-      installedAtMs: DateTime.now().millisecondsSinceEpoch,
-      type: 'server',
-      desc: entry.desc,
-      changelog: entry.changelog,
-      icon: entry.icon,
-    );
-    await register(installed);
+  String? _resolvedIconOrNull(MarketEntry? entry) {
+    return entry == null ? null : _resolvedIcon(entry);
   }
 
   // ============================================================
   // 内部工具
   // ============================================================
 
+  void _throwIfCancelled(InstallCancelToken token) {
+    if (token.isCancelled) throw _CancelledException();
+  }
+
+  Future<void> _commitStagedDirectory({
+    required Directory root,
+    required Directory staging,
+    required String finalDir,
+    required String tag,
+    required Future<void> Function() writeRegistry,
+    required bool Function() isCancelled,
+    void Function()? onRegistering,
+  }) async {
+    if (isCancelled()) throw _CancelledException();
+    final swap = await PluginPaths.swapInDirectory(
+      staging: staging,
+      finalDir: Directory(finalDir),
+      allowedRoot: root,
+      tag: tag,
+    );
+    try {
+      if (isCancelled()) throw _CancelledException();
+      onRegistering?.call();
+      await writeRegistry();
+      await swap.commit();
+    } catch (_) {
+      await swap.rollback();
+      rethrow;
+    }
+  }
+
   /// H1：Zip Slip 防护——entry 名解析后的绝对路径必须落在 targetDir 内。
   /// 合法包（市场包全部合法）行为完全不变；`../` 逃逸 entry 被跳过。
   bool _isSafeArchivePath(String targetDir, String entryName) {
     try {
       final normalizedTarget = p.normalize(p.absolute(targetDir));
-      final normalizedOut =
-          p.normalize(p.absolute(p.join(targetDir, entryName)));
+      final normalizedOut = p.normalize(
+        p.absolute(p.join(targetDir, entryName)),
+      );
       return p.isWithin(normalizedTarget, normalizedOut) ||
           normalizedOut == normalizedTarget;
     } catch (_) {
@@ -2021,7 +2244,8 @@ class InstallManager {
       throw Exception('HTTP ${response.statusCode}');
     }
 
-    final contentLength = int.tryParse(
+    final contentLength =
+        int.tryParse(
           response.headers.value(Headers.contentLengthHeader) ?? '',
         ) ??
         0;
@@ -2116,29 +2340,46 @@ class InstallManager {
     }
   }
 
-  Future<void> _cleanupOldVersions(String id, String keepVersion) async {
-    try {
-      final root = await PluginPaths.root();
-      final dir = Directory(p.join(root.path, id));
-      if (dir.existsSync()) {
-        await dir.delete(recursive: true);
-        debugPrint('[InstallManager] 已清理旧目录: $id');
-      }
-    } catch (e) {
-      debugPrint('[InstallManager] _cleanupOldVersions failed: $e');
+  Future<void> _deleteInstalledPath(String path) async {
+    if (path.isEmpty) return;
+    final pluginRoot = await PluginPaths.root();
+    final serviceRoot = await PluginPaths.servicesRoot();
+    if (!PluginPaths.isWithin(pluginRoot, path) &&
+        !PluginPaths.isWithin(serviceRoot, path)) {
+      debugPrint('[InstallManager] 拒绝删除越界目录: $path');
+      return;
     }
+    if (p.equals(path, pluginRoot.path) || p.equals(path, serviceRoot.path)) {
+      debugPrint('[InstallManager] 拒绝删除根目录: $path');
+      return;
+    }
+    await _safeDeleteDir(path);
   }
 
-  String _applyGithubProxyIfNeeded(String url) {
-    final sources = MarketManager.instance.getSources();
-    if (sources.isEmpty) return url;
-    final proxy = sources.first.proxy;
+  String _applyGithubProxyIfNeeded(String url, MarketEntry entry) {
+    // 条目来自已启用市场时，空 proxy 是明确的“直连”配置，
+    // 不能再回退到第一个市场的代理。
+    final proxy = entry.marketId.isNotEmpty
+        ? entry.proxy
+        : (MarketManager.instance.getSources().isEmpty
+              ? ''
+              : MarketManager.instance.getSources().first.proxy);
     if (proxy.isEmpty) return url;
     if (url.contains('github.com') ||
         url.contains('raw.githubusercontent.com')) {
       return '$proxy$url';
     }
     return url;
+  }
+
+  String? _resolvedIcon(MarketEntry entry) {
+    final icon = entry.icon;
+    if (icon == null || icon.isEmpty) return null;
+    if (icon.startsWith('http://') || icon.startsWith('https://')) {
+      return icon;
+    }
+    if (entry.indexBaseUrl.isEmpty) return icon;
+    return MarketManager.resolveUrl(icon, entry.indexBaseUrl);
   }
 }
 

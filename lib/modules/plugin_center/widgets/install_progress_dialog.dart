@@ -13,7 +13,7 @@ Future<void> showInstallProgressDialog({
   required MarketEntry entry,
   required InstallCancelToken token,
   required Future<void> Function(void Function(InstallProgress) onProgress)
-      task,
+  task,
 }) async {
   final progressNotifier = ValueNotifier<InstallProgress>(
     const InstallProgress(stage: InstallStage.idle),
@@ -34,6 +34,18 @@ Future<void> showInstallProgressDialog({
     }
   }
 
+  bool requestCancel() {
+    if (finished || cancelled) return false;
+    if (!token.cancel()) {
+      SmartDialog.showToast('正在完成安装，无法取消');
+      return false;
+    }
+    cancelled = true;
+    closeDialog();
+    SmartDialog.showToast('已取消安装');
+    return true;
+  }
+
   showDialog<void>(
     context: context,
     barrierDismissible: false,
@@ -44,22 +56,13 @@ Future<void> showInstallProgressDialog({
         canPop: false,
         onPopInvokedWithResult: (didPop, result) {
           if (!finished && !cancelled) {
-            cancelled = true;
-            token.cancel();
-            closeDialog();
-            SmartDialog.showToast('已取消安装');
+            requestCancel();
           }
         },
         child: _InstallProgressDialogBody(
           entry: entry,
           progressNotifier: progressNotifier,
-          onCancel: () {
-            if (finished || cancelled) return;
-            cancelled = true;
-            token.cancel();
-            closeDialog();
-            SmartDialog.showToast('已取消安装');
-          },
+          onCancel: requestCancel,
         ),
       );
     },
@@ -72,6 +75,7 @@ Future<void> showInstallProgressDialog({
       progressNotifier.value = p;
     });
     finished = true;
+    if (cancelled || token.isCancelled) return;
     progressNotifier.value = const InstallProgress(stage: InstallStage.done);
     await Future.delayed(const Duration(milliseconds: 600));
     closeDialog();

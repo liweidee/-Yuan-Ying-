@@ -138,14 +138,16 @@ class _PluginTabState extends State<PluginTab> with WidgetsBindingObserver {
           padding: const EdgeInsets.fromLTRB(12, 8, 4, 4),
           child: Row(
             children: [
-              Obx(() => Text(
-                    '已装 ${controller.filteredPlugins.length} 个插件',
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: colorScheme.onSurface,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  )),
+              Obx(
+                () => Text(
+                  '已装 ${controller.filteredPlugins.length} 个插件',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: colorScheme.onSurface,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
               const Spacer(),
               // 扫描按钮（仅 Android）
               if (Platform.isAndroid)
@@ -224,7 +226,9 @@ class _PluginTabState extends State<PluginTab> with WidgetsBindingObserver {
                   borderRadius: BorderRadius.circular(10),
                 ),
                 contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 12, vertical: 10),
+                  horizontal: 12,
+                  vertical: 10,
+                ),
               ),
               onChanged: (v) => controller.pluginSearch.value = v,
             ),
@@ -242,8 +246,10 @@ class _PluginTabState extends State<PluginTab> with WidgetsBindingObserver {
             // - 从市场安装过 → findInstalled(id) 有值 → 不显示固化卡片
             // - 从市场卸载后 → findInstalled(id) 为 null → 卡片恢复显示
             final sysList = _systemPlugins
-                .where((s) =>
-                    InstallManager.instance.findInstalled(s.pluginId) == null)
+                .where(
+                  (s) =>
+                      InstallManager.instance.findInstalled(s.pluginId) == null,
+                )
                 .toList();
 
             if (list.isEmpty && sysList.isEmpty) {
@@ -251,8 +257,11 @@ class _PluginTabState extends State<PluginTab> with WidgetsBindingObserver {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.extension_outlined,
-                        size: 64, color: colorScheme.outline),
+                    Icon(
+                      Icons.extension_outlined,
+                      size: 64,
+                      color: colorScheme.outline,
+                    ),
                     const SizedBox(height: 16),
                     Text(
                       controller.pluginSearch.value.isNotEmpty
@@ -265,7 +274,9 @@ class _PluginTabState extends State<PluginTab> with WidgetsBindingObserver {
                       Text(
                         '前往「市场」标签页安装',
                         style: TextStyle(
-                            fontSize: 12, color: colorScheme.outline),
+                          fontSize: 12,
+                          color: colorScheme.outline,
+                        ),
                       ),
                   ],
                 ),
@@ -285,12 +296,14 @@ class _PluginTabState extends State<PluginTab> with WidgetsBindingObserver {
                     controller: controller,
                     onSolidified: () {
                       _systemPlugins.removeWhere(
-                          (e) => e.pluginId == sysList[index].pluginId);
+                        (e) => e.pluginId == sysList[index].pluginId,
+                      );
                       controller.reloadInstalled();
                     },
                     onUninstalled: () {
                       _systemPlugins.removeWhere(
-                          (e) => e.pluginId == sysList[index].pluginId);
+                        (e) => e.pluginId == sysList[index].pluginId,
+                      );
                     },
                   );
                 }
@@ -430,8 +443,9 @@ class _SystemInstalledPluginCard extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Divider(
-                height: 1,
-                color: colorScheme.outline.withValues(alpha: 0.1)),
+              height: 1,
+              color: colorScheme.outline.withValues(alpha: 0.1),
+            ),
             const SizedBox(height: 4),
             // ===== 底部操作栏 =====
             Row(
@@ -524,10 +538,14 @@ class _SystemInstalledPluginCard extends StatelessWidget {
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: Style.mdRadius),
         backgroundColor: colorScheme.surface,
-        title: const Text('卸载系统应用',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
-        content: Text('确定要卸载系统安装的「${info.title}」吗？\n'
-            '卸载后该卡片将不再显示，资源不会提取到应用内。'),
+        title: const Text(
+          '卸载系统应用',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+        ),
+        content: Text(
+          '确定要卸载系统安装的「${info.title}」吗？\n'
+          '卸载后该卡片将不再显示，资源不会提取到应用内。',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -580,7 +598,8 @@ class _InstalledPluginCard extends StatelessWidget {
             color: colorScheme.surface,
             borderRadius: Style.mdRadius,
             border: Border.all(
-                color: colorScheme.outline.withValues(alpha: 0.15)),
+              color: colorScheme.outline.withValues(alpha: 0.15),
+            ),
             boxShadow: [
               BoxShadow(
                 color: theme.shadowColor.withValues(alpha: 0.06),
@@ -629,8 +648,7 @@ class _InstalledPluginCard extends StatelessWidget {
                     ),
                   ),
                   if (plugin.pinned) ...[
-                    Icon(Icons.push_pin,
-                        size: 16, color: colorScheme.primary),
+                    Icon(Icons.push_pin, size: 16, color: colorScheme.primary),
                     const SizedBox(width: 12),
                   ],
                   Obx(() {
@@ -662,8 +680,9 @@ class _InstalledPluginCard extends StatelessWidget {
               ],
               const SizedBox(height: 8),
               Divider(
-                  height: 1,
-                  color: colorScheme.outline.withValues(alpha: 0.1)),
+                height: 1,
+                color: colorScheme.outline.withValues(alpha: 0.1),
+              ),
               const SizedBox(height: 4),
               _buildActions(context),
             ],
@@ -681,7 +700,7 @@ class _InstalledPluginCard extends StatelessWidget {
           .where((s) => s.runtime == plugin.id)
           .toList();
       for (final s in allServices) {
-        ServiceManager.instance.resetToStopped(s.id);
+        await ServiceManager.instance.resetToStopped(s.id);
       }
       return;
     }
@@ -690,12 +709,20 @@ class _InstalledPluginCard extends StatelessWidget {
         .getAll()
         .where((s) => s.runtime == plugin.id)
         .toList();
-    final activeServices = allServices
-        .where((s) {
-          final st = ServiceManager.instance.getStatus(s.id);
-          return st == ServiceStatus.running || st == ServiceStatus.starting;
-        })
+    final activeServices = allServices.where((s) {
+      final st = ServiceManager.instance.getStatus(s.id);
+      return st == ServiceStatus.running || st == ServiceStatus.starting;
+    }).toList();
+    final listedActiveServices = activeServices
+        .where((s) => s.id != 'svc-local-php-t4')
         .toList();
+    final specialDependencyNotices = <String>[
+      if (plugin.id == 'nodejs' || plugin.id == 'nodejs-win')
+        '猫影视配置使用的 Node 服务（若正在运行）',
+      if (plugin.id == 'php' || plugin.id == 'php-win') 'PHP-T4 本地服务（若正在运行）',
+    ];
+    final hasStoppedServices =
+        activeServices.isNotEmpty || specialDependencyNotices.isNotEmpty;
 
     if (!context.mounted) return;
     final colorScheme = Theme.of(context).colorScheme;
@@ -705,8 +732,10 @@ class _InstalledPluginCard extends StatelessWidget {
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: Style.mdRadius),
         backgroundColor: colorScheme.surface,
-        title: const Text('关闭插件',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+        title: const Text(
+          '关闭插件',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+        ),
         content: SizedBox(
           width: 460,
           child: Column(
@@ -718,20 +747,24 @@ class _InstalledPluginCard extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: activeServices.isNotEmpty
+                  color: hasStoppedServices
                       ? colorScheme.errorContainer.withValues(alpha: 0.3)
-                      : colorScheme.surfaceContainerHighest
-                          .withValues(alpha: 0.3),
+                      : colorScheme.surfaceContainerHighest.withValues(
+                          alpha: 0.3,
+                        ),
                   borderRadius: Style.mdRadius,
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (activeServices.isNotEmpty) ...[
+                    if (listedActiveServices.isNotEmpty) ...[
                       Row(
                         children: [
-                          Icon(Icons.warning_amber,
-                              size: 16, color: colorScheme.error),
+                          Icon(
+                            Icons.warning_amber,
+                            size: 16,
+                            color: colorScheme.error,
+                          ),
                           const SizedBox(width: 6),
                           Text(
                             '关闭后将停止以下正在运行的服务：',
@@ -744,16 +777,50 @@ class _InstalledPluginCard extends StatelessWidget {
                         ],
                       ),
                       const SizedBox(height: 4),
-                      ...activeServices.map((s) => Padding(
-                            padding:
-                                const EdgeInsets.only(left: 22, top: 2),
-                            child: Text('· ${s.name}',
-                                style: const TextStyle(fontSize: 12)),
-                          )),
+                      ...listedActiveServices.map(
+                        (s) => Padding(
+                          padding: const EdgeInsets.only(left: 22, top: 2),
+                          child: Text(
+                            '· ${s.name}',
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
+                    if (specialDependencyNotices.isNotEmpty) ...[
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.link_off,
+                            size: 16,
+                            color: colorScheme.error,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            '以下关联服务也会同步暂停：',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: colorScheme.error,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      ...specialDependencyNotices.map(
+                        (text) => Padding(
+                          padding: const EdgeInsets.only(left: 22, top: 2),
+                          child: Text(
+                            '· $text',
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                        ),
+                      ),
                       const SizedBox(height: 8),
                     ],
                     Text(
-                      activeServices.isNotEmpty
+                      hasStoppedServices
                           ? '关闭后，这些服务将无法启动，直到重新开启此插件。已创建的服务配置会保留。'
                           : '关闭后，引用此插件的服务将无法启动，直到重新开启。',
                       style: TextStyle(
@@ -780,7 +847,7 @@ class _InstalledPluginCard extends StatelessWidget {
               foregroundColor: colorScheme.onError,
             ),
             child: Text(
-              activeServices.isNotEmpty ? '关闭插件并停止服务' : '关闭插件',
+              hasStoppedServices ? '关闭插件并停止服务' : '关闭插件',
             ),
           ),
         ],
@@ -810,98 +877,117 @@ class _InstalledPluginCard extends StatelessWidget {
       case 'nodejs-win':
       case 'php':
       case 'php-win':
-        actions.add(_ActionBtn(
-          icon: Icons.dns_outlined,
-          label: '查看服务',
-          onTap: () => controller.jumpToServiceTabFiltered(
-            plugin.id,
-            _titleForPlugin(plugin.id),
+        actions.add(
+          _ActionBtn(
+            icon: Icons.dns_outlined,
+            label: '查看服务',
+            onTap: () => controller.jumpToServiceTabFiltered(
+              plugin.id,
+              _titleForPlugin(plugin.id),
+            ),
           ),
-        ));
+        );
         break;
 
       case 'python':
       case 'python-win':
-        actions.add(_ActionBtn(
-          icon: Icons.dns_outlined,
-          label: '查看服务',
-          onTap: () => controller.jumpToServiceTabFiltered(
-            plugin.id,
-            _titleForPlugin(plugin.id),
+        actions.add(
+          _ActionBtn(
+            icon: Icons.dns_outlined,
+            label: '查看服务',
+            onTap: () => controller.jumpToServiceTabFiltered(
+              plugin.id,
+              _titleForPlugin(plugin.id),
+            ),
           ),
-        ));
-        actions.add(_ActionBtn(
-          icon: Icons.inventory_2_outlined,
-          label: '依赖管理',
-          onTap: () => showPythonDepsSheet(context, plugin),
-        ));
+        );
+        actions.add(
+          _ActionBtn(
+            icon: Icons.inventory_2_outlined,
+            label: '依赖管理',
+            onTap: () => showPythonDepsSheet(context, plugin),
+          ),
+        );
         break;
 
       case 'qjs':
       case 'qjs-win':
-        actions.add(_ActionBtn(
-          icon: Icons.speed_outlined,
-          label: '引擎并发',
-          onTap: () => showQjsConcurrencyDialog(context, plugin),
-        ));
+        actions.add(
+          _ActionBtn(
+            icon: Icons.speed_outlined,
+            label: '引擎并发',
+            onTap: () => showQjsConcurrencyDialog(context, plugin),
+          ),
+        );
         break;
 
       case 'py':
         // 引擎并发 / py 写入守卫 / 抗杀保活：暂不接入（语义待确认）
-        actions.add(_ActionBtn(
-          icon: Icons.settings_outlined,
-          label: '自启动设置',
-          onTap: () => _openAppDetails('com.dsplayer.plugin.python'),
-        ));
-        actions.add(_ActionBtn(
-          icon: Icons.folder_shared_outlined,
-          label: '所有文件权限',
-          onTap: () => _openAllFilesAccessForApp('com.dsplayer.plugin.python'),
-        ));
-        actions.add(_ActionBtn(
-          icon: Icons.search_outlined,
-          label: 'py 源管理',
-          onTap: () => Get.toNamed(AppPages.pySource),
-        ));
+        actions.add(
+          _ActionBtn(
+            icon: Icons.settings_outlined,
+            label: '自启动设置',
+            onTap: () => _openAppDetails('com.dsplayer.plugin.python'),
+          ),
+        );
+        actions.add(
+          _ActionBtn(
+            icon: Icons.folder_shared_outlined,
+            label: '所有文件权限',
+            onTap: () =>
+                _openAllFilesAccessForApp('com.dsplayer.plugin.python'),
+          ),
+        );
+        actions.add(
+          _ActionBtn(
+            icon: Icons.search_outlined,
+            label: 'py 源管理',
+            onTap: () => Get.toNamed(AppPages.pySource),
+          ),
+        );
         // 保活开关：从 extras['pyKeepAlive'] 读状态，label 上带状态标识
-        actions.add(_ActionBtn(
-          icon: plugin.extras['pyKeepAlive'] == true
-              ? Icons.gpp_good
-              : Icons.gpp_bad,
-          label: plugin.extras['pyKeepAlive'] == true
-              ? '保活(已开)'
-              : '保活设置',
-          onTap: () => showPyKeepAliveDialog(context, plugin),
-        ));
+        actions.add(
+          _ActionBtn(
+            icon: plugin.extras['pyKeepAlive'] == true
+                ? Icons.gpp_good
+                : Icons.gpp_bad,
+            label: plugin.extras['pyKeepAlive'] == true ? '保活(已开)' : '保活设置',
+            onTap: () => showPyKeepAliveDialog(context, plugin),
+          ),
+        );
         break;
 
       case 'agent':
-        actions.add(_ActionBtn(
-          icon: Icons.smart_toy_outlined,
-          label: '打开 AI 助手',
-          onTap: () async {
-            // 先检查 AI 配置是否就绪
-            if (!Get.isRegistered<AiConfigController>()) {
-              Get.put(AiConfigController());
-            }
-            final ctrl = Get.find<AiConfigController>();
-            if (!ctrl.isReady) {
-              // 未配置 → 引导去设置页
-              Get.toNamed(AppPages.aiConfig);
-              SmartDialog.showToast('请先填写 API 基址和 Key');
-              return;
-            }
-            Get.toNamed(AppPages.agentUi);
-          },
-        ));
+        actions.add(
+          _ActionBtn(
+            icon: Icons.smart_toy_outlined,
+            label: '打开 AI 助手',
+            onTap: () async {
+              // 先检查 AI 配置是否就绪
+              if (!Get.isRegistered<AiConfigController>()) {
+                Get.put(AiConfigController());
+              }
+              final ctrl = Get.find<AiConfigController>();
+              if (!ctrl.isReady) {
+                // 未配置 → 引导去设置页
+                Get.toNamed(AppPages.aiConfig);
+                SmartDialog.showToast('请先填写 API 基址和 Key');
+                return;
+              }
+              Get.toNamed(AppPages.agentUi);
+            },
+          ),
+        );
         break;
 
       case 'proot':
-        actions.add(_ActionBtn(
-          icon: Icons.terminal,
-          label: '打开沙盒',
-          onTap: () => Get.toNamed(AppPages.sandbox),
-        ));
+        actions.add(
+          _ActionBtn(
+            icon: Icons.terminal,
+            label: '打开沙盒',
+            onTap: () => Get.toNamed(AppPages.sandbox),
+          ),
+        );
         break;
 
       case 'frp':
@@ -915,21 +1001,26 @@ class _InstalledPluginCard extends StatelessWidget {
         {
           final preset = getBinaryPreset(plugin.id);
           if (preset != null) {
-            actions.add(_ActionBtn(
-              icon: Icons.settings_outlined,
-              label: '编辑配置',
-              onTap: () => showBinaryServiceConfigDialog(context, plugin),
-            ));
-            actions.add(_ActionBtn(
-              icon: Icons.open_in_new_outlined,
-              label: '打开 Web',
-              onTap: () => openBinaryServiceWeb(context, plugin),
-            ));
+            actions.add(
+              _ActionBtn(
+                icon: Icons.settings_outlined,
+                label: '编辑配置',
+                onTap: () => showBinaryServiceConfigDialog(context, plugin),
+              ),
+            );
+            actions.add(
+              _ActionBtn(
+                icon: Icons.open_in_new_outlined,
+                label: '打开 Web',
+                onTap: () => openBinaryServiceWeb(context, plugin),
+              ),
+            );
             actions.add(
               Obx(() {
                 ServiceManager.instance.revision.value;
-                final status =
-                    ServiceManager.instance.getStatus(preset.serviceId);
+                final status = ServiceManager.instance.getStatus(
+                  preset.serviceId,
+                );
                 if (status == ServiceStatus.running) {
                   return _ActionBtn(
                     icon: Icons.stop_circle_outlined,
@@ -945,11 +1036,13 @@ class _InstalledPluginCard extends StatelessWidget {
               }),
             );
             // 查看日志：复用 service_log_sheet 通用组件，与 ServiceTab 行为一致
-            actions.add(_ActionBtn(
-              icon: Icons.receipt_long_outlined,
-              label: '查看日志',
-              onTap: () => showBinaryServiceLog(context, plugin),
-            ));
+            actions.add(
+              _ActionBtn(
+                icon: Icons.receipt_long_outlined,
+                label: '查看日志',
+                onTap: () => showBinaryServiceLog(context, plugin),
+              ),
+            );
           }
         }
         break;
@@ -990,10 +1083,12 @@ class _InstalledPluginCard extends StatelessWidget {
 
   Future<void> _openAllFilesAccessForApp(String pkgName) async {
     try {
-      final ok = await _pkgChannel
-          .invokeMethod<bool>('openAllFilesAccessForApp', {
-        'packageName': pkgName,
-      });
+      final ok = await _pkgChannel.invokeMethod<bool>(
+        'openAllFilesAccessForApp',
+        {
+          'packageName': pkgName,
+        },
+      );
       if (ok != true) {
         SmartDialog.showToast('无法打开权限页');
       }
@@ -1005,20 +1100,17 @@ class _InstalledPluginCard extends StatelessWidget {
   Future<void> _confirmUninstall(BuildContext context) async {
     final colorScheme = Theme.of(context).colorScheme;
     final installMode = plugin.extras['installMode']?.toString();
-    final isSystemApk = Platform.isAndroid &&
-        plugin.type == 'apk' &&
-        installMode == 'apk';
+    final isSystemApk =
+        Platform.isAndroid && plugin.type == 'apk' && installMode == 'apk';
 
     final allServices = ServiceManager.instance
         .getAll()
         .where((s) => s.runtime == plugin.id)
         .toList();
-    final activeServices = allServices
-        .where((s) {
-          final st = ServiceManager.instance.getStatus(s.id);
-          return st == ServiceStatus.running || st == ServiceStatus.starting;
-        })
-        .toList();
+    final activeServices = allServices.where((s) {
+      final st = ServiceManager.instance.getStatus(s.id);
+      return st == ServiceStatus.running || st == ServiceStatus.starting;
+    }).toList();
 
     if (!context.mounted) return;
     final ok = await showDialog<bool>(
@@ -1026,8 +1118,10 @@ class _InstalledPluginCard extends StatelessWidget {
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: Style.mdRadius),
         backgroundColor: colorScheme.surface,
-        title: Text(isSystemApk ? '卸载系统应用' : '卸载插件',
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+        title: Text(
+          isSystemApk ? '卸载系统应用' : '卸载插件',
+          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+        ),
         content: SizedBox(
           width: 480,
           child: SingleChildScrollView(
@@ -1048,8 +1142,11 @@ class _InstalledPluginCard extends StatelessWidget {
                     children: [
                       Row(
                         children: [
-                          Icon(Icons.warning_amber,
-                              size: 16, color: colorScheme.error),
+                          Icon(
+                            Icons.warning_amber,
+                            size: 16,
+                            color: colorScheme.error,
+                          ),
                           const SizedBox(width: 6),
                           Text(
                             isSystemApk ? '将拉起系统卸载界面：' : '卸载将：',
@@ -1066,38 +1163,45 @@ class _InstalledPluginCard extends StatelessWidget {
                         Text(
                           '系统卸载由系统弹窗完成，取消不影响当前状态。',
                           style: TextStyle(
-                              fontSize: 12,
-                              color: colorScheme.onSurfaceVariant,
-                              height: 1.4),
+                            fontSize: 12,
+                            color: colorScheme.onSurfaceVariant,
+                            height: 1.4,
+                          ),
                         )
                       else ...[
                         if (activeServices.isNotEmpty) ...[
                           Text(
                             '1. 停止以下正在运行的服务：',
                             style: TextStyle(
-                                fontSize: 12,
-                                color: colorScheme.onSurfaceVariant),
+                              fontSize: 12,
+                              color: colorScheme.onSurfaceVariant,
+                            ),
                           ),
                           const SizedBox(height: 2),
-                          ...activeServices.map((s) => Padding(
-                                padding:
-                                    const EdgeInsets.only(left: 20, top: 2),
-                                child: Text('· ${s.name}',
-                                    style: const TextStyle(fontSize: 12)),
-                              )),
+                          ...activeServices.map(
+                            (s) => Padding(
+                              padding: const EdgeInsets.only(left: 20, top: 2),
+                              child: Text(
+                                '· ${s.name}',
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                            ),
+                          ),
                           const SizedBox(height: 6),
                           Text(
                             '2. 删除插件文件夹：',
                             style: TextStyle(
-                                fontSize: 12,
-                                color: colorScheme.onSurfaceVariant),
+                              fontSize: 12,
+                              color: colorScheme.onSurfaceVariant,
+                            ),
                           ),
                         ] else
                           Text(
                             '删除插件文件夹：',
                             style: TextStyle(
-                                fontSize: 12,
-                                color: colorScheme.onSurfaceVariant),
+                              fontSize: 12,
+                              color: colorScheme.onSurfaceVariant,
+                            ),
                           ),
                         const SizedBox(height: 2),
                         SelectableText(
@@ -1117,8 +1221,9 @@ class _InstalledPluginCard extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: colorScheme.surfaceContainerHighest
-                          .withValues(alpha: 0.3),
+                      color: colorScheme.surfaceContainerHighest.withValues(
+                        alpha: 0.3,
+                      ),
                       borderRadius: Style.mdRadius,
                     ),
                     child: Column(
@@ -1133,11 +1238,15 @@ class _InstalledPluginCard extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(height: 4),
-                        ...allServices.map((s) => Padding(
-                              padding: const EdgeInsets.only(left: 6, top: 2),
-                              child: Text('· ${s.name}',
-                                  style: const TextStyle(fontSize: 12)),
-                            )),
+                        ...allServices.map(
+                          (s) => Padding(
+                            padding: const EdgeInsets.only(left: 6, top: 2),
+                            child: Text(
+                              '· ${s.name}',
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                          ),
+                        ),
                         const SizedBox(height: 6),
                         Text(
                           '如需恢复，请重新从市场安装此插件。',

@@ -51,14 +51,16 @@ class _MarketTabState extends State<MarketTab> {
           padding: const EdgeInsets.fromLTRB(12, 8, 4, 4),
           child: Row(
             children: [
-              Obx(() => Text(
-                    '${_controller.marketEntries.length} 个插件'
-                    ' · ${_controller.updatableCount} 个可更新',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: colorScheme.outline,
-                    ),
-                  )),
+              Obx(
+                () => Text(
+                  '${_controller.marketEntries.length} 个插件'
+                  ' · ${_controller.updatableCount} 个可更新',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: colorScheme.outline,
+                  ),
+                ),
+              ),
               const Spacer(),
               IconButton(
                 tooltip: '搜索',
@@ -94,7 +96,9 @@ class _MarketTabState extends State<MarketTab> {
                   borderRadius: BorderRadius.circular(10),
                 ),
                 contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 12, vertical: 10),
+                  horizontal: 12,
+                  vertical: 10,
+                ),
               ),
               onChanged: (v) => _controller.marketSearch.value = v,
             ),
@@ -148,22 +152,19 @@ class _MarketTabState extends State<MarketTab> {
             const SizedBox(width: 12),
             _buildFilterChip(
               label: '全类别',
-              selected:
-                  _controller.marketCategory.value == MarketCategory.all,
+              selected: _controller.marketCategory.value == MarketCategory.all,
               onTap: () =>
                   _controller.marketCategory.value = MarketCategory.all,
             ),
             _buildFilterChip(
               label: '环境',
-              selected:
-                  _controller.marketCategory.value == MarketCategory.env,
+              selected: _controller.marketCategory.value == MarketCategory.env,
               onTap: () =>
                   _controller.marketCategory.value = MarketCategory.env,
             ),
             _buildFilterChip(
               label: '应用',
-              selected:
-                  _controller.marketCategory.value == MarketCategory.app,
+              selected: _controller.marketCategory.value == MarketCategory.app,
               onTap: () =>
                   _controller.marketCategory.value = MarketCategory.app,
             ),
@@ -237,14 +238,7 @@ class _MarketTabState extends State<MarketTab> {
 
       final list = _controller.filteredEntries;
       if (list.isEmpty) {
-        return Center(
-          child: Text(
-            _controller.marketSearch.value.isNotEmpty
-                ? '没有匹配的插件'
-                : '没有符合条件的插件',
-            style: TextStyle(color: colorScheme.outline),
-          ),
-        );
+        return _buildEmptyState(colorScheme);
       }
 
       // 用 installRevision 作为列表的整体 key 前缀，保证注册表变更时
@@ -274,6 +268,63 @@ class _MarketTabState extends State<MarketTab> {
     });
   }
 
+  Widget _buildEmptyState(ColorScheme colorScheme) {
+    final hasSearch = _controller.marketSearch.value.trim().isNotEmpty;
+    final hasFilter =
+        _controller.marketFilter.value != MarketFilter.all ||
+        _controller.marketCategory.value != MarketCategory.all;
+    final title = hasSearch
+        ? '没有匹配的插件'
+        : hasFilter
+        ? '没有符合筛选条件的插件'
+        : '暂无市场插件';
+    final subtitle = hasSearch || hasFilter
+        ? '可以调整搜索或筛选条件后重试'
+        : '市场源可能暂时不可用，或当前没有可用插件';
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.storefront_outlined,
+              size: 52,
+              color: colorScheme.outline,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                color: colorScheme.onSurface,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              subtitle,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 12,
+                color: colorScheme.outline,
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
+              onPressed: () => _controller.loadMarket(forceRefresh: true),
+              icon: const Icon(Icons.refresh, size: 18),
+              label: const Text('刷新市场'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   /// 安装/更新。成功/失败 Toast 由 [showInstallProgressDialog] 统一处理。
   ///
   /// 安装完成（无论成功与否）后统一走 controller.reloadInstalled()，
@@ -283,7 +334,9 @@ class _MarketTabState extends State<MarketTab> {
     // 1. 检查关联服务是否在运行（含 running + starting）
     final runningServices = <String, String>{};
     for (final svc in ServiceManager.instance.getAll()) {
-      if (svc.runtime != entry.id) continue;
+      final isServerService =
+          entry.type == 'server' && svc.id == 'svc-mkt-${entry.id}';
+      if (svc.runtime != entry.id && !isServerService) continue;
       final st = ServiceManager.instance.getStatus(svc.id);
       if (st == ServiceStatus.running || st == ServiceStatus.starting) {
         runningServices[svc.id] = svc.name;
@@ -327,8 +380,8 @@ class _MarketTabState extends State<MarketTab> {
       token: token,
       task: (onProgress) => InstallManager.instance.install(
         entry,
-        indexBaseUrl: _controller.getCurrentIndexBaseUrl(),
-        marketName: _controller.getCurrentMarketName(),
+        indexBaseUrl: entry.indexBaseUrl,
+        marketName: entry.marketName,
         cancelToken: token,
         onProgress: onProgress,
       ),
@@ -375,10 +428,11 @@ class _MarketCard extends StatelessWidget {
             onTap: disabled
                 ? null
                 : () => showPluginDetailSheet(
-                      context,
-                      entry: entry,
-                      onInstall: () => onInstall(entry),
-                    ),
+                    context,
+                    entry: entry,
+                    installState: state,
+                    onInstall: () => onInstall(entry),
+                  ),
             child: Container(
               decoration: BoxDecoration(
                 color: colorScheme.surface,
@@ -394,8 +448,7 @@ class _MarketCard extends StatelessWidget {
                   ),
                 ],
               ),
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -404,7 +457,7 @@ class _MarketCard extends StatelessWidget {
                       PluginIcon(
                         id: entry.id,
                         icon: entry.icon,
-                        indexBaseUrl: controller.getCurrentIndexBaseUrl(),
+                        indexBaseUrl: entry.indexBaseUrl,
                         size: 40,
                       ),
                       const SizedBox(width: 12),
@@ -527,9 +580,7 @@ class _MarketCard extends StatelessWidget {
         return TextButton(
           onPressed: () => onInstall(entry),
           child: Text(
-            entry.type == 'live' || entry.type == 'source'
-                ? '导入'
-                : '安装',
+            entry.type == 'live' || entry.type == 'source' ? '导入' : '安装',
           ),
         );
 

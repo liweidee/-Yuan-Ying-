@@ -114,7 +114,7 @@ const Map<String, BinaryServicePreset> _presets = {
       '-a', '0.0.0.0',
       '-p', '8080',
       '-r', '$_externalRoot', // 真实 sdcard 根目录
-      '-d', 'filebrowser.db',  // 相对路径，落 cwd（私有目录，避 FUSE mmap）
+      '-d', 'filebrowser.db', // 相对路径，落 cwd（私有目录，避 FUSE mmap）
       '--username', 'admin',
       // bcrypt 哈希，明文为 admin；含 $ 必须用 raw string
       '--password',
@@ -134,7 +134,8 @@ const Map<String, BinaryServicePreset> _presets = {
     healthPath: '/music/healthz',
     defaultArgs: [
       'web',
-      '--port', '37777',
+      '--port',
+      '37777',
       '--no-browser',
     ],
     defaultEnv: {
@@ -188,10 +189,10 @@ const Map<String, BinaryServicePreset> _presets = {
   'mediaProxy-win': BinaryServicePreset(
     pluginId: 'mediaProxy-win',
     displayName: '媒体代理服务（Windows）',
-    defaultPort: 5575,
+    defaultPort: 18080,
     healthType: 'http',
     healthPath: '/',
-    defaultArgs: ['-port', '5575'],
+    defaultArgs: ['-port', '18080'],
     defaultEnv: const {},
     portArg: '-port',
   ),
@@ -222,7 +223,9 @@ List<String> _getArgs(InstalledPlugin plugin, BinaryServicePreset preset) {
 }
 
 Map<String, String> _getEnv(
-    InstalledPlugin plugin, BinaryServicePreset preset) {
+  InstalledPlugin plugin,
+  BinaryServicePreset preset,
+) {
   final latest = InstallManager.instance.findInstalled(plugin.id);
   final extras = latest?.extras ?? plugin.extras;
   final v = extras['binaryServiceEnv'];
@@ -367,8 +370,7 @@ class _BinaryServiceConfigDialogState
     _argsCtrl = TextEditingController(text: args.join(' '));
     _presetKeys = preset.defaultEnv.keys.toSet();
     _envCtrls = {
-      for (final e in env.entries)
-        e.key: TextEditingController(text: e.value),
+      for (final e in env.entries) e.key: TextEditingController(text: e.value),
     };
 
     _portCtrl.addListener(_onPortChanged);
@@ -458,8 +460,11 @@ class _BinaryServiceConfigDialogState
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(Icons.folder_special,
-                          size: 14, color: colorScheme.primary),
+                      Icon(
+                        Icons.folder_special,
+                        size: 14,
+                        color: colorScheme.primary,
+                      ),
                       const SizedBox(width: 6),
                       Expanded(
                         child: Text(
@@ -483,24 +488,24 @@ class _BinaryServiceConfigDialogState
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color:
-                        colorScheme.tertiaryContainer.withValues(alpha: 0.25),
+                    color: colorScheme.tertiaryContainer.withValues(
+                      alpha: 0.25,
+                    ),
                     borderRadius: Style.mdRadius,
                   ),
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(Icons.sync,
-                          size: 14, color: colorScheme.tertiary),
+                      Icon(Icons.sync, size: 14, color: colorScheme.tertiary),
                       const SizedBox(width: 6),
                       Expanded(
                         child: Text(
                           [
-                            if (preset.syncPortEnvKey != null)
-                              '环境变量 ${preset.syncPortEnvKey}',
-                            if (preset.portArg != null)
-                              '启动参数 ${preset.portArg}',
-                          ].join(' 与 ') +
+                                if (preset.syncPortEnvKey != null)
+                                  '环境变量 ${preset.syncPortEnvKey}',
+                                if (preset.portArg != null)
+                                  '启动参数 ${preset.portArg}',
+                              ].join(' 与 ') +
                               ' 会随端口自动同步。',
                           style: TextStyle(
                             fontSize: 11,
@@ -591,14 +596,15 @@ class _BinaryServiceConfigDialogState
           Expanded(
             flex: 2,
             child: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
               decoration: BoxDecoration(
-                color: colorScheme.surfaceContainerHighest
-                    .withValues(alpha: isPreset ? 0.5 : 0.3),
+                color: colorScheme.surfaceContainerHighest.withValues(
+                  alpha: isPreset ? 0.5 : 0.3,
+                ),
                 borderRadius: BorderRadius.circular(4),
                 border: Border.all(
-                    color: colorScheme.outline.withValues(alpha: 0.3)),
+                  color: colorScheme.outline.withValues(alpha: 0.3),
+                ),
               ),
               child: Row(
                 children: [
@@ -617,8 +623,7 @@ class _BinaryServiceConfigDialogState
                     ),
                   ),
                   if (isSynced)
-                    Icon(Icons.sync,
-                        size: 12, color: colorScheme.tertiary),
+                    Icon(Icons.sync, size: 12, color: colorScheme.tertiary),
                 ],
               ),
             ),
@@ -635,11 +640,15 @@ class _BinaryServiceConfigDialogState
               decoration: InputDecoration(
                 isDense: true,
                 border: const OutlineInputBorder(),
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 10,
+                ),
                 helperText: isSynced ? '随端口自动同步' : null,
-                helperStyle:
-                    TextStyle(fontSize: 10, color: colorScheme.tertiary),
+                helperStyle: TextStyle(
+                  fontSize: 10,
+                  color: colorScheme.tertiary,
+                ),
               ),
               style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
             ),
@@ -648,13 +657,14 @@ class _BinaryServiceConfigDialogState
             tooltip: isSynced
                 ? '随端口自动同步，不可删除'
                 : isPreset
-                    ? '预设变量（可清空值但不可删除）'
-                    : '删除',
+                ? '预设变量（可清空值但不可删除）'
+                : '删除',
             icon: Icon(
               Icons.close,
               size: 18,
-              color: colorScheme.error
-                  .withValues(alpha: (isPreset || isSynced) ? 0.3 : 1),
+              color: colorScheme.error.withValues(
+                alpha: (isPreset || isSynced) ? 0.3 : 1,
+              ),
             ),
             onPressed: (isPreset || isSynced) ? null : () => _removeEnv(key),
           ),

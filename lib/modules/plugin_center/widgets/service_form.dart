@@ -21,6 +21,18 @@ Future<void> showServiceForm(
   ServiceConfig? copyFrom,
 }) async {
   assert(existing == null || copyFrom == null);
+  if (existing != null) {
+    final status = ServiceManager.instance.getStatus(existing.id);
+    final hasLiveProcess = ServiceManager.instance.getPid(existing.id) != null;
+    final isActive =
+        status == ServiceStatus.running ||
+        status == ServiceStatus.starting ||
+        (status == ServiceStatus.error && hasLiveProcess);
+    if (isActive) {
+      SmartDialog.showToast('请先停止服务，再修改配置');
+      return;
+    }
+  }
   await showDialog<void>(
     context: context,
     builder: (_) => _ServiceFormDialog(
@@ -99,7 +111,8 @@ String _runtimeLabel(String id) {
 }
 
 String? _exeNameFor(String runtime) {
-  if (runtime.startsWith('nodejs')) return Platform.isWindows ? 'node.exe' : 'node';
+  if (runtime.startsWith('nodejs'))
+    return Platform.isWindows ? 'node.exe' : 'node';
   if (runtime.startsWith('php')) return Platform.isWindows ? 'php.exe' : 'php';
   if (runtime.startsWith('python')) {
     return Platform.isWindows ? 'python.exe' : 'python3.12';
@@ -117,10 +130,10 @@ class _EnvEntry {
   final FocusNode valueFocus;
 
   _EnvEntry({String key = '', String value = ''})
-      : keyCtrl = TextEditingController(text: key),
-        valueCtrl = TextEditingController(text: value),
-        keyFocus = FocusNode(),
-        valueFocus = FocusNode();
+    : keyCtrl = TextEditingController(text: key),
+      valueCtrl = TextEditingController(text: value),
+      keyFocus = FocusNode(),
+      valueFocus = FocusNode();
 
   void dispose() {
     keyCtrl.dispose();
@@ -186,7 +199,8 @@ class _ServiceFormDialogState extends State<_ServiceFormDialog> {
     if (existing != null) {
       _nameCtrl = TextEditingController(text: existing.name);
       _portCtrl = TextEditingController(
-          text: existing.port != null ? '${existing.port}' : '');
+        text: existing.port != null ? '${existing.port}' : '',
+      );
       _argsCtrl = TextEditingController(text: existing.args.join(' '));
       _cwdCtrl = TextEditingController(text: existing.cwd);
       _exeCtrl = TextEditingController(text: existing.executable ?? '');
@@ -202,7 +216,8 @@ class _ServiceFormDialogState extends State<_ServiceFormDialog> {
     } else if (copyFrom != null) {
       _nameCtrl = TextEditingController(text: '${copyFrom.name} - 副本');
       _portCtrl = TextEditingController(
-          text: copyFrom.port != null ? '${copyFrom.port! + 1}' : '');
+        text: copyFrom.port != null ? '${copyFrom.port! + 1}' : '',
+      );
       _argsCtrl = TextEditingController(text: copyFrom.args.join(' '));
       _cwdCtrl = TextEditingController(text: '');
       _exeCtrl = TextEditingController(text: copyFrom.executable ?? '');
@@ -388,8 +403,10 @@ class _ServiceFormDialogState extends State<_ServiceFormDialog> {
     return out;
   }
 
-  Future<void> _applyRuntimeDefaults(String runtime,
-      {bool force = false}) async {
+  Future<void> _applyRuntimeDefaults(
+    String runtime, {
+    bool force = false,
+  }) async {
     if (runtime == _customRuntimeKey) {
       if (force) {
         setState(() => _healthType = 'process');
@@ -490,8 +507,9 @@ class _ServiceFormDialogState extends State<_ServiceFormDialog> {
     final sel = ctrl.selection;
     if (sel.isValid && sel.start >= 0 && sel.end <= text.length) {
       ctrl.text = text.replaceRange(sel.start, sel.end, placeholder);
-      ctrl.selection =
-          TextSelection.collapsed(offset: sel.start + placeholder.length);
+      ctrl.selection = TextSelection.collapsed(
+        offset: sel.start + placeholder.length,
+      );
     } else {
       ctrl.text = text + placeholder;
       ctrl.selection = TextSelection.collapsed(offset: ctrl.text.length);
@@ -520,8 +538,8 @@ class _ServiceFormDialogState extends State<_ServiceFormDialog> {
     final title = widget.existing != null
         ? '编辑服务'
         : widget.copyFrom != null
-            ? '复制服务'
-            : '添加服务';
+        ? '复制服务'
+        : '添加服务';
 
     return AlertDialog(
       shape: RoundedRectangleBorder(borderRadius: Style.mdRadius),
@@ -652,17 +670,20 @@ class _ServiceFormDialogState extends State<_ServiceFormDialog> {
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 title: const Text('自启动', style: TextStyle(fontSize: 14)),
-                subtitle: const Text('App 冷启动时自动拉起',
-                    style: TextStyle(fontSize: 12)),
+                subtitle: const Text(
+                  'App 冷启动时自动拉起',
+                  style: TextStyle(fontSize: 12),
+                ),
                 value: _autostart,
                 onChanged: (v) => setState(() => _autostart = v),
               ),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
-                title: const Text('常驻前台服务',
-                    style: TextStyle(fontSize: 14)),
-                subtitle: const Text('App 关闭时不杀，下次启动自动收养',
-                    style: TextStyle(fontSize: 12)),
+                title: const Text('常驻前台服务', style: TextStyle(fontSize: 14)),
+                subtitle: const Text(
+                  'App 关闭时不杀，下次启动自动收养',
+                  style: TextStyle(fontSize: 12),
+                ),
                 value: _keepForeground,
                 onChanged: (v) => setState(() => _keepForeground = v),
               ),
@@ -684,8 +705,7 @@ class _ServiceFormDialogState extends State<_ServiceFormDialog> {
                           controller: _exeCtrl,
                           focusNode: _exeFocus,
                           decoration: InputDecoration(
-                            labelText:
-                                _isCustomRuntime ? '可执行文件 *' : '可执行文件',
+                            labelText: _isCustomRuntime ? '可执行文件 *' : '可执行文件',
                             hintText: _isCustomRuntime
                                 ? '点击右侧浏览选择 .exe'
                                 : '自动从插件解析',
@@ -702,8 +722,7 @@ class _ServiceFormDialogState extends State<_ServiceFormDialog> {
                         icon: const Icon(Icons.folder_open),
                         onPressed: _pickExe,
                         style: IconButton.styleFrom(
-                          backgroundColor: colorScheme
-                              .surfaceContainerHighest
+                          backgroundColor: colorScheme.surfaceContainerHighest
                               .withValues(alpha: 0.5),
                         ),
                       ),
@@ -731,8 +750,7 @@ class _ServiceFormDialogState extends State<_ServiceFormDialog> {
                         icon: const Icon(Icons.folder_open),
                         onPressed: _pickCwd,
                         style: IconButton.styleFrom(
-                          backgroundColor: colorScheme
-                              .surfaceContainerHighest
+                          backgroundColor: colorScheme.surfaceContainerHighest
                               .withValues(alpha: 0.5),
                         ),
                       ),
@@ -763,8 +781,7 @@ class _ServiceFormDialogState extends State<_ServiceFormDialog> {
                           icon: const Icon(Icons.insert_drive_file_outlined),
                           onPressed: _pickPidFile,
                           style: IconButton.styleFrom(
-                            backgroundColor: colorScheme
-                                .surfaceContainerHighest
+                            backgroundColor: colorScheme.surfaceContainerHighest
                                 .withValues(alpha: 0.5),
                           ),
                         ),
@@ -779,7 +796,9 @@ class _ServiceFormDialogState extends State<_ServiceFormDialog> {
                       const Text(
                         '环境变量',
                         style: TextStyle(
-                            fontSize: 13, fontWeight: FontWeight.w600),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                       const Spacer(),
                       TextButton.icon(
@@ -806,13 +825,16 @@ class _ServiceFormDialogState extends State<_ServiceFormDialog> {
                                   hintText: 'KEY',
                                   border: OutlineInputBorder(),
                                   contentPadding: EdgeInsets.symmetric(
-                                      horizontal: 10, vertical: 10),
+                                    horizontal: 10,
+                                    vertical: 10,
+                                  ),
                                 ),
                               ),
                             ),
                             Padding(
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 6),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                              ),
                               child: Text(
                                 '=',
                                 style: TextStyle(
@@ -832,13 +854,18 @@ class _ServiceFormDialogState extends State<_ServiceFormDialog> {
                                   hintText: 'VALUE（支持占位符）',
                                   border: OutlineInputBorder(),
                                   contentPadding: EdgeInsets.symmetric(
-                                      horizontal: 10, vertical: 10),
+                                    horizontal: 10,
+                                    vertical: 10,
+                                  ),
                                 ),
                               ),
                             ),
                             IconButton(
-                              icon: Icon(Icons.close,
-                                  size: 18, color: colorScheme.error),
+                              icon: Icon(
+                                Icons.close,
+                                size: 18,
+                                color: colorScheme.error,
+                              ),
                               onPressed: () => _removeEnvEntry(idx),
                             ),
                           ],
@@ -852,7 +879,9 @@ class _ServiceFormDialogState extends State<_ServiceFormDialog> {
                     child: Text(
                       '快捷占位符（点击插入到当前焦点输入框）',
                       style: TextStyle(
-                          fontSize: 12, color: colorScheme.outline),
+                        fontSize: 12,
+                        color: colorScheme.outline,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 6),
@@ -868,11 +897,14 @@ class _ServiceFormDialogState extends State<_ServiceFormDialog> {
                           borderRadius: BorderRadius.circular(4),
                           child: Container(
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 4),
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
                             decoration: BoxDecoration(
                               border: Border.all(
-                                color: colorScheme.primary
-                                    .withValues(alpha: 0.5),
+                                color: colorScheme.primary.withValues(
+                                  alpha: 0.5,
+                                ),
                               ),
                               borderRadius: BorderRadius.circular(4),
                             ),
@@ -945,8 +977,11 @@ class _ServiceFormDialogState extends State<_ServiceFormDialog> {
               hintText: '请在上方填写端口',
               isDense: true,
               border: const OutlineInputBorder(),
-              suffixIcon:
-                  Icon(Icons.link, size: 18, color: colorScheme.outline),
+              suffixIcon: Icon(
+                Icons.link,
+                size: 18,
+                color: colorScheme.outline,
+              ),
             ),
           ),
         ],
@@ -1004,8 +1039,7 @@ class _ServiceFormDialogState extends State<_ServiceFormDialog> {
               label,
               style: TextStyle(
                 fontSize: 12,
-                color:
-                    selected ? colorScheme.onPrimary : colorScheme.primary,
+                color: selected ? colorScheme.onPrimary : colorScheme.primary,
                 fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
               ),
             ),
@@ -1081,6 +1115,10 @@ class _ServiceFormDialogState extends State<_ServiceFormDialog> {
       pidFile: _isCustomRuntime && _pidFileCtrl.text.trim().isNotEmpty
           ? _pidFileCtrl.text.trim()
           : null,
+      packageRoot: widget.existing?.packageRoot,
+      packagePluginId: widget.existing?.packagePluginId,
+      packageVersion: widget.existing?.packageVersion,
+      packageIdentitySource: widget.existing?.packageIdentitySource,
     );
 
     await ServiceManager.instance.addOrUpdate(config);

@@ -126,6 +126,7 @@ class NovelTtsService extends GetxService {
   NovelTtsEngine engine = NovelTtsEngine.system;
   List<NovelTtsVoice> _networkVoices = [];
   String? _networkVoiceId;
+  int _networkVoiceRevision = 0;
   Future<void> _engineSwitchQueue = Future.value();
   Future<void>? _activeStop;
   bool _systemPlaybackActive = false;
@@ -193,6 +194,7 @@ class NovelTtsService extends GetxService {
       List<NovelTtsVoice>.unmodifiable(_networkVoices);
 
   String? get networkVoiceId => _networkVoiceId;
+  int get networkVoiceRevision => _networkVoiceRevision;
 
   NovelTtsVoice? get currentNetworkVoice {
     for (final voice in _networkVoices) {
@@ -234,7 +236,9 @@ class NovelTtsService extends GetxService {
 
   Future<void> setNetworkVoice(String id) async {
     if (!_networkVoices.any((voice) => voice.id == id)) return;
+    if (_networkVoiceId == id) return;
     _networkVoiceId = id;
+    _networkVoiceRevision++;
     await StorageManager.setSetting(
       SettingBoxKey.ttsNetworkVoiceId,
       id,
@@ -277,6 +281,7 @@ class NovelTtsService extends GetxService {
     }
     if (added > 0) {
       _networkVoiceId ??= _networkVoices.first.id;
+      _networkVoiceRevision++;
       await _saveNetworkVoices();
     }
     return NovelTtsImportResult(added: added, skipped: skipped);
@@ -289,6 +294,7 @@ class NovelTtsService extends GetxService {
       throw const BusinessException('音色 JSON 格式不正确');
     }
     _networkVoices[index] = voice;
+    _networkVoiceRevision++;
     await _saveNetworkVoices();
   }
 
@@ -297,6 +303,7 @@ class NovelTtsService extends GetxService {
     if (_networkVoiceId == id) {
       _networkVoiceId = _networkVoices.isEmpty ? null : _networkVoices.first.id;
     }
+    _networkVoiceRevision++;
     await _saveNetworkVoices();
   }
 
@@ -620,29 +627,29 @@ class NovelTtsService extends GetxService {
     await _stopMusicForTts();
 
     if (engine == NovelTtsEngine.network) {
-      final voice = currentNetworkVoice;
-      if (voice == null) {
-        throw const BusinessException('请先选择网络音色');
+      Future<File> downloadChunk(String text) {
+        final voice = currentNetworkVoice;
+        if (voice == null) {
+          throw const BusinessException('请先选择网络音色');
+        }
+        if (!_isValidVoice(voice)) {
+          throw const BusinessException('音色 URL 缺少 {{speakText}} 占位符');
+        }
+        return _downloadTtsAudio(buildVoiceUrl(voice, text));
       }
-      if (!_isValidVoice(voice)) {
-        throw const BusinessException('音色 URL 缺少 {{speakText}} 占位符');
-      }
+
       File? currentFile;
       Future<File>? nextDownload;
       try {
         if (chunks.isNotEmpty) {
-          currentFile = await _downloadTtsAudio(
-            buildVoiceUrl(voice, chunks.first),
-          );
+          currentFile = await downloadChunk(chunks.first);
         }
         for (var i = 0; i < chunks.length; i++) {
           if (isCancelled()) break;
           final file = currentFile;
           if (file == null) break;
           if (i + 1 < chunks.length) {
-            nextDownload = _downloadTtsAudio(
-              buildVoiceUrl(voice, chunks[i + 1]),
-            );
+            nextDownload = downloadChunk(chunks[i + 1]);
           }
           try {
             final finished = await _playNetworkToCompletion(

@@ -13,6 +13,30 @@ import 'package:path_provider/path_provider.dart';
 ///   └── services/  服务
 abstract final class PluginPaths {
   static Directory? _rootCache;
+  static final RegExp _unsafePathChars = RegExp(r'[\x00-\x1F<>:"/\\|?*]');
+
+  static bool isSafePathSegment(String value) {
+    return value.isNotEmpty &&
+        value != '.' &&
+        value != '..' &&
+        p.basename(value) == value &&
+        !_unsafePathChars.hasMatch(value) &&
+        !value.endsWith(' ') &&
+        !value.endsWith('.') &&
+        value.trim() == value;
+  }
+
+  static void ensureSafePathSegment(String value, String label) {
+    if (!isSafePathSegment(value)) {
+      throw FormatException('$label 含非法字符：$value');
+    }
+  }
+
+  static bool isWithin(Directory root, String candidate) {
+    final rootPath = p.normalize(p.absolute(root.path));
+    final candidatePath = p.normalize(p.absolute(candidate));
+    return p.isWithin(rootPath, candidatePath) || rootPath == candidatePath;
+  }
 
   /// 数据根：应用私有 support 目录（Android 与桌面端一致，不再套子目录）
   static Future<Directory> dataRoot() async {
@@ -53,28 +77,39 @@ abstract final class PluginPaths {
   /// 已装插件目录：{support}/plugins/{id}/
   /// 注：目录不带版本号，升级覆盖；版本由 Hive 登记表维护
   static Future<Directory> pluginDir(String id, String version) async {
+    ensureSafePathSegment(id, '插件 ID');
     final root = await PluginPaths.root();
     final dir = Directory(p.join(root.path, id));
+    if (!isWithin(root, dir.path)) {
+      throw FormatException('插件目录越界：$id');
+    }
     if (!dir.existsSync()) await dir.create(recursive: true);
     return dir;
   }
 
   /// 服务数据目录：{support}/services/{serviceId}/
   static Future<Directory> serverDir(String serviceId) async {
+    ensureSafePathSegment(serviceId, '服务 ID');
     final root = await PluginPaths.servicesRoot();
     final dir = Directory(p.join(root.path, serviceId));
+    if (!isWithin(root, dir.path)) {
+      throw FormatException('服务目录越界：$serviceId');
+    }
     if (!dir.existsSync()) await dir.create(recursive: true);
     return dir;
   }
 
   /// 下载临时文件：{support}/plugins/cache/download/{id}-{version}.zip
   static Future<String> downloadFilePath(String id, String version) async {
+    ensureSafePathSegment(id, '插件 ID');
+    ensureSafePathSegment(version, '插件版本');
     final dir = await downloadDir();
     return p.join(dir.path, '$id-$version.zip');
   }
 
   /// 已装插件目录是否存在
   static Future<bool> isPluginInstalled(String id, String version) async {
+    if (!isSafePathSegment(id)) return false;
     final root = await PluginPaths.root();
     return Directory(p.join(root.path, id)).existsSync();
   }
@@ -89,9 +124,13 @@ abstract final class PluginPaths {
       return icon;
     }
     if (indexBaseUrl.isNotEmpty) {
-      final idx = indexBaseUrl.lastIndexOf('/');
-      if (idx > 0) {
-        return '${indexBaseUrl.substring(0, idx + 1)}$icon';
+      try {
+        return Uri.parse(indexBaseUrl).resolve(icon).toString();
+      } catch (_) {
+        final idx = indexBaseUrl.lastIndexOf('/');
+        if (idx > 0) {
+          return '${indexBaseUrl.substring(0, idx + 1)}$icon';
+        }
       }
     }
     return null;
@@ -119,6 +158,96 @@ abstract final class PluginPaths {
     } catch (e) {
       debugPrint('[PluginPaths] prepareAndroidExecutable failed: $e');
       return srcPath;
+    }
+  }
+
+  /// 将已准备好的 staging 目录替换到正式目录。
+  ///
+  /// 旧目录先改名为 backup，staging 成功就位后由调用方完成登记，
+  /// 再调用 [PluginDirectorySwap.commit]；登记失败时调用
+  /// [PluginDirectorySwap.rollback] 恢复旧目录。
+  static Future<PluginDirectorySwap> swapInDirectory({
+    required Directory staging,
+    required Directory finalDir,
+    required Directory allowedRoot,
+    required String tag,
+  }) async {
+    if (!isWithin(allowedRoot, finalDir.path) ||
+        p.equals(finalDir.path, allowedRoot.path)) {
+      throw FormatException('替换目录越界：${finalDir.path}');
+    }
+    if (!isWithin(allowedRoot, staging.path) ||
+        p.equals(staging.path, allowedRoot.path)) {
+      throw FormatException('staging 目录越界：${staging.path}');
+    }
+
+    Directory? backup;
+    if (finalDir.existsSync()) {
+      backup = Directory(
+        p.join(
+          allowedRoot.path,
+          '.backup-$tag-${DateTime.now().microsecondsSinceEpoch}',
+        ),
+      );
+      await finalDir.rename(backup.path);
+    }
+
+    try {
+      await staging.rename(finalDir.path);
+    } catch (e) {
+      if (backup != null && backup.existsSync()) {
+        try {
+          await backup.rename(finalDir.path);
+        } catch (restoreError) {
+          debugPrint('[PluginPaths] restore backup failed: $restoreError');
+        }
+      }
+      rethrow;
+    }
+
+    return PluginDirectorySwap._(
+      finalDir: finalDir,
+      backup: backup,
+    );
+  }
+}
+
+class PluginDirectorySwap {
+  final Directory finalDir;
+  final Directory? backup;
+  bool _closed = false;
+
+  PluginDirectorySwap._({
+    required this.finalDir,
+    required this.backup,
+  });
+
+  Future<void> commit() async {
+    if (_closed) return;
+    _closed = true;
+    final old = backup;
+    if (old != null && old.existsSync()) {
+      try {
+        await old.delete(recursive: true);
+      } catch (e) {
+        debugPrint('[PluginPaths] remove backup failed: $e');
+      }
+    }
+  }
+
+  Future<void> rollback() async {
+    if (_closed) return;
+    _closed = true;
+    final old = backup;
+    try {
+      if (finalDir.existsSync()) {
+        await finalDir.delete(recursive: true);
+      }
+      if (old != null && old.existsSync()) {
+        await old.rename(finalDir.path);
+      }
+    } catch (e) {
+      debugPrint('[PluginPaths] rollback failed: $e');
     }
   }
 }

@@ -40,12 +40,12 @@ class MarketManager {
   }
 
   MarketSource _defaultOfficialSource() => MarketSource(
-        id: _officialMarketId,
-        name: _officialMarketName,
-        url: _officialMarketUrl,
-        enabled: true,
-        proxy: 'https://gh-proxy.com/',
-      );
+    id: _officialMarketId,
+    name: _officialMarketName,
+    url: _officialMarketUrl,
+    enabled: true,
+    proxy: 'https://gh-proxy.com/',
+  );
 
   Future<void> saveSources(List<MarketSource> sources) async {
     await _box.put(
@@ -99,6 +99,7 @@ class MarketManager {
       }
       final entries = plugins
           .map((e) => MarketEntry.fromJson(Map<String, dynamic>.from(e as Map)))
+          .map((e) => _attachSource(e, source))
           .toList();
 
       // 3. 写缓存
@@ -114,7 +115,10 @@ class MarketManager {
   }
 
   /// 拉取所有启用的市场源，按 id 归并（同名按 updatedAt 取新，这里简化为后写覆盖）
-  Future<List<MarketEntry>> fetchAll({bool forceRefresh = false}) async {
+  Future<List<MarketEntry>> fetchAll({
+    bool forceRefresh = false,
+    void Function(MarketSource source, Object error)? onSourceError,
+  }) async {
     final sources = getSources().where((s) => s.enabled).toList();
     final Map<String, MarketEntry> merged = {};
     for (final source in sources) {
@@ -125,6 +129,7 @@ class MarketManager {
         }
       } catch (e) {
         debugPrint('[MarketManager] source ${source.id} failed: $e');
+        onSourceError?.call(source, e);
       }
     }
     return merged.values.toList();
@@ -153,10 +158,24 @@ class MarketManager {
     if (url.startsWith('http://') || url.startsWith('https://')) {
       return url;
     }
-    // 相对本索引路径：取 index 的目录部分拼接
-    final idx = indexBaseUrl.lastIndexOf('/');
-    if (idx < 0) return url;
-    return '${indexBaseUrl.substring(0, idx + 1)}$url';
+    // 相对本索引路径：使用 URI 语义处理 ../、根路径和 query/fragment，
+    // 避免不同市场之间错误复用另一个市场的前缀。
+    try {
+      return Uri.parse(indexBaseUrl).resolve(url).toString();
+    } catch (_) {
+      final idx = indexBaseUrl.lastIndexOf('/');
+      if (idx < 0) return url;
+      return '${indexBaseUrl.substring(0, idx + 1)}$url';
+    }
+  }
+
+  MarketEntry _attachSource(MarketEntry entry, MarketSource source) {
+    return entry.copyWith(
+      marketId: source.id,
+      marketName: source.name,
+      indexBaseUrl: source.url,
+      proxy: source.proxy,
+    );
   }
 
   // ============================================================
@@ -164,22 +183,29 @@ class MarketManager {
   // ============================================================
 
   List<MarketEntry>? _readCache(MarketSource source, {bool ignoreTtl = false}) {
-    final raw = _box.get('${PluginStorageKeys.marketIndexCachePrefix}${source.id}');
+    final raw = _box.get(
+      '${PluginStorageKeys.marketIndexCachePrefix}${source.id}',
+    );
     if (raw is! Map) return null;
     final cachedAtMs = (raw['cachedAtMs'] is num)
         ? (raw['cachedAtMs'] as num).toInt()
         : 0;
-    if (!ignoreTtl && DateTime.now().millisecondsSinceEpoch - cachedAtMs > _cacheTtlMs) {
+    if (!ignoreTtl &&
+        DateTime.now().millisecondsSinceEpoch - cachedAtMs > _cacheTtlMs) {
       return null;
     }
     final list = raw['entries'];
     if (list is! List) return null;
     return list
         .map((e) => MarketEntry.fromJson(Map<String, dynamic>.from(e as Map)))
+        .map((e) => _attachSource(e, source))
         .toList();
   }
 
-  Future<void> _writeCache(MarketSource source, List<MarketEntry> entries) async {
+  Future<void> _writeCache(
+    MarketSource source,
+    List<MarketEntry> entries,
+  ) async {
     // 缓存时保存 url，供后续 resolveUrl 使用
     await _box.put(
       '${PluginStorageKeys.marketIndexCachePrefix}${source.id}',
@@ -192,28 +218,34 @@ class MarketManager {
   }
 
   Map<String, dynamic> _entryToJson(MarketEntry e) => {
-        'id': e.id,
-        'name': e.name,
-        'version': e.version,
-        'url': e.url,
-        'size': e.sizeBytes,
-        'type': e.type,
-        'category': e.category,
-        'icon': e.icon,
-        'author': e.author,
-        'desc': e.desc,
-        'tags': e.tags,
-        'changelog': e.changelog,
-        'md5': e.md5,
-        'minApp': e.minApp,
-        'pkg': e.pkg,
-        'platforms': e.platforms,
-        'abis': e.abis,
-      };
+    'id': e.id,
+    'name': e.name,
+    'version': e.version,
+    'url': e.url,
+    'size': e.sizeBytes,
+    'marketId': e.marketId,
+    'marketName': e.marketName,
+    'indexBaseUrl': e.indexBaseUrl,
+    'proxy': e.proxy,
+    'type': e.type,
+    'category': e.category,
+    'icon': e.icon,
+    'author': e.author,
+    'desc': e.desc,
+    'tags': e.tags,
+    'changelog': e.changelog,
+    'md5': e.md5,
+    'minApp': e.minApp,
+    'pkg': e.pkg,
+    'platforms': e.platforms,
+    'abis': e.abis,
+  };
 
   /// 读取缓存里的 indexBaseUrl（供下载时拼相对 url）
   String getCachedIndexBaseUrl(String sourceId) {
-    final raw = _box.get('${PluginStorageKeys.marketIndexCachePrefix}$sourceId');
+    final raw = _box.get(
+      '${PluginStorageKeys.marketIndexCachePrefix}$sourceId',
+    );
     if (raw is Map) {
       return raw['indexBaseUrl']?.toString() ?? '';
     }

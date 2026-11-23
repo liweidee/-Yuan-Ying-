@@ -14,6 +14,15 @@ class MarketEntry {
   final String url;
   final int sizeBytes;
 
+  /// 该条目来自哪个市场。归并多个市场后仍保留来源信息，
+  /// 用于解析相对资源地址和记录安装来源。
+  final String marketId;
+  final String marketName;
+  final String indexBaseUrl;
+
+  /// 该市场配置的 GitHub 加速代理；空串表示直连。
+  final String proxy;
+
   /// import / apk / live / server / source
   final String type;
 
@@ -43,6 +52,10 @@ class MarketEntry {
     required this.version,
     required this.url,
     required this.sizeBytes,
+    this.marketId = '',
+    this.marketName = '',
+    this.indexBaseUrl = '',
+    this.proxy = '',
     required this.type,
     this.category = 'env',
     this.icon,
@@ -68,6 +81,10 @@ class MarketEntry {
       version: json['version']?.toString() ?? '',
       url: json['url']?.toString() ?? '',
       sizeBytes: (json['size'] is num) ? (json['size'] as num).toInt() : 0,
+      marketId: json['marketId']?.toString() ?? '',
+      marketName: json['marketName']?.toString() ?? '',
+      indexBaseUrl: json['indexBaseUrl']?.toString() ?? '',
+      proxy: json['proxy']?.toString() ?? '',
       type: json['type']?.toString() ?? 'import',
       category: json['category']?.toString() ?? 'env',
       icon: json['icon']?.toString(),
@@ -86,6 +103,37 @@ class MarketEntry {
       abis: rawAbis is List
           ? rawAbis.map((e) => e.toString()).toList()
           : const ['arm64-v8a'],
+    );
+  }
+
+  MarketEntry copyWith({
+    String? marketId,
+    String? marketName,
+    String? indexBaseUrl,
+    String? proxy,
+  }) {
+    return MarketEntry(
+      id: id,
+      name: name,
+      version: version,
+      url: url,
+      sizeBytes: sizeBytes,
+      marketId: marketId ?? this.marketId,
+      marketName: marketName ?? this.marketName,
+      indexBaseUrl: indexBaseUrl ?? this.indexBaseUrl,
+      proxy: proxy ?? this.proxy,
+      type: type,
+      category: category,
+      icon: icon,
+      author: author,
+      desc: desc,
+      tags: tags,
+      changelog: changelog,
+      md5: md5,
+      minApp: minApp,
+      pkg: pkg,
+      platforms: platforms,
+      abis: abis,
     );
   }
 
@@ -110,12 +158,12 @@ class MarketEntry {
     final abiName = currentAbi == Abi.androidArm64
         ? 'arm64-v8a'
         : currentAbi == Abi.androidArm
-            ? 'armeabi-v7a'
-            : currentAbi == Abi.androidX64
-                ? 'x86_64'
-                : currentAbi == Abi.androidIA32
-                    ? 'x86'
-                    : '';
+        ? 'armeabi-v7a'
+        : currentAbi == Abi.androidX64
+        ? 'x86_64'
+        : currentAbi == Abi.androidIA32
+        ? 'x86'
+        : '';
     if (abiName.isEmpty) return true;
     // 缺省 abis 在 fromJson 中已归一为 arm64-v8a；显式空数组表示不限 ABI。
     // 例如 format:2 的 jar 包会声明 abis=[]，但 artifacts 内携带全部 ABI。
