@@ -26,6 +26,10 @@ internal class JarSpiderRuntime(context: Context) {
     private var bridge: IJarSpiderBridge? = null
     private var bridgeKey: String? = null
 
+    init {
+        logDependencyBaseline()
+    }
+
     @Synchronized
     fun handleRequest(requestJson: String): String {
         return try {
@@ -147,9 +151,7 @@ internal class JarSpiderRuntime(context: Context) {
             dexFiles.joinToString(File.pathSeparator) { it.absolutePath },
             optDir.absolutePath,
             File(pluginDir, "libs").absolutePath,
-            IsolatedDependenciesClassLoader(
-                JarSpiderRuntime::class.java.classLoader,
-            ),
+            JarSpiderRuntime::class.java.classLoader,
         )
         val instance = loader.loadClass(BRIDGE_CLASS)
             .getDeclaredConstructor()
@@ -186,21 +188,20 @@ internal class JarSpiderRuntime(context: Context) {
         bridgeKey = null
     }
 
-    /**
-     * DsPlayer's JAR bridge bundles its own Kotlin, OkHttp and Okio versions.
-     * Hide host copies so all types come from one consistent class loader.
-     */
-    private class IsolatedDependenciesClassLoader(base: ClassLoader) :
-        ClassLoader(base) {
-        override fun loadClass(name: String, resolve: Boolean): Class<*> {
-            if (name.startsWith("okhttp3.") ||
-                name.startsWith("okio.") ||
-                name.startsWith("kotlin.")
-            ) {
-                throw ClassNotFoundException(name)
-            }
-            return super.loadClass(name, resolve)
+    private fun logDependencyBaseline() {
+        val loader = JarSpiderRuntime::class.java.classLoader
+        val status = listOf(
+            "okhttp3.Request\$Builder",
+            "okio.Buffer",
+            "com.google.gson.Gson",
+            "kotlin.Result",
+        ).joinToString { className ->
+            val available = runCatching {
+                Class.forName(className, false, loader)
+            }.isSuccess
+            "$className=${if (available) "ok" else "missing"}"
         }
+        Log.i(TAG, "JAR dependency baseline: $status")
     }
 }
 
