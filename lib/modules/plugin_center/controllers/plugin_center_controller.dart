@@ -234,10 +234,10 @@ class PluginCenterController extends GetxController {
     await InstallManager.instance.setEnabled(id, enabled);
 
     if (!enabled) {
-      // ===== 禁用 nodejs-win 时主动停 Node 进程 =====
+      // ===== 禁用 Node.js 运行时插件时主动停 Node 进程 =====
       // 猫影视的 Node 进程由 NodeJSService 自己 spawn，不在 ServiceManager
-      // 管理下，必须单独处理。仅桌面端生效。
-      if (id == 'nodejs-win') {
+      // 管理下，必须单独处理（Windows 与 Android 插件模式均适用）。
+      if (id == 'nodejs-win' || id == 'nodejs') {
         try {
           await NodeJSService.instance.stopForPluginDisabled();
         } catch (e) {

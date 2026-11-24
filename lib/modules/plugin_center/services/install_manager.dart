@@ -300,7 +300,7 @@ class InstallManager {
         debugPrint('[InstallManager] shutdown py worker failed: $e');
       }
     }
-    if (runtimeId == 'nodejs-win') {
+    if (runtimeId == 'nodejs-win' || runtimeId == 'nodejs') {
       try {
         await NodeJSService.instance.stopForPluginDisabled();
       } catch (e) {
@@ -1910,9 +1910,9 @@ class InstallManager {
       }
     }
 
-    // nodejs-win 卸载：先杀掉 NodeJSService 的猫影视 Node 进程
-    // 否则 node.exe 占用插件目录，_safeDeleteDir 会静默失败留下残留
-    if (plugin.id == 'nodejs-win') {
+    // Node.js 运行时卸载：先杀掉 NodeJSService 的猫影视外部进程。
+    // Windows 下可释放 node.exe 文件占用；Android 同时解除前台保活。
+    if (plugin.id == 'nodejs-win' || plugin.id == 'nodejs') {
       try {
         await NodeJSService.instance.stopForPluginDisabled();
         await Future.delayed(const Duration(milliseconds: 500));

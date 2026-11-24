@@ -6,17 +6,23 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:get/get.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:flutter/foundation.dart';
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:yuanying/utils/platform_utils.dart';
 import 'package:yuanying/services/catvod_log_service.dart';
 import 'package:path/path.dart' as p;
 import 'package:yuanying/modules/plugin_center/services/install_manager.dart';
+import 'package:yuanying/modules/plugin_center/services/plugin_paths.dart';
+import 'package:yuanying/modules/sandbox/services/service_host_bridge.dart';
 import 'package:yuanying/utils/business_exception.dart';
 
 class NodeJSService extends GetxService with WidgetsBindingObserver {
   static const MethodChannel _channel = MethodChannel('com.tvbox/nodejs');
-  static const EventChannel _eventChannel = EventChannel('com.tvbox/nodejs/events');
+  static const EventChannel _eventChannel = EventChannel(
+    'com.tvbox/nodejs/events',
+  );
+  static const MethodChannel _assetChannel = MethodChannel(
+    'com.example.yuanying/node_assets',
+  );
   static final NodeJSService _instance = NodeJSService._internal();
   factory NodeJSService() => _instance;
   NodeJSService._internal();
@@ -26,7 +32,6 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
   bool _isNodeReady = false;
   int _managementPort = 0;
   int _spiderPort = 0;
-  int _nativeServerPort = 0;
   String _currentSpiderKey = '';
   int _currentSpiderType = 3;
   String _spiderApiBase = '';
@@ -42,43 +47,60 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
   bool get hasSpiderServer => _spiderPort > 0;
   String? _lastLoadedUrl;
   String _currentConfigType = 'tvbox'; // 当前配置类型
-  void updateConfigType(String type) {  // 供外部更新配置类型
+  void updateConfigType(String type) {
+    // 供外部更新配置类型
     _currentConfigType = type;
   }
+
   String? get lastLoadedUrl => _lastLoadedUrl;
   bool _isRestarting = false;
   late CatVodLogService _logService;
 
-  // ============ 桌面端专属字段（移动端不会访问） ============
+  // ============ 插件 Node 外部进程字段 ============
   Process? _nodeProcess;
   HttpServer? _localNotifyServer;
+  String? _androidProjectDir;
 
-  /// 可执行文件所在目录（仅桌面端有意义）
+  /// Windows 和 Android 使用插件中心的 Node CLI；iOS 仍走原生桥接。
+  bool get _usesExternalNodeRuntime => Platform.isWindows || Platform.isAndroid;
+
+  String get _nodeRuntimePluginId =>
+      Platform.isWindows ? 'nodejs-win' : 'nodejs';
+
+  /// 可执行文件所在目录（仅 Windows 使用）
   String get _exeDir => File(Platform.resolvedExecutable).parent.path;
 
   /// 入口脚本路径，优先 main.js，兜底 index.js（与 iOS NodeJSManager.m 一致）
   String get _scriptPath {
+    if (Platform.isAndroid) {
+      final projectDir = _androidProjectDir;
+      return projectDir == null ? '' : p.join(projectDir, 'dist', 'main.js');
+    }
     final mainJs = '$_exeDir/nodejs/project/dist/main.js';
     if (File(mainJs).existsSync()) return mainJs;
     return '$_exeDir/nodejs/project/dist/index.js';
   }
 
-  /// 资源目录（内嵌在应用安装目录，不随插件变动）
-  String get _resourceProjectDir => '$_exeDir/nodejs/project';
+  /// 资源目录。Windows 使用安装目录，Android 使用运行时物化目录。
+  String get _resourceProjectDir {
+    if (Platform.isAndroid) return _androidProjectDir ?? '';
+    return '$_exeDir/nodejs/project';
+  }
 
-  /// 检查 nodejs-win 插件是否可用
+  /// 检查当前平台 Node.js 运行时插件是否可用。
   ///
   /// 返回 null 表示可用；否则返回业务错误文案（由 SourceManager 展示到首页）。
   String? _checkNodejsWinPlugin() {
-    if (!Platform.isWindows) return null;
+    if (!_usesExternalNodeRuntime) return null;
 
-    final reg = InstallManager.instance.findInstalled('nodejs-win');
+    final pluginId = _nodeRuntimePluginId;
+    final reg = InstallManager.instance.findInstalled(pluginId);
     if (reg == null) {
-      return '未安装 Node.js 运行时（nodejs-win），无法加载猫影视配置。'
+      return '未安装 Node.js 运行时（$pluginId），无法加载猫影视配置。'
           '请前往「插件中心 → 市场」安装后重试。';
     }
     if (!reg.enabled) {
-      return 'Node.js 运行时（nodejs-win）已关闭，无法加载猫影视配置。'
+      return 'Node.js 运行时（$pluginId）已关闭，无法加载猫影视配置。'
           '请前往「插件中心 → 插件」重新开启后重试。';
     }
     return null;
@@ -113,13 +135,62 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
     return null;
   }
 
+  /// 从 Android nodejs 插件解析可执行文件，并准备为可直接启动的路径。
+  Future<String?> _resolveAndroidNodeExecutable() async {
+    final reg = InstallManager.instance.findInstalled('nodejs');
+    if (reg == null || !reg.enabled) return null;
+
+    final root = reg.installPath;
+    final pluginJson = File(p.join(root, 'plugin.json'));
+    if (pluginJson.existsSync()) {
+      try {
+        final json = jsonDecode(await pluginJson.readAsString());
+        if (json is Map) {
+          final binaries = json['binaries'];
+          if (binaries is Map) {
+            final rel = binaries['android']?.toString();
+            if (rel != null && rel.isNotEmpty) {
+              final candidates = <String>[
+                p.join(root, rel),
+                p.join(root, 'bin', rel),
+                p.join(root, p.basename(rel)),
+                p.join(root, 'bin', p.basename(rel)),
+              ];
+              for (final candidate in candidates) {
+                if (File(candidate).existsSync()) {
+                  return PluginPaths.prepareAndroidExecutable(candidate);
+                }
+              }
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
+    try {
+      final entities = Directory(root).listSync(recursive: true);
+      for (final entity in entities) {
+        if (entity is File && p.basename(entity.path).toLowerCase() == 'node') {
+          return PluginPaths.prepareAndroidExecutable(entity.path);
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  Future<String?> _resolveNodeExecutable() async {
+    if (Platform.isWindows) return _resolveNodeExePath();
+    if (Platform.isAndroid) return _resolveAndroidNodeExecutable();
+    return null;
+  }
+
   /// 检查 nodejs-win 插件是否可用（供外部主动检查）
   ///
   /// 与 `_checkNodejsWinPlugin` 语义相同，但此方法为公开，
   /// 允许调用方在 Node 进程已启动的情况下依然能感知插件被禁用。
-  /// 非 Windows 平台返回 null（Android 走 APK 插件，由其他逻辑处理）。
+  /// 非插件 Node 平台返回 null。
   String? checkPluginUsable() {
-    if (!PlatformUtils.isDesktop) return null;
+    if (!_usesExternalNodeRuntime) return null;
     return _checkNodejsWinPlugin();
   }
 
@@ -133,8 +204,13 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
   /// 保留 `_lastLoadedUrl` 和 `_localNotifyServer`：
   ///   - 重新启用插件后可复用已下载的源、复用同一个通知服务器端口
   Future<void> stopForPluginDisabled() async {
-    if (!PlatformUtils.isDesktop) return;
-    if (_nodeProcess == null && !_isInitialized) return; // 已经是停止状态
+    if (!_usesExternalNodeRuntime) return;
+    if (_nodeProcess == null && !_isInitialized) {
+      if (Platform.isAndroid) {
+        await ServiceHostBridge.instance.syncCatVod(active: false);
+      }
+      return;
+    }
 
     _isShuttingDown = true; // 阻止 exitCode 回调触发自动重启
     try {
@@ -164,6 +240,9 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
       _spiderApiBase = '';
       _restartCount = 0; // 重置计数，允许重新启用后再启动
       _isShuttingDown = false; // 恢复，下次启动用
+      if (Platform.isAndroid) {
+        await ServiceHostBridge.instance.syncCatVod(active: false);
+      }
       _log('Node 进程已停止（插件被禁用）');
     }
   }
@@ -181,9 +260,9 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
   /// 调用方需要重新 `setCurrentSpider + initSpider`）；
   /// 返回 `false` 表示 Node 本来就好，无需任何操作。
   ///
-  /// 非桌面端直接返回 `false`（Android/iOS 走原生 channel，不受影响）。
+  /// iOS 直接返回 `false`；Android/Windows 使用插件外部进程。
   Future<bool> ensureReady() async {
-    if (!PlatformUtils.isDesktop) return false;
+    if (!_usesExternalNodeRuntime) return false;
 
     // 1) 插件可用性
     final pluginError = _checkNodejsWinPlugin();
@@ -224,9 +303,9 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
   }
 
   /// 桌面端保活/关闭状态（移动端不会访问）
-  bool _isShuttingDown = false;                    // 应用是否正在关闭（用户主动退出）
-  int _restartCount = 0;                           // 本会话已重启次数（只加不减，上限 1）
-  static const int _maxRestartPerSession = 1;      // 本会话最多重启 1 次，结构上杜绝循环
+  bool _isShuttingDown = false; // 应用是否正在关闭（用户主动退出）
+  int _restartCount = 0; // 本会话已重启次数（只加不减，上限 1）
+  static const int _maxRestartPerSession = 1; // 本会话最多重启 1 次，结构上杜绝循环
   // ============ 桌面端字段结束 ============
 
   String _spiderBaseUrl() => 'http://127.0.0.1:$_spiderPort';
@@ -288,8 +367,8 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
     super.onInit();
     _logService = Get.find<CatVodLogService>();
 
-    // 桌面端不支持猫影视，不需要监听 EventChannel
-    if (!PlatformUtils.isDesktop) {
+    // 只有 iOS 仍使用原生 EventChannel。
+    if (!_usesExternalNodeRuntime) {
       _setupEventListener();
     }
 
@@ -300,8 +379,8 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
   // 自治保活：App 回到前台时检查
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // 桌面端无需保活：Node 子进程退出由 exitCode 回调感知
-    if (PlatformUtils.isDesktop) return;
+    // 插件 Node 子进程退出由 exitCode 回调感知，回前台不再重复探活。
+    if (_usesExternalNodeRuntime) return;
     if (state == AppLifecycleState.resumed) {
       _onAppResumed();
     }
@@ -334,7 +413,7 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
     // 场景：App 运行中用户关闭了 nodejs-win 插件，此时 _isInitialized
     //      仍为 true、_managementPort 仍 > 0，但插件已不可用。
     //      不检查的话，所有调用方都会静默复用已死的状态。
-    if (PlatformUtils.isDesktop && _isInitialized) {
+    if (_usesExternalNodeRuntime && _isInitialized) {
       final pluginError = _checkNodejsWinPlugin();
       if (pluginError != null) {
         _log('❌ initialize: $pluginError');
@@ -345,22 +424,28 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
     if (_isInitialized) return;
     // 如果端口还在，说明 Node.js 还在运行（stop 只清了 Dart 状态）
     // 直接恢复 _isInitialized，不调用 startNodeJS，避免二次 node_start 闪退
-    // 桌面端额外确认进程句柄未丢失
+    // 外部 Node 额外确认进程句柄未丢失。
     if (_managementPort > 0 &&
-        (!PlatformUtils.isDesktop || _nodeProcess != null)) {
+        (!_usesExternalNodeRuntime || _nodeProcess != null)) {
       _isInitialized = true;
-      if (!PlatformUtils.isDesktop) {
+      if (!_usesExternalNodeRuntime) {
         _setupEventListener();
+      }
+      if (Platform.isAndroid && _nodeProcess != null) {
+        await ServiceHostBridge.instance.syncCatVod(
+          active: true,
+          pid: _nodeProcess!.pid,
+        );
       }
       _log('initialize: restored from existing port $_managementPort');
       return;
     }
 
-    // 桌面端分发：进程句柄丢失或首次启动 → 走桌面端流程
-    if (PlatformUtils.isDesktop) {
+    // 插件 Node：进程句柄丢失或首次启动 → 走外部进程流程。
+    if (_usesExternalNodeRuntime) {
       _managementPort = 0;
       _spiderPort = 0;
-      return _initializeDesktop();
+      return _initializeExternalNode();
     }
 
     _setupEventListener();
@@ -379,7 +464,8 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
         await _readyCompleter!.future;
         readyTimeout.cancel();
         final mgmtTimeout = Timer(const Duration(seconds: 15), () {
-          if (_managementPortCompleter != null && !_managementPortCompleter!.isCompleted) {
+          if (_managementPortCompleter != null &&
+              !_managementPortCompleter!.isCompleted) {
             _log('Warning: Management port timeout, proceeding anyway');
             _managementPortCompleter!.complete();
           }
@@ -388,7 +474,9 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
         mgmtTimeout.cancel();
       }
       if (_managementPort == 0) {
-        _log('Node.js initialization completed but managementPort is 0, resetting state');
+        _log(
+          'Node.js initialization completed but managementPort is 0, resetting state',
+        );
         _isInitialized = false;
       }
     } catch (e) {
@@ -398,9 +486,9 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
   }
 
   Future<bool> loadSourceFromURL(String url) async {
-    // 桌面端分发：下载逻辑改由 Dart 侧执行
-    if (PlatformUtils.isDesktop) {
-      return _loadSourceFromURLDesktop(url);
+    // 插件 Node 分发：下载、缓存和加载逻辑统一由 Dart 侧执行。
+    if (_usesExternalNodeRuntime) {
+      return _loadSourceFromURLExternal(url);
     }
 
     // 先保存旧 URL，加载成功后再更新
@@ -423,7 +511,7 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
       timer.cancel();
       if (_managementPort == 0) {
         _log('managementPort still 0, cannot load source');
-        _lastLoadedUrl = previousUrl;  // 恢复旧 URL
+        _lastLoadedUrl = previousUrl; // 恢复旧 URL
         return false;
       }
     }
@@ -499,11 +587,13 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
 
     final url = 'http://127.0.0.1:$_managementPort/source/loadPath';
     try {
-      final response = await http.post(
-        Uri.parse(url),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'path': sourcePath}),
-      ).timeout(const Duration(seconds: 10));
+      final response = await http
+          .post(
+            Uri.parse(url),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'path': sourcePath}),
+          )
+          .timeout(const Duration(seconds: 10));
       if (response.statusCode == 200) {
         _log('✅ 本地源重载成功');
         return true;
@@ -517,7 +607,9 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
     }
   }
 
-  Future<void> waitForSpiderPort({Duration timeout = const Duration(seconds: 30)}) async {
+  Future<void> waitForSpiderPort({
+    Duration timeout = const Duration(seconds: 30),
+  }) async {
     if (_spiderPort > 0) return;
     _spiderPortCompleter = Completer<void>();
     final timer = Timer(timeout, () {
@@ -533,9 +625,11 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
   Future<bool> isServiceAlive() async {
     if (_spiderPort <= 0) return false;
     try {
-      final response = await http.get(
-        Uri.parse('http://127.0.0.1:$_spiderPort/config'),
-      ).timeout(const Duration(milliseconds: 800));
+      final response = await http
+          .get(
+            Uri.parse('http://127.0.0.1:$_spiderPort/config'),
+          )
+          .timeout(const Duration(milliseconds: 800));
       return response.statusCode == 200;
     } catch (_) {
       return false;
@@ -547,18 +641,53 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
     _isRestarting = true;
     _log('🔄 检查 Node.js 服务状态...');
     try {
-      // 桌面端：直接杀进程重启，无需"重启 App"
+      if (Platform.isAndroid) {
+        if (await ServiceHostBridge.instance.consumeCatVodStopRequest()) {
+          await ServiceHostBridge.instance.syncCatVod(active: false);
+          _log('用户已从通知栏停止猫影视 Node，取消重新初始化');
+          return;
+        }
+        _log('🔄 重启 Android 插件 Node 子进程');
+        _isShuttingDown = true;
+        final previousProcess = _nodeProcess;
+        _nodeProcess = null;
+        if (previousProcess != null) {
+          try {
+            previousProcess.kill();
+            await previousProcess.exitCode.timeout(
+              const Duration(seconds: 2),
+              onTimeout: () {
+                previousProcess.kill(ProcessSignal.sigkill);
+                return -1;
+              },
+            );
+          } catch (_) {}
+        }
+        _isInitialized = false;
+        _isNodeReady = false;
+        _managementPort = 0;
+        _spiderPort = 0;
+        _isShuttingDown = false;
+        await ServiceHostBridge.instance.syncCatVod(active: true);
+        await _initializeExternalNode();
+        if (_lastLoadedUrl != null && _lastLoadedUrl!.isNotEmpty) {
+          await loadSourceFromURL(_lastLoadedUrl!);
+        }
+        return;
+      }
+
+      // Windows 保持原有直接杀进程重启流程。
       if (PlatformUtils.isDesktop) {
         _log('🔄 重启桌面端 Node 子进程');
         try {
-          await _nodeProcess?.kill();
+          _nodeProcess?.kill();
         } catch (_) {}
         _nodeProcess = null;
         _isInitialized = false;
         _isNodeReady = false;
         _managementPort = 0;
         _spiderPort = 0;
-        await _initializeDesktop();
+        await _initializeExternalNode();
         if (_lastLoadedUrl != null && _lastLoadedUrl!.isNotEmpty) {
           await loadSourceFromURL(_lastLoadedUrl!);
         }
@@ -606,8 +735,8 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
   }
 
   Future<bool> deleteSource() async {
-    // 桌面端：直接删源目录
-    if (PlatformUtils.isDesktop) {
+    // 插件 Node：直接删源目录。
+    if (_usesExternalNodeRuntime) {
       try {
         final sourceDir = await getDefaultSourcePath();
         final dir = Directory(sourceDir);
@@ -617,7 +746,7 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
         _spiderPort = 0;
         _spiderApiBase = '';
         _lastLoadedUrl = null;
-        _log('桌面端源已删除');
+        _log('插件 Node 源已删除');
         return true;
       } catch (e) {
         _log('deleteSource error: $e');
@@ -656,17 +785,20 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
   String getWebsiteUrl() => _websiteUrl;
 
   Future<void> initSpider() async {
-    if (_spiderPort <= 0 || (_spiderApiBase.isEmpty && _currentSpiderKey.isEmpty)) {
+    if (_spiderPort <= 0 ||
+        (_spiderApiBase.isEmpty && _currentSpiderKey.isEmpty)) {
       return;
     }
     try {
       final url = '${_spiderBaseUrl()}${_spiderPath()}/init';
       _log('initSpider POST $url');
-      final response = await http.post(
-        Uri.parse(url),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({}),
-      ).timeout(const Duration(seconds: 10));
+      final response = await http
+          .post(
+            Uri.parse(url),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({}),
+          )
+          .timeout(const Duration(seconds: 10));
       _log('initSpider status=${response.statusCode}');
     } catch (e) {
       _log('initSpider error: $e');
@@ -678,7 +810,9 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
     for (int i = 0; i < retries; i++) {
       try {
         final url = '${_spiderBaseUrl()}/config';
-        final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 10));
+        final response = await http
+            .get(Uri.parse(url))
+            .timeout(const Duration(seconds: 10));
         if (response.statusCode == 200) {
           final data = jsonDecode(response.body) as Map<String, dynamic>;
           // 解析并设置 _spiderApiBase
@@ -691,24 +825,28 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
         }
       } catch (e) {
         _log('getCatConfig attempt ${i + 1} failed: $e');
-        if (i < retries - 1) await Future.delayed(Duration(milliseconds: 500 * (i + 1)));
+        if (i < retries - 1)
+          await Future.delayed(Duration(milliseconds: 500 * (i + 1)));
       }
     }
     return {};
   }
 
   Future<Map<String, dynamic>> getHomeContent() async {
-    if (_spiderPort <= 0 || (_spiderApiBase.isEmpty && _currentSpiderKey.isEmpty)) {
+    if (_spiderPort <= 0 ||
+        (_spiderApiBase.isEmpty && _currentSpiderKey.isEmpty)) {
       return {};
     }
     try {
       final url = '${_spiderBaseUrl()}${_spiderPath()}/home';
       _log('getHomeContent POST $url');
-      final response = await http.post(
-        Uri.parse(url),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({}),
-      ).timeout(const Duration(seconds: 15));
+      final response = await http
+          .post(
+            Uri.parse(url),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({}),
+          )
+          .timeout(const Duration(seconds: 15));
       if (response.statusCode == 200) {
         return jsonDecode(response.body) as Map<String, dynamic>;
       }
@@ -723,22 +861,25 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
     int page = 1,
     Map<String, dynamic> filters = const {},
   }) async {
-    if (_spiderPort <= 0 || (_spiderApiBase.isEmpty && _currentSpiderKey.isEmpty)) {
+    if (_spiderPort <= 0 ||
+        (_spiderApiBase.isEmpty && _currentSpiderKey.isEmpty)) {
       return {};
     }
     for (int retry = 0; retry < 3; retry++) {
       try {
         final url = '${_spiderBaseUrl()}${_spiderPath()}/category';
         _log('getCategoryContent POST $url (retry $retry)');
-        final response = await http.post(
-          Uri.parse(url),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({
-            'id': categoryId,
-            'page': page,
-            'filters': filters,
-          }),
-        ).timeout(const Duration(seconds: 15));
+        final response = await http
+            .post(
+              Uri.parse(url),
+              headers: {'Content-Type': 'application/json'},
+              body: jsonEncode({
+                'id': categoryId,
+                'page': page,
+                'filters': filters,
+              }),
+            )
+            .timeout(const Duration(seconds: 15));
         if (response.statusCode == 200) {
           return jsonDecode(response.body) as Map<String, dynamic>;
         }
@@ -758,17 +899,20 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
   }
 
   Future<Map<String, dynamic>> getVideoDetail({required String videoId}) async {
-    if (_spiderPort <= 0 || (_spiderApiBase.isEmpty && _currentSpiderKey.isEmpty)) {
+    if (_spiderPort <= 0 ||
+        (_spiderApiBase.isEmpty && _currentSpiderKey.isEmpty)) {
       return {};
     }
     try {
       final url = '${_spiderBaseUrl()}${_spiderPath()}/detail';
       _log('getVideoDetail POST $url');
-      final response = await http.post(
-        Uri.parse(url),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'id': videoId}),
-      ).timeout(const Duration(seconds: 15));
+      final response = await http
+          .post(
+            Uri.parse(url),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'id': videoId}),
+          )
+          .timeout(const Duration(seconds: 15));
       if (response.statusCode == 200) {
         return jsonDecode(response.body) as Map<String, dynamic>;
       }
@@ -783,20 +927,23 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
     required String flag,
     required String playId,
   }) async {
-    if (_spiderPort <= 0 || (_spiderApiBase.isEmpty && _currentSpiderKey.isEmpty)) {
+    if (_spiderPort <= 0 ||
+        (_spiderApiBase.isEmpty && _currentSpiderKey.isEmpty)) {
       return {};
     }
     try {
       final url = '${_spiderBaseUrl()}${_spiderPath()}/play';
       _log('getPlayUrl POST $url');
-      final response = await http.post(
-        Uri.parse(url),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'flag': flag,
-          'id': playId,
-        }),
-      ).timeout(const Duration(seconds: 15));
+      final response = await http
+          .post(
+            Uri.parse(url),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'flag': flag,
+              'id': playId,
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
       if (response.statusCode == 200) {
         return jsonDecode(response.body) as Map<String, dynamic>;
       }
@@ -815,22 +962,28 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
     return result['url'] as String?;
   }
 
-  Future<Map<String, dynamic>> search({required String keyword, int page = 1}) async {
-    if (_spiderPort <= 0 || (_spiderApiBase.isEmpty && _currentSpiderKey.isEmpty)) {
+  Future<Map<String, dynamic>> search({
+    required String keyword,
+    int page = 1,
+  }) async {
+    if (_spiderPort <= 0 ||
+        (_spiderApiBase.isEmpty && _currentSpiderKey.isEmpty)) {
       return {};
     }
     for (int retry = 0; retry < 3; retry++) {
       try {
         final url = '${_spiderBaseUrl()}${_spiderPath()}/search';
         _log('search POST $url (retry $retry)');
-        final response = await http.post(
-          Uri.parse(url),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({
-            'wd': keyword,
-            'page': page,
-          }),
-        ).timeout(const Duration(seconds: 15));
+        final response = await http
+            .post(
+              Uri.parse(url),
+              headers: {'Content-Type': 'application/json'},
+              body: jsonEncode({
+                'wd': keyword,
+                'page': page,
+              }),
+            )
+            .timeout(const Duration(seconds: 15));
         if (response.statusCode == 200) {
           return jsonDecode(response.body) as Map<String, dynamic>;
         }
@@ -855,9 +1008,12 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
     _spiderApiBase = '';
     // 保留 _managementPort、_spiderPort、_lastLoadedUrl
     // 切回猫影视时可用于探活和复用，避免重新加载源
-    // 桌面端无 EventChannel；_nodeProcess 也保留（进程继续运行，便于快速复用）
-    if (!PlatformUtils.isDesktop) {
+    // 外部 Node 进程继续运行，便于快速复用；仅解除 Android 后台保活。
+    if (!_usesExternalNodeRuntime) {
       _eventSubscription?.cancel();
+    }
+    if (Platform.isAndroid) {
+      await ServiceHostBridge.instance.syncCatVod(active: false);
     }
     _log('Node.js service stopped (Dart layer only, ports kept)');
   }
@@ -866,7 +1022,7 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
   /// 先设置 _isShuttingDown 后，exitCode 回调不会触发重启
   /// 未启动过 Node 时也安全：所有字段均为 null-safe 访问
   Future<void> shutdown() async {
-    if (!PlatformUtils.isDesktop) return;
+    if (!_usesExternalNodeRuntime) return;
     // 先设置标志，保证即使后续任何步骤失败，也不会触发重启
     _isShuttingDown = true;
     try {
@@ -902,34 +1058,53 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
         // exitCode 可能因为各种原因抛异常，忽略
       }
     }
+    if (Platform.isAndroid) {
+      await ServiceHostBridge.instance.syncCatVod(active: false);
+    }
     // 不置空 _nodeProcess，让 exitCode 回调自己清理状态
   }
 
   // ==================================================================
-  //                       桌面端专属实现
+  //                    插件 Node 外部进程实现
   // ==================================================================
 
-  Future<void> _initializeDesktop() async {
-    _log('🚀 桌面端初始化 Node.js...');
+  Future<void> _initializeExternalNode() async {
+    _log('🚀 使用插件 Node 运行时初始化...');
 
-    // ===== 前置检查 1：nodejs-win 插件 =====
+    // ===== 前置检查 1：运行时插件 =====
     final pluginError = _checkNodejsWinPlugin();
     if (pluginError != null) {
       _log('❌ $pluginError');
       throw BusinessException(pluginError);
     }
 
-    // ===== 前置检查 2：解析 node.exe =====
-    final nodeExePath = _resolveNodeExePath();
+    // ===== 前置检查 2：解析可执行文件 =====
+    final nodeExePath = await _resolveNodeExecutable();
     if (nodeExePath == null) {
-      final msg = 'nodejs-win 插件中找不到 node.exe，请重新安装 nodejs-win 插件';
+      final executable = Platform.isWindows ? 'node.exe' : 'node';
+      final msg = '$_nodeRuntimePluginId 插件中找不到 $executable，请重新安装该插件';
       _log('❌ $msg');
       throw BusinessException(msg);
     }
-    _log('✅ 使用插件 node.exe: $nodeExePath');
+    _log('✅ 使用插件 Node 可执行文件: $nodeExePath');
 
     // 启动前先清理上次残留的孤儿 Node 进程（避免端口冲突 / 文件占用）
     await _killOrphanNodeProcesses();
+
+    if (Platform.isAndroid) {
+      // 新启动应清除上一次通知栏停止遗留的标记。
+      await ServiceHostBridge.instance.consumeCatVodStopRequest();
+      final project = await _assetChannel.invokeMapMethod<String, dynamic>(
+        'prepareProject',
+      );
+      final projectDir = project?['projectDir']?.toString();
+      if (projectDir == null || projectDir.isEmpty) {
+        const msg = '无法准备 Android Node 资源目录';
+        _log('❌ $msg');
+        throw BusinessException(msg);
+      }
+      _androidProjectDir = projectDir;
+    }
 
     // 1) 确保通知服务器已就绪（复用已有实例，避免重启时泄漏）
     final nativePort = await _ensureNotifyServer();
@@ -951,20 +1126,46 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
       final sourceDir = await getDefaultSourcePath();
       await Directory(sourceDir).create(recursive: true);
 
+      final environment = <String, String>{
+        ...Platform.environment,
+        'NODE_PATH': sourceDir,
+      };
+      if (Platform.isAndroid) {
+        final plugin = InstallManager.instance.findInstalled('nodejs');
+        final supportDir = await getApplicationSupportDirectory();
+        environment['HOME'] = supportDir.path;
+        environment['TMPDIR'] = Directory.systemTemp.path;
+        if (plugin != null) {
+          final inherited = environment['LD_LIBRARY_PATH'];
+          environment['LD_LIBRARY_PATH'] = [
+            plugin.installPath,
+            if (inherited != null && inherited.isNotEmpty) inherited,
+          ].join(':');
+        }
+        // 先提升宿主进程优先级，再 spawn 子进程，降低子进程被系统提前回收的概率。
+        await ServiceHostBridge.instance.syncCatVod(active: true);
+      }
+
       _nodeProcess = await Process.start(
-        nodeExePath,                             // ← 从插件解析
+        nodeExePath, // ← 从插件解析
         [scriptPath, '--native-port', '$nativePort'],
-        workingDirectory: _resourceProjectDir,   // ← 内嵌资源目录
-        environment: {
-          ...Platform.environment,
-          'NODE_PATH': sourceDir,
-        },
+        workingDirectory: _resourceProjectDir, // ← 内嵌资源目录
+        environment: environment,
       );
       _isInitialized = true;
+      if (Platform.isAndroid) {
+        await ServiceHostBridge.instance.syncCatVod(
+          active: true,
+          pid: _nodeProcess!.pid,
+        );
+      }
       _log('Node 进程已启动, PID=${_nodeProcess!.pid}');
     } catch (e) {
       _log('❌ 启动 Node 进程失败: $e');
       _isInitialized = false;
+      if (Platform.isAndroid) {
+        await ServiceHostBridge.instance.syncCatVod(active: false);
+      }
       return;
     }
 
@@ -985,7 +1186,7 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
     //   b) _isShuttingDown（用户主动关闭，不重启）
     //   c) _restartCount 上限（本会话最多重启 1 次，结构上杜绝循环）
     final startedProcess = _nodeProcess!;
-    startedProcess.exitCode.then((code) {
+    startedProcess.exitCode.then((code) async {
       if (_nodeProcess != startedProcess) return;
       _log('⚠️ Node 进程退出, code=$code');
 
@@ -998,18 +1199,42 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
 
       // 用户主动关闭 → 不重启
       if (_isShuttingDown) {
+        if (Platform.isAndroid) {
+          await ServiceHostBridge.instance.syncCatVod(active: false);
+        }
         _log('应用关闭中，不重启 Node');
         return;
       }
 
+      if (Platform.isAndroid) {
+        final stopRequested = await ServiceHostBridge.instance
+            .consumeCatVodStopRequest();
+        if (stopRequested) {
+          await ServiceHostBridge.instance.syncCatVod(active: false);
+          _log('用户从通知栏停止猫影视 Node，不自动重启');
+          return;
+        }
+        if (_currentConfigType != 'catvod') {
+          await ServiceHostBridge.instance.syncCatVod(active: false);
+          _log('已切离猫影视配置，不自动重启 Node');
+          return;
+        }
+      }
+
       // 已达本会话重启上限 → 不重启
       if (_restartCount >= _maxRestartPerSession) {
+        if (Platform.isAndroid) {
+          await ServiceHostBridge.instance.syncCatVod(active: false);
+        }
         _log('⚠️ 本会话已重启 $_restartCount 次，不再重启（如需恢复请重启应用）');
         return;
       }
 
       // 触发一次重启
       _restartCount++;
+      if (Platform.isAndroid) {
+        await ServiceHostBridge.instance.syncCatVod(active: true);
+      }
       _log('🔄 尝试第 $_restartCount 次重启');
       _handleProcessCrashOnce();
     });
@@ -1024,10 +1249,18 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
         const Duration(seconds: 20),
         onTimeout: () => _log('⚠️ managementPort 超时'),
       );
-      _log('✅ 桌面端 Node.js 初始化完成, '
-          'mgmt=$_managementPort, spider=$_spiderPort');
+      _log(
+        '✅ 插件 Node.js 初始化完成, '
+        'mgmt=$_managementPort, spider=$_spiderPort',
+      );
     } catch (e) {
       _log('初始化等待异常: $e');
+    }
+
+    if (Platform.isAndroid && (_nodeProcess == null || _managementPort <= 0)) {
+      _isInitialized = false;
+      await ServiceHostBridge.instance.syncCatVod(active: false);
+      _log('❌ Android Node 初始化未就绪，已解除后台保活');
     }
   }
 
@@ -1043,8 +1276,10 @@ class NodeJSService extends GetxService with WidgetsBindingObserver {
 
     // 首次启动（替代 iOS 的 GCDWebServer）
     try {
-      _localNotifyServer =
-          await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      _localNotifyServer = await HttpServer.bind(
+        InternetAddress.loopbackIPv4,
+        0,
+      );
     } catch (e) {
       _log('❌ 本地通知服务器启动失败: $e');
       return null;
@@ -1136,7 +1371,7 @@ if (\$targets) {
     }
   }
 
-  Future<bool> _loadSourceFromURLDesktop(String url) async {
+  Future<bool> _loadSourceFromURLExternal(String url) async {
     final previousUrl = _lastLoadedUrl;
     _lastLoadedUrl = url;
 
@@ -1165,8 +1400,7 @@ if (\$targets) {
     // 归一化 URL（去掉 .md5 后缀）
     var normalizedUrl = url;
     if (normalizedUrl.endsWith('.js.md5')) {
-      normalizedUrl =
-          normalizedUrl.substring(0, normalizedUrl.length - 4);
+      normalizedUrl = normalizedUrl.substring(0, normalizedUrl.length - 4);
     }
 
     final sourceDir = await getDefaultSourcePath();
@@ -1251,11 +1485,13 @@ if (\$targets) {
       return false;
     }
     try {
-      final r = await http.post(
-        Uri.parse('http://127.0.0.1:$_managementPort/source/loadPath'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'path': path}),
-      ).timeout(const Duration(seconds: 20));
+      final r = await http
+          .post(
+            Uri.parse('http://127.0.0.1:$_managementPort/source/loadPath'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'path': path}),
+          )
+          .timeout(const Duration(seconds: 20));
       if (r.statusCode == 200) {
         _log('✅ Node 已加载源');
         return true;
@@ -1284,14 +1520,26 @@ if (\$targets) {
     }
     if (_currentConfigType != 'catvod') {
       _log('已切离猫影视配置，取消重启');
+      if (Platform.isAndroid) {
+        await ServiceHostBridge.instance.syncCatVod(active: false);
+      }
+      return;
+    }
+    if (Platform.isAndroid &&
+        await ServiceHostBridge.instance.consumeCatVodStopRequest()) {
+      await ServiceHostBridge.instance.syncCatVod(active: false);
+      _log('用户已从通知栏停止猫影视 Node，取消重启');
       return;
     }
 
     _log('🔄 开始重启 Node 子进程');
     try {
-      await _initializeDesktop();
+      await _initializeExternalNode();
     } catch (e) {
       _log('重启异常: $e');
+      if (Platform.isAndroid) {
+        await ServiceHostBridge.instance.syncCatVod(active: false);
+      }
       return;
     }
 
@@ -1300,6 +1548,9 @@ if (\$targets) {
       // 静默恢复源，不刷新 UI
       await _restoreSourceAfterRestart();
     } else {
+      if (Platform.isAndroid) {
+        await ServiceHostBridge.instance.syncCatVod(active: false);
+      }
       _log('❌ Node 重启失败，本会话不再重试');
     }
   }
@@ -1386,10 +1637,14 @@ if (\$targets) {
     for (final path in getPaths) {
       try {
         final url = 'http://127.0.0.1:$_spiderPort$path';
-        final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 5));
+        final response = await http
+            .get(Uri.parse(url))
+            .timeout(const Duration(seconds: 5));
         result['GET $path'] = <String, dynamic>{
           'status': response.statusCode,
-          'body': response.body.length > 200 ? response.body.substring(0, 200) : response.body,
+          'body': response.body.length > 200
+              ? response.body.substring(0, 200)
+              : response.body,
         };
       } catch (e) {
         result['GET $path'] = <String, dynamic>{'error': e.toString()};
@@ -1400,10 +1655,14 @@ if (\$targets) {
     for (final path in queryParamPaths) {
       try {
         final url = 'http://127.0.0.1:$_spiderPort$path';
-        final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 5));
+        final response = await http
+            .get(Uri.parse(url))
+            .timeout(const Duration(seconds: 5));
         result['GET $path'] = <String, dynamic>{
           'status': response.statusCode,
-          'body': response.body.length > 200 ? response.body.substring(0, 200) : response.body,
+          'body': response.body.length > 200
+              ? response.body.substring(0, 200)
+              : response.body,
         };
       } catch (e) {
         result['GET $path'] = <String, dynamic>{'error': e.toString()};
@@ -1413,10 +1672,22 @@ if (\$targets) {
     final postTests = <Map<String, dynamic>>[
       {'path': '/home', 'body': <String, dynamic>{}},
       {'path': '/init', 'body': <String, dynamic>{}},
-      {'path': '/category', 'body': <String, dynamic>{'id': 'test', 'page': 1}},
-      {'path': '/detail', 'body': <String, dynamic>{'id': 'test'}},
-      {'path': '/search', 'body': <String, dynamic>{'wd': 'test', 'page': 1}},
-      {'path': '/play', 'body': <String, dynamic>{'flag': 'test', 'id': 'test'}},
+      {
+        'path': '/category',
+        'body': <String, dynamic>{'id': 'test', 'page': 1},
+      },
+      {
+        'path': '/detail',
+        'body': <String, dynamic>{'id': 'test'},
+      },
+      {
+        'path': '/search',
+        'body': <String, dynamic>{'wd': 'test', 'page': 1},
+      },
+      {
+        'path': '/play',
+        'body': <String, dynamic>{'flag': 'test', 'id': 'test'},
+      },
     ];
 
     result['=== POST Requests (root) ==='] = null;
@@ -1425,14 +1696,18 @@ if (\$targets) {
       final body = test['body'] as Map<String, dynamic>;
       try {
         final url = 'http://127.0.0.1:$_spiderPort$path';
-        final response = await http.post(
-          Uri.parse(url),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode(body),
-        ).timeout(const Duration(seconds: 5));
+        final response = await http
+            .post(
+              Uri.parse(url),
+              headers: {'Content-Type': 'application/json'},
+              body: jsonEncode(body),
+            )
+            .timeout(const Duration(seconds: 5));
         result['POST $path'] = <String, dynamic>{
           'status': response.statusCode,
-          'body': response.body.length > 200 ? response.body.substring(0, 200) : response.body,
+          'body': response.body.length > 200
+              ? response.body.substring(0, 200)
+              : response.body,
         };
       } catch (e) {
         result['POST $path'] = <String, dynamic>{'error': e.toString()};
@@ -1447,14 +1722,18 @@ if (\$targets) {
         final fullPath = '$_spiderApiBase$path';
         try {
           final url = 'http://127.0.0.1:$_spiderPort$fullPath';
-          final response = await http.post(
-            Uri.parse(url),
-            headers: {'Content-Type': 'application/json'},
-            body: jsonEncode(body),
-          ).timeout(const Duration(seconds: 5));
+          final response = await http
+              .post(
+                Uri.parse(url),
+                headers: {'Content-Type': 'application/json'},
+                body: jsonEncode(body),
+              )
+              .timeout(const Duration(seconds: 5));
           result['POST $fullPath'] = <String, dynamic>{
             'status': response.statusCode,
-            'body': response.body.length > 200 ? response.body.substring(0, 200) : response.body,
+            'body': response.body.length > 200
+                ? response.body.substring(0, 200)
+                : response.body,
           };
         } catch (e) {
           result['POST $fullPath'] = <String, dynamic>{'error': e.toString()};
@@ -1468,22 +1747,28 @@ if (\$targets) {
 
         // 1. 初始化
         final initUrl = 'http://127.0.0.1:$_spiderPort$fullBase/init';
-        await http.post(
-          Uri.parse(initUrl),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({}),
-        ).timeout(const Duration(seconds: 5));
+        await http
+            .post(
+              Uri.parse(initUrl),
+              headers: {'Content-Type': 'application/json'},
+              body: jsonEncode({}),
+            )
+            .timeout(const Duration(seconds: 5));
 
         // 2. 搜索
         final searchUrl = 'http://127.0.0.1:$_spiderPort$fullBase/search';
-        final searchResp = await http.post(
-          Uri.parse(searchUrl),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({'wd': '电影', 'page': 1}),
-        ).timeout(const Duration(seconds: 5));
+        final searchResp = await http
+            .post(
+              Uri.parse(searchUrl),
+              headers: {'Content-Type': 'application/json'},
+              body: jsonEncode({'wd': '电影', 'page': 1}),
+            )
+            .timeout(const Duration(seconds: 5));
         result['[Step1] Search'] = {
           'status': searchResp.statusCode,
-          'body': searchResp.body.length > 300 ? searchResp.body.substring(0, 300) : searchResp.body,
+          'body': searchResp.body.length > 300
+              ? searchResp.body.substring(0, 300)
+              : searchResp.body,
         };
 
         if (searchResp.statusCode == 200) {
@@ -1496,14 +1781,18 @@ if (\$targets) {
 
             // 3. 详情
             final detailUrl = 'http://127.0.0.1:$_spiderPort$fullBase/detail';
-            final detailResp = await http.post(
-              Uri.parse(detailUrl),
-              headers: {'Content-Type': 'application/json'},
-              body: jsonEncode({'id': vodId}),
-            ).timeout(const Duration(seconds: 5));
+            final detailResp = await http
+                .post(
+                  Uri.parse(detailUrl),
+                  headers: {'Content-Type': 'application/json'},
+                  body: jsonEncode({'id': vodId}),
+                )
+                .timeout(const Duration(seconds: 5));
             result['[Step2] Detail'] = {
               'status': detailResp.statusCode,
-              'body': detailResp.body.length > 500 ? detailResp.body.substring(0, 500) : detailResp.body,
+              'body': detailResp.body.length > 500
+                  ? detailResp.body.substring(0, 500)
+                  : detailResp.body,
             };
 
             if (detailResp.statusCode == 200) {
@@ -1516,7 +1805,9 @@ if (\$targets) {
                 final vodPlayUrl = vod['vod_play_url']?.toString() ?? '';
 
                 result['[Step2a] vod_play_from'] = vodPlayFrom;
-                result['[Step2b] vod_play_url'] = vodPlayUrl.length > 200 ? '${vodPlayUrl.substring(0, 200)}...' : vodPlayUrl;
+                result['[Step2b] vod_play_url'] = vodPlayUrl.length > 200
+                    ? '${vodPlayUrl.substring(0, 200)}...'
+                    : vodPlayUrl;
 
                 if (vodPlayFrom.isNotEmpty && vodPlayUrl.isNotEmpty) {
                   final froms = vodPlayFrom.split('\$\$\$');
@@ -1536,15 +1827,20 @@ if (\$targets) {
 
                     result['[Step3] Play Input'] = {'flag': flag, 'id': playId};
 
-                    final playUrl = 'http://127.0.0.1:$_spiderPort$fullBase/play';
-                    final playResp = await http.post(
-                      Uri.parse(playUrl),
-                      headers: {'Content-Type': 'application/json'},
-                      body: jsonEncode({'flag': flag, 'id': playId}),
-                    ).timeout(const Duration(seconds: 5));
+                    final playUrl =
+                        'http://127.0.0.1:$_spiderPort$fullBase/play';
+                    final playResp = await http
+                        .post(
+                          Uri.parse(playUrl),
+                          headers: {'Content-Type': 'application/json'},
+                          body: jsonEncode({'flag': flag, 'id': playId}),
+                        )
+                        .timeout(const Duration(seconds: 5));
                     result['[Step3] Play Response'] = {
                       'status': playResp.statusCode,
-                      'body': playResp.body.length > 200 ? playResp.body.substring(0, 200) : playResp.body,
+                      'body': playResp.body.length > 200
+                          ? playResp.body.substring(0, 200)
+                          : playResp.body,
                     };
                   }
                 }
@@ -1553,7 +1849,10 @@ if (\$targets) {
           }
         }
       } catch (e, stackTrace) {
-        result['Workflow Test Error'] = {'error': e.toString(), 'stack': stackTrace.toString()};
+        result['Workflow Test Error'] = {
+          'error': e.toString(),
+          'stack': stackTrace.toString(),
+        };
       }
     }
 

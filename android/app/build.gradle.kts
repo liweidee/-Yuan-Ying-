@@ -33,12 +33,6 @@ android {
 
         // 说明：ABI 限制由 flutter build --split-per-abi 提供，
         // 这里不再添加 ndk.abiFilters，避免与其冲突。
-
-        externalNativeBuild {
-            cmake {
-                cppFlags.add("-std=c++14")
-            }
-        }
     }
 
     packagingOptions.jniLibs.useLegacyPackaging = true
@@ -94,12 +88,6 @@ android {
             (output as ApkVariantOutputImpl).versionCodeOverride = flutter.versionCode
         }
     }
-
-    externalNativeBuild {
-        cmake {
-            path = file("src/main/cpp/CMakeLists.txt")
-        }
-    }
 }
 
 kotlin {
@@ -117,5 +105,4 @@ dependencies {
     implementation("com.google.code.gson:gson:2.10.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.squareup.okio:okio:3.6.0")
-    implementation("org.nanohttpd:nanohttpd:2.3.1")
 }

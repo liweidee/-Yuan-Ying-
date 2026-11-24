@@ -37,8 +37,7 @@ class SandboxServiceManager extends GetxService {
   SandboxServiceStatus statusOf(String id) =>
       _states[id]?.status ?? SandboxServiceStatus.stopped;
 
-  bool isRunning(String id) =>
-      statusOf(id) == SandboxServiceStatus.running;
+  bool isRunning(String id) => statusOf(id) == SandboxServiceStatus.running;
 
   int get runningCount => _states.values
       .where((s) => s.status == SandboxServiceStatus.running)
@@ -91,11 +90,8 @@ class SandboxServiceManager extends GetxService {
         if (st.status == SandboxServiceStatus.running) running++;
       }
     }
-    if (pids.isEmpty) {
-      ServiceHostBridge.instance.stopAll();
-    } else {
-      ServiceHostBridge.instance.sync(pids: pids, serviceCount: running);
-    }
+    // 沙盒清空只更新沙盒 PID；前台服务可能仍被猫影视 Node 使用。
+    ServiceHostBridge.instance.sync(pids: pids, serviceCount: running);
   }
 
   // ============================================================
@@ -171,17 +167,15 @@ class SandboxServiceManager extends GetxService {
       _notify();
 
       const decoder = Utf8Decoder(allowMalformed: true);
-      process.stdout
-          .transform(decoder)
-          .transform(const LineSplitter())
-          .listen((line) {
+      process.stdout.transform(decoder).transform(const LineSplitter()).listen((
+        line,
+      ) {
         st.appendLog(line);
         _notify();
       });
-      process.stderr
-          .transform(decoder)
-          .transform(const LineSplitter())
-          .listen((line) {
+      process.stderr.transform(decoder).transform(const LineSplitter()).listen((
+        line,
+      ) {
         st.appendLog('[err] $line');
         _notify();
       });
@@ -216,18 +210,28 @@ class SandboxServiceManager extends GetxService {
             healthType: healthType,
             healthPath: healthPath,
             maxRestart: maxRestart,
-          ).catchError((e) =>
-              debugPrint('[SandboxServiceManager] restart: $e'));
+          ).catchError(
+            (e) => debugPrint('[SandboxServiceManager] restart: $e'),
+          );
         });
       });
 
-      await _waitForReady(service, st, process,
-          healthType: healthType, healthPath: healthPath);
+      await _waitForReady(
+        service,
+        st,
+        process,
+        healthType: healthType,
+        healthPath: healthPath,
+      );
 
       st.status = SandboxServiceStatus.running;
       st.appendLog('[health] ready');
-      _startHealthCheck(service, distroId,
-          healthType: healthType, healthPath: healthPath);
+      _startHealthCheck(
+        service,
+        distroId,
+        healthType: healthType,
+        healthPath: healthPath,
+      );
       _notify();
     } catch (e) {
       st.status = SandboxServiceStatus.error;
@@ -319,8 +323,11 @@ class SandboxServiceManager extends GetxService {
 
   Future<bool> _probeTcp(int port) async {
     try {
-      final socket = await Socket.connect('127.0.0.1', port,
-          timeout: const Duration(milliseconds: 800));
+      final socket = await Socket.connect(
+        '127.0.0.1',
+        port,
+        timeout: const Duration(milliseconds: 800),
+      );
       await socket.close();
       return true;
     } catch (_) {
@@ -332,8 +339,7 @@ class SandboxServiceManager extends GetxService {
     try {
       final client = HttpClient();
       client.connectionTimeout = const Duration(milliseconds: 800);
-      final req =
-          await client.getUrl(Uri.parse('http://127.0.0.1:$port$path'));
+      final req = await client.getUrl(Uri.parse('http://127.0.0.1:$port$path'));
       final resp = await req.close();
       client.close(force: true);
       return resp.statusCode >= 200 && resp.statusCode < 400;

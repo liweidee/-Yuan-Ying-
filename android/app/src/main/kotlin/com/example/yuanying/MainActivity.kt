@@ -6,7 +6,6 @@ import android.media.MediaScannerConnection
 import android.os.Environment
 import android.provider.Settings
 import android.net.Uri
-import org.json.JSONObject
 import android.content.Intent
 import android.content.res.Configuration
 import android.os.Build
@@ -15,19 +14,12 @@ import android.view.WindowManager.LayoutParams
 import com.ryanheise.audioservice.AudioServiceActivity
 import com.dsplayer.ds_player.jar_spider.JarSpiderHost
 import io.flutter.embedding.engine.FlutterEngine
-import io.flutter.plugin.common.EventChannel
-import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
-import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.plugin.common.MethodChannel.Result
 import java.io.File
 
-class MainActivity : AudioServiceActivity(), MethodCallHandler {
+class MainActivity : AudioServiceActivity() {
 
-    private var nodeJSChannel: MethodChannel? = null
-    private var nodeJSEventChannel: EventChannel? = null
-    private var eventSink: EventChannel.EventSink? = null
-    private lateinit var nodeJSManager: NodeJSManager
     private var pyBridge: PythonPluginBridge? = null
     private var pipChannel: MethodChannel? = null
     private var pendingStoragePermissionResult: Result? = null
@@ -249,70 +241,24 @@ class MainActivity : AudioServiceActivity(), MethodCallHandler {
             }
         }
 
-        // ===== 1) 初始化 NodeJSManager =====
-        nodeJSManager = NodeJSManager.getInstance(applicationContext)
-
-        // ===== 2) 挂回调 → 转发到 eventSink =====
-        nodeJSManager.onPortReceived = { port, type ->
-            val json = JSONObject().apply {
-                put("port", port)
-                put("type", type)
-            }.toString()
-            eventSink?.success(json)
-        }
-        nodeJSManager.onNodeReady = {
-            val json = JSONObject().apply {
-                put("event", "ready")
-            }.toString()
-            eventSink?.success(json)
-        }
-
-        // ===== 3) MethodChannel =====
-        nodeJSChannel = MethodChannel(
+        // Android Node 运行时改由插件提供，原生侧仅同步 assets 项目资源。
+        MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
-            "com.tvbox/nodejs"
-        )
-        nodeJSChannel?.setMethodCallHandler(this)
-
-        // ===== 4) EventChannel =====
-        nodeJSEventChannel = EventChannel(
-            flutterEngine.dartExecutor.binaryMessenger,
-            "com.tvbox/nodejs/events"
-        )
-        nodeJSEventChannel?.setStreamHandler(object : EventChannel.StreamHandler {
-            override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
-                eventSink = events
-
-                if (!::nodeJSManager.isInitialized) return
-
-                if (nodeJSManager.managementPort > 0) {
-                    val json = JSONObject().apply {
-                        put("port", nodeJSManager.managementPort)
-                        put("type", "management")
-                    }.toString()
-                    events?.success(json)
+            "com.example.yuanying/node_assets"
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "prepareProject" -> {
+                    try {
+                        result.success(NodeAssetsManager.prepareProject(applicationContext))
+                    } catch (e: Exception) {
+                        result.error("NODE_ASSETS_FAILED", e.message ?: "unknown error", null)
+                    }
                 }
-                if (nodeJSManager.spiderPort > 0) {
-                    val json = JSONObject().apply {
-                        put("port", nodeJSManager.spiderPort)
-                        put("type", "spider")
-                    }.toString()
-                    events?.success(json)
-                }
-                if (nodeJSManager.isNodeReady) {
-                    val json = JSONObject().apply {
-                        put("event", "ready")
-                    }.toString()
-                    events?.success(json)
-                }
+                else -> result.notImplemented()
             }
-
-            override fun onCancel(arguments: Any?) {
-                eventSink = null
-            }
-        })
+        }
         
-        // ===== 5) 服务托管前台服务（沙盒/插件服务保活） =====
+        // ===== 服务托管前台服务（沙盒/插件与猫影视 Node 保活） =====
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             "com.example.yuanying/service_host"
@@ -321,6 +267,7 @@ class MainActivity : AudioServiceActivity(), MethodCallHandler {
                 "start" -> {
                     try {
                         val intent = Intent(this, ServiceHostService::class.java).apply {
+                            action = ServiceHostService.ACTION_UPDATE_SANDBOX
                             @Suppress("UNCHECKED_CAST")
                             val pidsArg = call.argument<List<Int>>("pids")
                             putIntegerArrayListExtra(
@@ -341,16 +288,48 @@ class MainActivity : AudioServiceActivity(), MethodCallHandler {
                                 putExtra(ServiceHostService.EXTRA_GW, it)
                             }
                         }
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                            startForegroundService(intent)
-                        } else {
-                            startService(intent)
-                        }
+                        val hasPids = (call.argument<List<Int>>("pids") ?: emptyList()).isNotEmpty()
+                        startHostService(intent, requireForeground = hasPids)
                         result.success(true)
                     } catch (e: Exception) {
                         android.util.Log.w("MainActivity", "service_host start failed: $e")
                         result.success(false)
                     }
+                }
+                "syncCatVod" -> {
+                    try {
+                        val active = call.argument<Boolean>("active") ?: false
+                        val pid = call.argument<Int>("pid")
+                        val intent = Intent(this, ServiceHostService::class.java).apply {
+                            action = ServiceHostService.ACTION_UPDATE_CATVOD
+                            putExtra(ServiceHostService.EXTRA_CATVOD_ACTIVE, active)
+                            putExtra(
+                                ServiceHostService.EXTRA_CATVOD_PID,
+                                if (active && pid != null && pid > 0) pid else 0
+                            )
+                        }
+                        startHostService(intent, requireForeground = active)
+                        result.success(true)
+                    } catch (e: Exception) {
+                        android.util.Log.w("MainActivity", "service_host syncCatVod failed: $e")
+                        result.success(false)
+                    }
+                }
+                "consumeCatVodStopRequest" -> {
+                    val prefs = getSharedPreferences(
+                        ServiceHostService.PREFS_NAME,
+                        MODE_PRIVATE
+                    )
+                    val requested = prefs.getBoolean(
+                        ServiceHostService.PREF_CATVOD_STOP_REQUESTED,
+                        false
+                    )
+                    if (requested) {
+                        prefs.edit()
+                            .remove(ServiceHostService.PREF_CATVOD_STOP_REQUESTED)
+                            .apply()
+                    }
+                    result.success(requested)
                 }
                 "stopAll" -> {
                     try {
@@ -407,6 +386,14 @@ class MainActivity : AudioServiceActivity(), MethodCallHandler {
         }
     }
 
+    private fun startHostService(intent: Intent, requireForeground: Boolean) {
+        if (requireForeground && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
+    }
+
     private fun hasRecordingStorageAccess(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             Environment.isExternalStorageManager()
@@ -444,9 +431,6 @@ class MainActivity : AudioServiceActivity(), MethodCallHandler {
     }
 
     override fun onDestroy() {
-        if (::nodeJSManager.isInitialized) {
-            nodeJSManager.stopNodeJS()
-        }
         // 断开 py 插件绑定，避免 ServiceConnection 泄漏
         try {
             pyBridge?.unbind()
@@ -477,50 +461,4 @@ class MainActivity : AudioServiceActivity(), MethodCallHandler {
         }
     }
 
-    // ===== MethodCallHandler =====
-    override fun onMethodCall(call: MethodCall, result: Result) {
-        when (call.method) {
-            "startNodeJS" -> {
-                nodeJSManager.startNodeJS { success -> result.success(success) }
-            }
-            "loadSourceFromURL" -> {
-                val url = call.argument<String>("url")
-                if (url == null) {
-                    result.error("INVALID_ARGS", "Missing url", null)
-                    return
-                }
-                nodeJSManager.loadSourceFromURL(url) { success, message ->
-                    result.success(
-                        mapOf(
-                            "success" to success,
-                            "message" to (message ?: "")
-                        )
-                    )
-                }
-            }
-            "deleteSource" -> {
-                nodeJSManager.deleteSource { success -> result.success(success) }
-            }
-            "getSourcePath" -> {
-                result.success(nodeJSManager.getDocumentsSourcePath())
-            }
-            "getNativeServerPort" -> {
-                result.success(nodeJSManager.nativeServerPort)
-            }
-            "getManagementPort" -> {
-                result.success(nodeJSManager.managementPort)
-            }
-            "getSpiderPort" -> {
-                result.success(nodeJSManager.spiderPort)
-            }
-            "isNodeReady" -> {
-                result.success(nodeJSManager.isNodeReady)
-            }
-            "stopNodeJS" -> {
-                nodeJSManager.stopNodeJS()
-                result.success(null)
-            }
-            else -> result.notImplemented()
-        }
-    }
 }
