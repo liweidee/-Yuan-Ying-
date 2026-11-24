@@ -118,7 +118,17 @@ internal object JarSpiderProcessClient {
             appContext = application
             val existingConnection = connection
             if (existingConnection == null) {
-                val newConnection = Connection()
+                val newConnection = Connection(
+                    connectedCallback = { current, binder ->
+                        handleServiceConnected(current, binder)
+                    },
+                    disconnectedCallback = { current ->
+                        handleRemoteDeath(current)
+                    },
+                    nullBindingCallback = { current ->
+                        handleNullBinding(current)
+                    },
+                )
                 connection = newConnection
                 waitConnection = newConnection
                 val intent = Intent(application, JarSpiderProcessService::class.java)
@@ -152,6 +162,53 @@ internal object JarSpiderProcessClient {
         }
 
         return service?.takeIf { it.asBinder().isBinderAlive }
+    }
+
+    private fun handleServiceConnected(
+        connection: Connection,
+        binder: IBinder,
+    ) {
+        val isCurrentConnection = synchronized(bindLock) {
+            this.connection === connection
+        }
+        if (!isCurrentConnection) {
+            connection.ready.countDown()
+            return
+        }
+        val proxy = IJarSpiderProcess.Stub.asInterface(binder)
+        val recipient = IBinder.DeathRecipient {
+            handleRemoteDeath(connection)
+        }
+        try {
+            binder.linkToDeath(recipient, 0)
+            service = proxy
+            Log.i(TAG, "Connected to isolated JAR process")
+        } catch (error: RemoteException) {
+            Log.e(TAG, "Link JAR process death failed", error)
+            service = null
+            handleRemoteDeath(connection)
+            return
+        }
+        connection.ready.countDown()
+    }
+
+    private fun handleNullBinding(connection: Connection) {
+        Log.e(TAG, "JAR process returned a null binding")
+        val isCurrentConnection = synchronized(bindLock) {
+            if (this.connection === connection) {
+                this.connection = null
+                true
+            } else {
+                false
+            }
+        }
+        connection.ready.countDown()
+        if (!isCurrentConnection) return
+        service = null
+        failAll("JAR_PROCESS_UNAVAILABLE", "JAR 运行进程无法启动")
+        mainHandler.post {
+            runCatching { appContext?.unbindService(connection) }
+        }
     }
 
     private fun handleRemoteDeath(source: Connection? = null) {
@@ -190,61 +247,31 @@ internal object JarSpiderProcessClient {
         }
     }
 
-    private inner class Connection : ServiceConnection {
+    private class Connection(
+        private val connectedCallback: (Connection, IBinder) -> Unit,
+        private val disconnectedCallback: (Connection) -> Unit,
+        private val nullBindingCallback: (Connection) -> Unit,
+    ) : ServiceConnection {
         val ready = CountDownLatch(1)
 
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
-            val isCurrentConnection = synchronized(bindLock) {
-                connection === this
-            }
-            if (!isCurrentConnection) {
-                ready.countDown()
-                return
-            }
             if (binder == null) {
-                onNullBinding(name)
+                nullBindingCallback(this)
                 return
             }
-            val proxy = IJarSpiderProcess.Stub.asInterface(binder)
-            val recipient = IBinder.DeathRecipient { handleRemoteDeath(this) }
-            try {
-                binder.linkToDeath(recipient, 0)
-                service = proxy
-                Log.i(TAG, "Connected to isolated JAR process")
-            } catch (error: RemoteException) {
-                Log.e(TAG, "Link JAR process death failed", error)
-                service = null
-                handleRemoteDeath(this)
-                return
-            }
-            ready.countDown()
+            connectedCallback(this, binder)
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
-            handleRemoteDeath(this)
+            disconnectedCallback(this)
         }
 
         override fun onBindingDied(name: ComponentName?) {
-            handleRemoteDeath(this)
+            disconnectedCallback(this)
         }
 
         override fun onNullBinding(name: ComponentName?) {
-            Log.e(TAG, "JAR process returned a null binding")
-            val isCurrentConnection = synchronized(bindLock) {
-                if (connection === this) {
-                    connection = null
-                    true
-                } else {
-                    false
-                }
-            }
-            ready.countDown()
-            if (!isCurrentConnection) return
-            service = null
-            failAll("JAR_PROCESS_UNAVAILABLE", "JAR 运行进程无法启动")
-            mainHandler.post {
-                runCatching { appContext?.unbindService(this) }
-            }
+            nullBindingCallback(this)
         }
     }
 

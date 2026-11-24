@@ -77,6 +77,7 @@ class _ActionDialogState extends State<ActionDialog>
         curve: Curves.easeOutCubic,
       ),
     );
+        );
 
     if (widget.visible) {
       _show();
@@ -153,6 +154,8 @@ class _ActionDialogState extends State<ActionDialog>
       return const SizedBox.shrink();
     }
 
+    final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
+
     return KeyboardListener(
       focusNode: _focusNode,
       onKeyEvent: _handleKeyDown,
@@ -174,13 +177,26 @@ class _ActionDialogState extends State<ActionDialog>
               ),
             ),
           ),
-          // 弹窗
-          Center(
-            child: FadeTransition(
-              opacity: _fadeAnimation,
-              child: ScaleTransition(
-                scale: _scaleAnimation,
-                child: _buildDialogContent(context),
+          // 弹窗：输入法弹出时，将整个弹窗移动到键盘上方。
+          Positioned.fill(
+            child: AnimatedPadding(
+              duration: const Duration(milliseconds: 180),
+              curve: Curves.easeOutCubic,
+              padding: EdgeInsets.only(bottom: keyboardInset),
+              child: SafeArea(
+                minimum: const EdgeInsets.symmetric(
+                  horizontal: 8,
+                  vertical: 12,
+                ),
+                child: Center(
+                  child: FadeTransition(
+                    opacity: _fadeAnimation,
+                    child: ScaleTransition(
+                      scale: _scaleAnimation,
+                      child: _buildDialogContent(context),
+                    ),
+                  ),
+                ),
               ),
             ),
           ),
@@ -229,6 +245,7 @@ class _ActionDialogState extends State<ActionDialog>
     //   同时它的 color 会自动跟随 colorScheme.surface，
     //   亮/暗/动态色主题切换无需额外处理
     return Container(
+      key: const ValueKey('action-dialog-content'),
       width: dialogWidth,
       margin: EdgeInsets.only(bottom: bottomPadding),
       decoration: BoxDecoration(
