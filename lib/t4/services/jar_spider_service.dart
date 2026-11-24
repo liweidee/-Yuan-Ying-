@@ -275,7 +275,12 @@ class JarSpiderService implements IJarSpiderService {
       }
       return map['data'];
     } on PlatformException catch (e) {
-      throw Exception(e.message ?? e.code);
+      final details = e.details?.toString().trim() ?? '';
+      throw Exception(
+        details.isEmpty
+            ? (e.message ?? e.code)
+            : '${e.message ?? e.code}\n$details',
+      );
     }
   }
 

@@ -26,7 +26,7 @@ object JarSpiderHost {
     private val pool = Executors.newCachedThreadPool()
     private val dexPattern = Pattern.compile(DEX_PATTERN)
 
-    private var bridge: Any? = null
+    private var bridge: IJarSpiderBridge? = null
     private var bridgeKey: String? = null
     private var channel: MethodChannel? = null
 
@@ -38,6 +38,11 @@ object JarSpiderHost {
                         val value = handle(activity, call)
                         mainHandler.post { result.success(value) }
                     } catch (error: Throwable) {
+                        android.util.Log.e(
+                            "JarSpider",
+                            "JAR bridge channel failed: ${call.method}",
+                            error,
+                        )
                         mainHandler.post {
                             result.error(
                                 "JAR_BRIDGE_ERR",
@@ -60,32 +65,24 @@ object JarSpiderHost {
             )
 
             "loadJar" -> withBridge { loadedBridge ->
-                invokeBridge(
-                    loadedBridge,
-                    "loadJar",
-                    String::class.java to call.argument<String>("jarPath").orEmpty(),
-                )
+                loadedBridge.loadJar(call.argument<String>("jarPath").orEmpty())
             }
 
             "createSpider" -> withBridge { loadedBridge ->
-                invokeBridge(
-                    loadedBridge,
-                    "createSpider",
-                    String::class.java to call.argument<String>("jarPath").orEmpty(),
-                    String::class.java to call.argument<String>("siteKey").orEmpty(),
-                    String::class.java to call.argument<String>("api").orEmpty(),
-                    String::class.java to call.argument<String>("ext").orEmpty(),
+                loadedBridge.createSpider(
+                    call.argument<String>("jarPath").orEmpty(),
+                    call.argument<String>("siteKey").orEmpty(),
+                    call.argument<String>("api").orEmpty(),
+                    call.argument<String>("ext").orEmpty(),
                 )
             }
 
             "call" -> withBridge { loadedBridge ->
-                invokeBridge(
-                    loadedBridge,
-                    "call",
-                    String::class.java to call.argument<String>("jarPath").orEmpty(),
-                    String::class.java to call.argument<String>("siteKey").orEmpty(),
-                    String::class.java to call.argument<String>("method").orEmpty(),
-                    List::class.java to call.argument<List<String>>("args").orEmpty(),
+                loadedBridge.call(
+                    call.argument<String>("jarPath").orEmpty(),
+                    call.argument<String>("siteKey").orEmpty(),
+                    call.argument<String>("method").orEmpty(),
+                    call.argument<List<String>>("args").orEmpty(),
                 )
             }
 
@@ -94,23 +91,14 @@ object JarSpiderHost {
                 val params = (call.arguments as? Map<*, *>)
                     ?.get("params") as? Map<String, String>
                     ?: emptyMap()
-                invokeBridge(
-                    loadedBridge,
-                    "proxy",
-                    String::class.java to call.argument<String>("jarPath").orEmpty(),
-                    Map::class.java to params,
+                loadedBridge.proxy(
+                    call.argument<String>("jarPath").orEmpty(),
+                    params,
                 )
             }
 
             "destroyJar" -> {
-                bridge?.let { loadedBridge ->
-                    invokeBridge(
-                        loadedBridge,
-                        "destroyJar",
-                        String::class.java to
-                            call.argument<String>("jarPath").orEmpty(),
-                    )
-                }
+                bridge?.destroyJar(call.argument<String>("jarPath").orEmpty())
                 mapOf("ok" to true)
             }
 
@@ -123,7 +111,7 @@ object JarSpiderHost {
         }
     }
 
-    private inline fun withBridge(block: (Any) -> Any?): Any {
+    private inline fun withBridge(block: (IJarSpiderBridge) -> Any?): Any {
         val loadedBridge = bridge ?: return bridgeNotLoaded()
         return block(loadedBridge) ?: mapOf(
             "ok" to false,
@@ -175,18 +163,16 @@ object JarSpiderHost {
             dexFiles.joinToString(File.pathSeparator) { it.absolutePath },
             optDir.absolutePath,
             File(pluginDir, "libs").absolutePath,
-            JarSpiderHost::class.java.classLoader,
+            IsolatedDependenciesClassLoader(
+                JarSpiderHost::class.java.classLoader,
+            ),
         )
         val instance = loader.loadClass(BRIDGE_CLASS)
             .getDeclaredConstructor()
             .newInstance()
-        invokeBridge(
-            instance,
-            "init",
-            android.content.Context::class.java to activity.applicationContext,
-            String::class.java to optDir.absolutePath,
-        )
-        bridge = instance
+        val loadedBridge = instance as IJarSpiderBridge
+        loadedBridge.init(activity.applicationContext, optDir.absolutePath)
+        bridge = loadedBridge
         bridgeKey = key
         return mapOf("ok" to true)
     }
@@ -195,18 +181,6 @@ object JarSpiderHost {
         if (file.name == "classes.dex") return 1
         val digits = file.name.removePrefix("classes").removeSuffix(".dex")
         return digits.toIntOrNull() ?: Int.MAX_VALUE
-    }
-
-    private fun invokeBridge(
-        target: Any,
-        methodName: String,
-        vararg args: Pair<Class<*>, Any?>,
-    ): Any? {
-        val method = target.javaClass.getMethod(
-            methodName,
-            *args.map { it.first }.toTypedArray(),
-        )
-        return method.invoke(target, *args.map { it.second }.toTypedArray())
     }
 
     private fun bridgeNotLoaded(): Map<String, Any> = mapOf(
@@ -219,5 +193,20 @@ object JarSpiderHost {
     private fun release() {
         bridge = null
         bridgeKey = null
+    }
+
+    /**
+     * DsPlayer JAR 插件自带 OkHttp/Okio，而 Flutter 应用的其他插件也可能带入
+     * 不同版本。父 ClassLoader 必须隐藏这两组类，让插件从自身 classes.dex/JAR
+     * 中加载成套版本，避免 Buffer/Source 等跨版本类型混淆。
+     */
+    private class IsolatedDependenciesClassLoader(base: ClassLoader) :
+        ClassLoader(base) {
+        override fun loadClass(name: String, resolve: Boolean): Class<*> {
+            if (name.startsWith("okhttp3.") || name.startsWith("okio.")) {
+                throw ClassNotFoundException(name)
+            }
+            return super.loadClass(name, resolve)
+        }
     }
 }
