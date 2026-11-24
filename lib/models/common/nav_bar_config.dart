@@ -66,22 +66,25 @@ enum NavigationBarType implements EnumWithLabel {
 /// 导航栏样式（移动端）
 enum NavigationBarStyle implements EnumWithLabel {
   /// 1. 默认风格：BottomNavigationBar 经典风格
-  default_('默认风格'),
+  default_('默认风格', 56),
 
   /// 2. 默认（紧凑）：关闭 MD3 底栏样式
-  defaultCompact('默认（紧凑）'),
+  defaultCompact('默认（紧凑）', 56),
 
   /// 3. 胶囊高亮：Material3 NavigationBar 胶囊指示器
-  capsule('胶囊高亮'),
+  capsule('胶囊高亮', 70),
 
   /// 4. 悬浮底栏：悬浮圆角卡片
-  floating('悬浮底栏'),
+  floating('悬浮底栏', 56),
 
   /// 5. 极简：仅显示图标，隐藏文字标签
-  minimal('极简');
+  minimal('极简', 48);
 
-  const NavigationBarStyle(this.label);
+  const NavigationBarStyle(this.label, this.baseHeight);
 
   @override
   final String label;
+
+  /// 不含系统安全区的基础高度。
+  final double baseHeight;
 }

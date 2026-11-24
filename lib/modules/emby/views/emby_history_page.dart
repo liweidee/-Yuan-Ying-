@@ -3,6 +3,7 @@ import 'package:get/get.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:yuanying/common/widgets/loading_widget/m3e_loading_indicator.dart';
 import 'package:yuanying/common/widgets/video_card/video_card_v.dart';
+import 'package:yuanying/common/widgets/bottom_bar_content_insets.dart';
 import 'package:yuanying/core/routes/app_pages.dart';
 import 'package:yuanying/utils/emby_converter.dart';
 import '../controllers/emby_history_controller.dart';
@@ -57,6 +58,10 @@ class EmbyHistoryPage extends StatelessWidget {
             onRefresh: ctrl.refreshData,
             child: ListView(
               physics: const AlwaysScrollableScrollPhysics(),
+              padding: BottomBarContentInsets.addToPadding(
+                context,
+                EdgeInsets.zero,
+              ),
               children: [
                 SizedBox(
                   height: MediaQuery.sizeOf(context).height * 0.7,
@@ -99,7 +104,10 @@ class EmbyHistoryPage extends StatelessWidget {
           child: GridView.builder(
             controller: ctrl.scrollController,
             physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            padding: BottomBarContentInsets.addToPadding(
+              context,
+              const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            ),
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: crossAxisCount,
               childAspectRatio: 0.6,

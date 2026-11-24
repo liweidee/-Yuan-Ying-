@@ -125,19 +125,22 @@ class RootfsManager {
     final token = cancelToken ?? CancelToken();
 
     void emit(RootfsStage stage, {int r = 0, int t = 0, String? detail}) {
-      onProgress(RootfsProgress(
-        stage: stage,
-        received: r,
-        total: t,
-        detail: detail,
-      ));
+      onProgress(
+        RootfsProgress(
+          stage: stage,
+          received: r,
+          total: t,
+          detail: detail,
+        ),
+      );
     }
 
     emit(RootfsStage.checking);
     final cache = await SandboxPaths.cache();
     final tgz = File(p.join(cache.path, '${distro.id}.tar.gz'));
 
-    final cachedOk = tgz.existsSync() &&
+    final cachedOk =
+        tgz.existsSync() &&
         await tgz.length() >= (distro.sizeBytes * 0.8).round();
 
     if (!cachedOk) {
@@ -327,7 +330,7 @@ class RootfsManager {
         final installedAt = json['installedAt']?.toString();
         final t = installedAt != null
             ? (DateTime.tryParse(installedAt) ??
-                DateTime.fromMillisecondsSinceEpoch(0))
+                  DateTime.fromMillisecondsSinceEpoch(0))
             : DateTime.fromMillisecondsSinceEpoch(0);
         if (latestTime == null || t.isAfter(latestTime)) {
           latestTime = t;
@@ -361,7 +364,8 @@ class RootfsManager {
       throw Exception('HTTP ${resp.statusCode}');
     }
 
-    final contentLength = int.tryParse(
+    final contentLength =
+        int.tryParse(
           resp.headers.value(Headers.contentLengthHeader) ?? '',
         ) ??
         0;
@@ -488,16 +492,20 @@ class RootfsManager {
     }
     const codename = 'noble';
 
-    final keyring = File(p.join(
-      rootfs.path,
-      'usr/share/keyrings/ubuntu-archive-keyring.gpg',
-    ));
+    final keyring = File(
+      p.join(
+        rootfs.path,
+        'usr/share/keyrings/ubuntu-archive-keyring.gpg',
+      ),
+    );
     final hasKeyring = keyring.existsSync();
 
-    final sourcesDeb822 = File(p.join(
-      rootfs.path,
-      'etc/apt/sources.list.d/ubuntu.sources',
-    ));
+    final sourcesDeb822 = File(
+      p.join(
+        rootfs.path,
+        'etc/apt/sources.list.d/ubuntu.sources',
+      ),
+    );
     await sourcesDeb822.parent.create(recursive: true);
     if (hasKeyring) {
       await sourcesDeb822.writeAsString('''
@@ -533,7 +541,7 @@ Trusted: yes
 
   Future<void> _extractTarGz(File tgz, Directory target) async {
     final bytes = await tgz.readAsBytes();
-    final gz = GZipDecoder().decodeBytes(bytes);
+    final gz = const GZipDecoder().decodeBytes(bytes);
     final archive = TarDecoder().decodeBytes(gz);
 
     final normalizedTarget = p.normalize(target.path);
@@ -548,9 +556,14 @@ Trusted: yes
       }
 
       if (f.isSymbolicLink) {
-        final linkTarget = f.content is String
-            ? f.content as String
-            : utf8.decode(f.content as List<int>, allowMalformed: true);
+        // archive >= 4.x stores the link target in symbolicLink. Reading
+        // content here yields an empty byte array, which made every Alpine
+        // BusyBox applet symlink fail to be created.
+        final linkTarget = f.symbolicLink;
+        if (linkTarget == null || linkTarget.isEmpty) {
+          debugPrint('[RootfsManager] skip empty link target: ${f.name}');
+          continue;
+        }
         try {
           final link = Link(outPath);
           await link.parent.create(recursive: true);
@@ -567,7 +580,7 @@ Trusted: yes
         await out.parent.create(recursive: true);
         await out.writeAsBytes(f.content as List<int>);
         final mode = f.mode;
-        if (mode != null && (mode & 0x49) != 0) {
+        if ((mode & 0x49) != 0) {
           try {
             await Process.run('chmod', ['755', outPath]);
           } catch (e) {
@@ -583,10 +596,27 @@ Trusted: yes
 
   Future<void> _fixPermissions(Directory rootfs) async {
     const criticalDirs = [
-      'bin', 'sbin', 'usr', 'usr/bin', 'usr/sbin', 'usr/lib',
-      'usr/local', 'usr/local/bin', 'usr/share', 'etc', 'var',
-      'var/lib', 'var/cache', 'tmp', 'root', 'lib', 'lib64',
-      'dev', 'proc', 'sys', 'run',
+      'bin',
+      'sbin',
+      'usr',
+      'usr/bin',
+      'usr/sbin',
+      'usr/lib',
+      'usr/local',
+      'usr/local/bin',
+      'usr/share',
+      'etc',
+      'var',
+      'var/lib',
+      'var/cache',
+      'tmp',
+      'root',
+      'lib',
+      'lib64',
+      'dev',
+      'proc',
+      'sys',
+      'run',
     ];
     for (final rel in criticalDirs) {
       final d = Directory(p.join(rootfs.path, rel));
@@ -598,9 +628,16 @@ Trusted: yes
     }
 
     const criticalFiles = [
-      'bin/sh', 'bin/busybox', 'bin/ash', 'sbin/apk',
-      'usr/bin/env', 'usr/bin/apt', 'usr/bin/apt-get',
-      'usr/bin/dpkg', 'bin/dash', 'usr/bin/perl',
+      'bin/sh',
+      'bin/busybox',
+      'bin/ash',
+      'sbin/apk',
+      'usr/bin/env',
+      'usr/bin/apt',
+      'usr/bin/apt-get',
+      'usr/bin/dpkg',
+      'bin/dash',
+      'usr/bin/perl',
     ];
     for (final rel in criticalFiles) {
       final f = File(p.join(rootfs.path, rel));

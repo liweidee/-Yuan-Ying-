@@ -39,24 +39,8 @@ class _MainPageState extends State<MainPage> {
   }
 
   double _getBottomBarHeight(NavigationBarStyle style) {
-    double baseHeight;
-    switch (style) {
-      case NavigationBarStyle.default_:
-      case NavigationBarStyle.defaultCompact:
-        baseHeight = 56.0;
-        break;
-      case NavigationBarStyle.capsule:
-        baseHeight = 70.0;
-        break;
-      case NavigationBarStyle.floating:
-        baseHeight = 56.0;
-        break;
-      case NavigationBarStyle.minimal:
-        baseHeight = 48.0;
-        break;
-    }
     final bottomPadding = MediaQuery.viewPaddingOf(context).bottom;
-    return baseHeight + bottomPadding;
+    return style.baseHeight + bottomPadding;
   }
 
   @override

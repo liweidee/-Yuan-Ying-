@@ -17,11 +17,13 @@ import 'package:yuanying/modules/setting/models/setting_pref.dart';
 class CategoryPage extends StatefulWidget {
   final CategoryController controller;
   final Function(VideoItem) onVideoTap;
+  final double bottomContentInset;
 
   const CategoryPage({
     Key? key,
     required this.controller,
     required this.onVideoTap,
+    this.bottomContentInset = 0,
   }) : super(key: key);
 
   @override
@@ -210,7 +212,7 @@ class _CategoryPageState extends State<CategoryPage>
             padding: EdgeInsets.only(
               left: Style.safeSpace,
               right: Style.safeSpace,
-              bottom: 16,
+              bottom: 16 + widget.bottomContentInset,
             ),
             itemCount: videoList.length + 1,
             itemBuilder: (context, index) {
@@ -247,7 +249,7 @@ class _CategoryPageState extends State<CategoryPage>
             padding: EdgeInsets.only(
               left: Style.safeSpace,
               right: Style.safeSpace,
-              bottom: 16,
+              bottom: 16 + widget.bottomContentInset,
             ),
             gridDelegate: gridDelegate,
             itemCount: videoList.length,

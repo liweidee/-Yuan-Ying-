@@ -4,9 +4,11 @@ import 'package:get/get.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 
 import '../../../common/widgets/floating_navigation_bar.dart';
+import '../../../common/widgets/bottom_bar_content_insets.dart';
 import '../../../models/common/nav_bar_config.dart';
 import '../../../modules/setting/models/setting_pref.dart';
 import '../../../modules/setting/controllers/bg_config_controller.dart';
+import '../../../modules/main/controllers/main_controller.dart';
 import '../../music/views/music_player_view.dart';
 import '../controllers/lx_board_controller.dart';
 import '../controllers/lx_download_controller.dart';
@@ -70,6 +72,9 @@ class _LxMusicPageState extends State<LxMusicPage> {
         final _ = Get.find<BgConfigController>().version.value;
       }
       final bgActive = SettingPref.bgActive;
+      if (Get.isRegistered<MainController>()) {
+        final _ = Get.find<MainController>().navStyleVersion.value;
+      }
 
       return Scaffold(
         extendBody: true,
@@ -103,45 +108,48 @@ class _LxMusicPageState extends State<LxMusicPage> {
             const SizedBox(width: 4),
           ],
         ),
-        body: Column(
-          children: [
-            Expanded(
-              child: Obx(() {
-                if (!_musicController.engineReady.value) {
-                  return const Center(child: CircularProgressIndicator());
+        body: BottomBarContentInsets(
+          style: SettingPref.navigationBarStyle,
+          child: Column(
+            children: [
+              Expanded(
+                child: Obx(() {
+                  if (!_musicController.engineReady.value) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  return IndexedStack(
+                    index: selectedIndex.value,
+                    children: const [
+                      LxBoardTab(),
+                      LxSearchTab(),
+                      LxDownloadTab(),
+                      LxSettingsTab(),
+                    ],
+                  );
+                }),
+              ),
+              // 全局播放条：仅在"本次会话播过洛雪歌曲" + "当前是洛雪渠道"时显示
+              Obx(() {
+                if (!LxPlayerHelper.hasPlayedInSession.value) {
+                  return const SizedBox.shrink();
                 }
-                return IndexedStack(
-                  index: selectedIndex.value,
-                  children: const [
-                    LxBoardTab(),
-                    LxSearchTab(),
-                    LxDownloadTab(),
-                    LxSettingsTab(),
-                  ],
+                final controller = Get.find<MusicPlayerController>();
+                if (!controller.isLxChannel) {
+                  return const SizedBox.shrink();
+                }
+                return MusicPlayerView(
+                  cancelMargin: true,
+                  onClose: () async {
+                    // 暂停播放 + 隐藏底条（保留队列）
+                    // controller.pause();
+                    await controller.closePlayer();
+                    LxPlayerHelper.hasPlayedInSession.value = false;
+                    SmartDialog.showToast('已停止播放');
+                  },
                 );
               }),
-            ),
-            // 全局播放条：仅在"本次会话播过洛雪歌曲" + "当前是洛雪渠道"时显示
-            Obx(() {
-              if (!LxPlayerHelper.hasPlayedInSession.value) {
-                return const SizedBox.shrink();
-              }
-              final controller = Get.find<MusicPlayerController>();
-              if (!controller.isLxChannel) {
-                return const SizedBox.shrink();
-              }
-              return MusicPlayerView(
-                cancelMargin: true,
-                onClose: () async {
-                  // 暂停播放 + 隐藏底条（保留队列）
-                  // controller.pause();
-                  await controller.closePlayer();
-                  LxPlayerHelper.hasPlayedInSession.value = false;
-                  SmartDialog.showToast('已停止播放');
-                },
-              );
-            }),
-          ],
+            ],
+          ),
         ),
         bottomNavigationBar: Obx(() {
           final style = SettingPref.navigationBarStyle;
@@ -247,6 +255,28 @@ class _LxMusicPageState extends State<LxMusicPage> {
             }).toList(),
           );
 
+          final minimalNavigationBar = NavigationBar(
+            backgroundColor: bgActive ? Colors.transparent : null,
+            surfaceTintColor: bgActive ? Colors.transparent : null,
+            height: 48,
+            elevation: bgActive ? 0 : null,
+            selectedIndex: idx,
+            onDestinationSelected: (i) => selectedIndex.value = i,
+            indicatorColor:
+                colorScheme.primaryContainer.withValues(alpha: 0.5),
+            labelBehavior: NavigationDestinationLabelBehavior.alwaysHide,
+            overlayColor: WidgetStateProperty.all(Colors.transparent),
+            destinations: _navItems.map((item) {
+              return NavigationDestination(
+                tooltip: item.label,
+                icon: Icon(item.icon, size: 24, color: colorScheme.outline),
+                selectedIcon: Icon(item.selectedIcon,
+                    size: 24, color: colorScheme.primary),
+                label: item.label,
+              );
+            }).toList(),
+          );
+
           Widget bottomBar;
           switch (style) {
             case NavigationBarStyle.default_:
@@ -274,8 +304,10 @@ class _LxMusicPageState extends State<LxMusicPage> {
                 }).toList(),
               );
               break;
+            case NavigationBarStyle.minimal:
+              bottomBar = minimalNavigationBar;
+              break;
             case NavigationBarStyle.capsule:
-            default:
               bottomBar = capsuleNavigationBar;
               break;
           }

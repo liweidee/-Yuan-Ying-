@@ -8,6 +8,7 @@ import 'package:yuanying/modules/lx_music/views/lx_favorites_page.dart';
 import 'package:yuanying/modules/lx_music/views/lx_playlist_page.dart';
 import 'package:yuanying/modules/lx_music/views/lx_recent_page.dart';
 import 'package:yuanying/modules/lx_music/views/lx_source_manage_page.dart';
+import 'package:yuanying/common/widgets/bottom_bar_content_insets.dart';
 
 /// 洛雪音乐设置 Tab
 class LxSettingsTab extends StatelessWidget {
@@ -21,7 +22,10 @@ class LxSettingsTab extends StatelessWidget {
         : Get.put(LxSourceController());
 
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: BottomBarContentInsets.addToPadding(
+        context,
+        const EdgeInsets.all(16),
+      ),
       children: [
         // ===== 我的音乐 =====
         _sectionTitle('我的音乐', colorScheme),

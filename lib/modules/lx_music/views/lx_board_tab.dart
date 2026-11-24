@@ -6,6 +6,7 @@ import 'package:yuanying/modules/lx_music/models/lx_board_model.dart';
 import 'package:yuanying/modules/lx_music/models/lx_music_model.dart';
 import 'package:yuanying/modules/lx_music/services/lx_board_service.dart';
 import 'package:yuanying/modules/lx_music/utils/lx_player_helper.dart';
+import 'package:yuanying/common/widgets/bottom_bar_content_insets.dart';
 
 /// 洛雪音乐榜单 Tab
 ///
@@ -245,7 +246,10 @@ class _LxBoardTabState extends State<LxBoardTab> {
         child: ListView.builder(
           controller: _scrollController,
           physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          padding: BottomBarContentInsets.addToPadding(
+            context,
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          ),
           itemCount: songs.length + 1,
           itemBuilder: (context, index) {
             if (index == songs.length) {

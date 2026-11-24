@@ -26,7 +26,7 @@ object JarSpiderHost {
     private val pool = Executors.newCachedThreadPool()
     private val dexPattern = Pattern.compile(DEX_PATTERN)
 
-    private var bridge: IJarSpiderBridge? = null
+    private var bridge: Any? = null
     private var bridgeKey: String? = null
     private var channel: MethodChannel? = null
 
@@ -41,8 +41,8 @@ object JarSpiderHost {
                         mainHandler.post {
                             result.error(
                                 "JAR_BRIDGE_ERR",
-                                "${error.javaClass.simpleName}: ${error.message.orEmpty()}",
-                                null,
+                                error.toString(),
+                                android.util.Log.getStackTraceString(error),
                             )
                         }
                     }
@@ -60,36 +60,57 @@ object JarSpiderHost {
             )
 
             "loadJar" -> withBridge { loadedBridge ->
-                loadedBridge.loadJar(call.argument<String>("jarPath").orEmpty())
+                invokeBridge(
+                    loadedBridge,
+                    "loadJar",
+                    String::class.java to call.argument<String>("jarPath").orEmpty(),
+                )
             }
 
             "createSpider" -> withBridge { loadedBridge ->
-                loadedBridge.createSpider(
-                    call.argument<String>("jarPath").orEmpty(),
-                    call.argument<String>("siteKey").orEmpty(),
-                    call.argument<String>("api").orEmpty(),
-                    call.argument<String>("ext").orEmpty(),
+                invokeBridge(
+                    loadedBridge,
+                    "createSpider",
+                    String::class.java to call.argument<String>("jarPath").orEmpty(),
+                    String::class.java to call.argument<String>("siteKey").orEmpty(),
+                    String::class.java to call.argument<String>("api").orEmpty(),
+                    String::class.java to call.argument<String>("ext").orEmpty(),
                 )
             }
 
             "call" -> withBridge { loadedBridge ->
-                loadedBridge.call(
-                    call.argument<String>("jarPath").orEmpty(),
-                    call.argument<String>("siteKey").orEmpty(),
-                    call.argument<String>("method").orEmpty(),
-                    call.argument<List<String>>("args").orEmpty(),
+                invokeBridge(
+                    loadedBridge,
+                    "call",
+                    String::class.java to call.argument<String>("jarPath").orEmpty(),
+                    String::class.java to call.argument<String>("siteKey").orEmpty(),
+                    String::class.java to call.argument<String>("method").orEmpty(),
+                    List::class.java to call.argument<List<String>>("args").orEmpty(),
                 )
             }
 
             "proxy" -> withBridge { loadedBridge ->
-                loadedBridge.proxy(
-                    call.argument<String>("jarPath").orEmpty(),
-                    call.argument<Map<String, String>>("params").orEmpty(),
+                @Suppress("UNCHECKED_CAST")
+                val params = (call.arguments as? Map<*, *>)
+                    ?.get("params") as? Map<String, String>
+                    ?: emptyMap()
+                invokeBridge(
+                    loadedBridge,
+                    "proxy",
+                    String::class.java to call.argument<String>("jarPath").orEmpty(),
+                    Map::class.java to params,
                 )
             }
 
             "destroyJar" -> {
-                bridge?.destroyJar(call.argument<String>("jarPath").orEmpty())
+                bridge?.let { loadedBridge ->
+                    invokeBridge(
+                        loadedBridge,
+                        "destroyJar",
+                        String::class.java to
+                            call.argument<String>("jarPath").orEmpty(),
+                    )
+                }
                 mapOf("ok" to true)
             }
 
@@ -102,7 +123,7 @@ object JarSpiderHost {
         }
     }
 
-    private inline fun withBridge(block: (IJarSpiderBridge) -> Any?): Any {
+    private inline fun withBridge(block: (Any) -> Any?): Any {
         val loadedBridge = bridge ?: return bridgeNotLoaded()
         return block(loadedBridge) ?: mapOf(
             "ok" to false,
@@ -159,9 +180,13 @@ object JarSpiderHost {
         val instance = loader.loadClass(BRIDGE_CLASS)
             .getDeclaredConstructor()
             .newInstance()
-        val loadedBridge = instance as IJarSpiderBridge
-        loadedBridge.init(activity.applicationContext, optDir.absolutePath)
-        bridge = loadedBridge
+        invokeBridge(
+            instance,
+            "init",
+            android.content.Context::class.java to activity.applicationContext,
+            String::class.java to optDir.absolutePath,
+        )
+        bridge = instance
         bridgeKey = key
         return mapOf("ok" to true)
     }
@@ -170,6 +195,18 @@ object JarSpiderHost {
         if (file.name == "classes.dex") return 1
         val digits = file.name.removePrefix("classes").removeSuffix(".dex")
         return digits.toIntOrNull() ?: Int.MAX_VALUE
+    }
+
+    private fun invokeBridge(
+        target: Any,
+        methodName: String,
+        vararg args: Pair<Class<*>, Any?>,
+    ): Any? {
+        val method = target.javaClass.getMethod(
+            methodName,
+            *args.map { it.first }.toTypedArray(),
+        )
+        return method.invoke(target, *args.map { it.second }.toTypedArray())
     }
 
     private fun bridgeNotLoaded(): Map<String, Any> = mapOf(

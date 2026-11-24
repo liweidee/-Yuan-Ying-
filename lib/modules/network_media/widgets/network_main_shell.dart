@@ -4,7 +4,9 @@ import 'package:get/get.dart';
 import 'package:yuanying/models/common/nav_bar_config.dart';
 import 'package:yuanying/modules/setting/models/setting_pref.dart';
 import 'package:yuanying/modules/setting/controllers/bg_config_controller.dart';
+import 'package:yuanying/common/widgets/bottom_bar_content_insets.dart';
 import 'package:yuanying/common/widgets/floating_navigation_bar.dart';
+import 'package:yuanying/modules/main/controllers/main_controller.dart';
 
 class NetworkMainShell extends StatefulWidget {
   const NetworkMainShell({
@@ -42,6 +44,9 @@ class _NetworkMainShellState extends State<NetworkMainShell> {
         final _ = Get.find<BgConfigController>().version.value;
       }
       final bgActive = SettingPref.bgActive;
+      if (Get.isRegistered<MainController>()) {
+        final _ = Get.find<MainController>().navStyleVersion.value;
+      }
 
       return Scaffold(
         extendBody: true,
@@ -54,10 +59,13 @@ class _NetworkMainShellState extends State<NetworkMainShell> {
           ),
           title: Text(widget.title),
         ),
-        body: Obx(() => IndexedStack(
-              index: _selectedIndex.value,
-              children: [widget.filePage, widget.downloadPage],
-            )),
+        body: BottomBarContentInsets(
+          style: SettingPref.navigationBarStyle,
+          child: Obx(() => IndexedStack(
+                index: _selectedIndex.value,
+                children: [widget.filePage, widget.downloadPage],
+              )),
+        ),
         bottomNavigationBar: Obx(() {
           final style = SettingPref.navigationBarStyle;
 
@@ -121,8 +129,31 @@ class _NetworkMainShellState extends State<NetworkMainShell> {
               );
               break;
 
+            case NavigationBarStyle.minimal:
+              bottomBar = NavigationBar(
+                backgroundColor:
+                    SettingPref.bgActive ? Colors.transparent : null,
+                surfaceTintColor:
+                    SettingPref.bgActive ? Colors.transparent : null,
+                height: 48,
+                elevation: SettingPref.bgActive ? 0 : null,
+                selectedIndex: _selectedIndex.value,
+                onDestinationSelected: (i) => _selectedIndex.value = i,
+                indicatorColor: cs.primaryContainer.withValues(alpha: 0.5),
+                labelBehavior: NavigationDestinationLabelBehavior.alwaysHide,
+                overlayColor:
+                    WidgetStateProperty.all(Colors.transparent),
+                destinations: destinations.map((d) => NavigationDestination(
+                      tooltip: d.label,
+                      icon: Icon(d.icon, size: 24, color: cs.outline),
+                      selectedIcon:
+                          Icon(d.selectedIcon, size: 24, color: cs.primary),
+                      label: d.label,
+                    )).toList(),
+              );
+              break;
+
             case NavigationBarStyle.capsule:
-            default:
               bottomBar = NavigationBar(
                 backgroundColor: SettingPref.bgActive ? Colors.transparent : null,
                 surfaceTintColor: SettingPref.bgActive ? Colors.transparent : null,

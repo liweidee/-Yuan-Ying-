@@ -3,6 +3,7 @@ import 'package:get/get.dart';
 import 'package:yuanying/common/widgets/loading_widget/m3e_loading_indicator.dart';
 import 'package:yuanying/core/routes/app_pages.dart';
 import 'package:yuanying/core/theme/style.dart';
+import 'package:yuanying/common/widgets/bottom_bar_content_insets.dart';
 import '../controllers/fnos_library_controller.dart';
 import '../controllers/fnos_server_controller.dart';
 import '../models/fnos_media_item.dart';
@@ -242,7 +243,10 @@ class _FnosLibraryGrid extends StatelessWidget {
 
       return GridView.builder(
         controller: ctrl.scrollController,
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        padding: BottomBarContentInsets.addToPadding(
+          context,
+          const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        ),
         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: crossAxisCount,
           childAspectRatio: 0.55,
@@ -331,7 +335,10 @@ class _FnosLibraryListContent extends StatelessWidget {
           );
         }
         return ListView.separated(
-          padding: const EdgeInsets.all(Style.safeSpace),
+          padding: BottomBarContentInsets.addToPadding(
+            context,
+            const EdgeInsets.all(Style.safeSpace),
+          ),
           itemCount: list.length,
           separatorBuilder: (_, __) => const SizedBox(height: 8),
           itemBuilder: (_, i) {

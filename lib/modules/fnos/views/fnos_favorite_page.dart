@@ -3,6 +3,7 @@ import 'package:get/get.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:yuanying/common/widgets/loading_widget/m3e_loading_indicator.dart';
 import 'package:yuanying/core/routes/app_pages.dart';
+import 'package:yuanying/common/widgets/bottom_bar_content_insets.dart';
 import '../controllers/fnos_favorite_controller.dart';
 import '../controllers/fnos_server_controller.dart';
 import '../models/fnos_media_item.dart';
@@ -121,6 +122,10 @@ class FnosFavoritePage extends StatelessWidget {
                 onRefresh: ctrl.refreshCurrent,
                 child: ListView(
                   physics: const AlwaysScrollableScrollPhysics(),
+                  padding: BottomBarContentInsets.addToPadding(
+                    context,
+                    EdgeInsets.zero,
+                  ),
                   children: [
                     SizedBox(
                       height:
@@ -204,7 +209,10 @@ class _FnosFavoriteGrid extends StatelessWidget {
         return false;
       },
       child: GridView.builder(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        padding: BottomBarContentInsets.addToPadding(
+          context,
+          const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        ),
         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: crossAxisCount,
           childAspectRatio: 0.55,

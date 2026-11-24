@@ -12,6 +12,7 @@ import 'package:yuanying/modules/lx_music/services/lx_songlist_service.dart';
 import 'package:yuanying/modules/lx_music/utils/lx_player_helper.dart';
 import 'package:yuanying/modules/lx_music/utils/lx_playlist_helper.dart';
 import 'package:yuanying/modules/lx_music/views/lx_songlist_detail_page.dart';
+import 'package:yuanying/common/widgets/bottom_bar_content_insets.dart';
 
 /// 搜索页（歌曲 + 歌单双 Tab）
 class LxSearchTab extends StatefulWidget {
@@ -359,7 +360,10 @@ class _LxSearchTabState extends State<LxSearchTab> {
     return Obx(() {
       final list = _controller.suggestResults;
       return ListView.builder(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        padding: BottomBarContentInsets.addToPadding(
+          context,
+          const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        ),
         itemCount: list.length,
         itemBuilder: (context, index) {
           final keyword = list[index];
@@ -400,7 +404,10 @@ class _LxSearchTabState extends State<LxSearchTab> {
 
   Widget _buildSuggestions(ColorScheme colorScheme) {
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(20),
+      padding: BottomBarContentInsets.addToPadding(
+        context,
+        const EdgeInsets.all(20),
+      ),
       child: Obx(() {
         final history = _controller.searchHistory;
         final hot = _controller.hotSearches;
@@ -529,7 +536,10 @@ class _LxSearchTabState extends State<LxSearchTab> {
 
       return ListView.builder(
         controller: _scrollController,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        padding: BottomBarContentInsets.addToPadding(
+          context,
+          const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        ),
         itemCount: results.length + (loading ? 1 : 0),
         itemBuilder: (context, index) {
           if (index == results.length) {
@@ -694,7 +704,10 @@ class _LxSearchTabState extends State<LxSearchTab> {
         );
       }
       return ListView.builder(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        padding: BottomBarContentInsets.addToPadding(
+          context,
+          const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        ),
         itemCount: _playlistResults.length,
         itemBuilder: (context, index) {
           final info = _playlistResults[index];

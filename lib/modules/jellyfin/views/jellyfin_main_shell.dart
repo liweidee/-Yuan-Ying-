@@ -5,7 +5,9 @@ import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:yuanying/models/common/nav_bar_config.dart';
 import 'package:yuanying/modules/setting/models/setting_pref.dart';
 import 'package:yuanying/modules/setting/controllers/bg_config_controller.dart';
+import 'package:yuanying/common/widgets/bottom_bar_content_insets.dart';
 import 'package:yuanying/common/widgets/floating_navigation_bar.dart';
+import 'package:yuanying/modules/main/controllers/main_controller.dart';
 
 import '../controllers/jellyfin_server_controller.dart';
 import '../controllers/jellyfin_history_controller.dart';
@@ -46,6 +48,9 @@ class JellyfinMainShell extends StatelessWidget {
         final _ = Get.find<BgConfigController>().version.value;
       }
       final bgActive = SettingPref.bgActive;
+      if (Get.isRegistered<MainController>()) {
+        final _ = Get.find<MainController>().navStyleVersion.value;
+      }
 
       return Scaffold(
         extendBody: true,
@@ -70,16 +75,19 @@ class JellyfinMainShell extends StatelessWidget {
             }),
           ],
         ),
-        body: Obx(() => IndexedStack(
-              index: selectedIndex.value,
-              children: const [
-                JellyfinHomePage(),
-                JellyfinFavoritePage(),
-                JellyfinHistoryPage(),
-                JellyfinSearchPage(),
-                JellyfinDownloadPage(),
-              ],
-            )),
+        body: BottomBarContentInsets(
+          style: SettingPref.navigationBarStyle,
+          child: Obx(() => IndexedStack(
+                index: selectedIndex.value,
+                children: const [
+                  JellyfinHomePage(),
+                  JellyfinFavoritePage(),
+                  JellyfinHistoryPage(),
+                  JellyfinSearchPage(),
+                  JellyfinDownloadPage(),
+                ],
+              )),
+        ),
         bottomNavigationBar: Obx(() {
           final style = SettingPref.navigationBarStyle;
 
@@ -153,6 +161,30 @@ class JellyfinMainShell extends StatelessWidget {
             )).toList(),
           );
 
+          final minimalNavigationBar = NavigationBar(
+            backgroundColor:
+                SettingPref.bgActive ? Colors.transparent : null,
+            surfaceTintColor:
+                SettingPref.bgActive ? Colors.transparent : null,
+            height: 48,
+            elevation: SettingPref.bgActive ? 0 : null,
+            selectedIndex: selectedIndex.value,
+            onDestinationSelected: (index) => selectedIndex.value = index,
+            indicatorColor:
+                colorScheme.primaryContainer.withValues(alpha: 0.5),
+            labelBehavior: NavigationDestinationLabelBehavior.alwaysHide,
+            overlayColor: WidgetStateProperty.all(Colors.transparent),
+            destinations:
+                jellyfinNavigationBars.map((item) => NavigationDestination(
+                      tooltip: item.label,
+                      icon: Icon(item.icon,
+                          size: 24, color: colorScheme.outline),
+                      selectedIcon: Icon(item.selectedIcon,
+                          size: 24, color: colorScheme.primary),
+                      label: item.label,
+                    )).toList(),
+          );
+
           Widget bottomBar;
           switch (style) {
             case NavigationBarStyle.default_:
@@ -174,8 +206,10 @@ class JellyfinMainShell extends StatelessWidget {
                 )).toList(),
               );
               break;
+            case NavigationBarStyle.minimal:
+              bottomBar = minimalNavigationBar;
+              break;
             case NavigationBarStyle.capsule:
-            default:
               bottomBar = capsuleNavigationBar;
               break;
           }

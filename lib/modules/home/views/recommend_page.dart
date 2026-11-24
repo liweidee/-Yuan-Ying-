@@ -14,11 +14,13 @@ import 'package:yuanying/core/theme/style.dart';
 class RecommendPage extends StatefulWidget {
   final List<VideoItem> data;
   final Function(VideoItem) onVideoTap;
+  final double bottomContentInset;
 
   const RecommendPage({
     Key? key,
     required this.data,
     required this.onVideoTap,
+    this.bottomContentInset = 0,
   }) : super(key: key);
 
   @override
@@ -57,7 +59,7 @@ class _RecommendPageState extends State<RecommendPage>
           padding: EdgeInsets.only(
             left: Style.safeSpace,
             right: Style.safeSpace,
-            bottom: 16,
+            bottom: 16 + widget.bottomContentInset,
           ),
           itemCount: widget.data.length,
           itemBuilder: (context, index) {
@@ -81,7 +83,7 @@ class _RecommendPageState extends State<RecommendPage>
         padding: EdgeInsets.only(
           left: Style.safeSpace,
           right: Style.safeSpace,
-          bottom: 16,
+          bottom: 16 + widget.bottomContentInset,
         ),
         gridDelegate: gridDelegate,
         itemCount: widget.data.length,

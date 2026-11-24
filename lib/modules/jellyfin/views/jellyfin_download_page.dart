@@ -5,6 +5,7 @@ import 'package:get/get.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:yuanying/core/routes/app_pages.dart';
 import 'package:yuanying/core/theme/style.dart';
+import 'package:yuanying/common/widgets/bottom_bar_content_insets.dart';
 import 'package:yuanying/t4/models/video_detail.dart';
 
 import '../controllers/jellyfin_download_controller.dart';
@@ -44,7 +45,10 @@ class JellyfinDownloadPage extends StatelessWidget {
           _buildHeader(context, ctrl),
           Expanded(
             child: ListView.builder(
-              padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+              padding: BottomBarContentInsets.addToPadding(
+                context,
+                const EdgeInsets.fromLTRB(12, 4, 12, 12),
+              ),
               itemCount: ctrl.items.length,
               itemBuilder: (context, index) {
                 final item = ctrl.items[index];

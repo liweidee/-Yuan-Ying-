@@ -1243,6 +1243,7 @@ class _HomePageState extends CommonPageState<HomePage>
           return RecommendPage(
             data: controller.recommendList,
             onVideoTap: _navigateToDetail,
+            bottomContentInset: bottomContentInset,
           );
         }
         final ctrl = controller.getOrCreateController(category.typeId);
@@ -1250,6 +1251,7 @@ class _HomePageState extends CommonPageState<HomePage>
           key: ValueKey('${siteKey}_${category.typeId}'),
           controller: ctrl!,
           onVideoTap: _navigateToDetail,
+          bottomContentInset: bottomContentInset,
         );
       }).toList(),
     );
@@ -1263,12 +1265,7 @@ class _HomePageState extends CommonPageState<HomePage>
         topBar,
         tabBar,
         // const SizedBox(height: 8),
-        Expanded(
-          child: Padding(
-            padding: EdgeInsets.only(bottom: bottomContentInset),
-            child: wrappedTabView,
-          ),
-        ),
+        Expanded(child: wrappedTabView),
       ],
     );
   }

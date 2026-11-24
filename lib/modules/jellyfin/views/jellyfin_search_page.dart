@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:yuanying/core/theme/style.dart';
+import 'package:yuanying/common/widgets/bottom_bar_content_insets.dart';
 import 'package:yuanying/common/widgets/video_card/video_card_v.dart';
 import 'package:yuanying/core/routes/app_pages.dart';
 import 'package:yuanying/utils/jellyfin_converter.dart';
@@ -66,7 +67,10 @@ class JellyfinSearchPage extends StatelessWidget {
               final screenWidth = MediaQuery.of(context).size.width;
               final crossAxisCount = screenWidth > 800 ? 5 : screenWidth > 600 ? 4 : 3;
               return GridView.builder(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                padding: BottomBarContentInsets.addToPadding(
+                  context,
+                  const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                ),
                 gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                   crossAxisCount: crossAxisCount,
                   childAspectRatio: 0.6,

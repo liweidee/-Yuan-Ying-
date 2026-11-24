@@ -22,6 +22,7 @@ class EpisodePanel extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
       child: Wrap(
+        alignment: WrapAlignment.start,
         spacing: 8,
         runSpacing: 8,
         children: episodes.asMap().entries.map((entry) {

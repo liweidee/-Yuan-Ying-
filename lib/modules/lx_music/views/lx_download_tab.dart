@@ -5,6 +5,7 @@ import '../controllers/lx_download_controller.dart';
 import '../models/lx_download_model.dart';
 import '../models/lx_music_model.dart';
 import '../utils/lx_player_helper.dart';
+import 'package:yuanying/common/widgets/bottom_bar_content_insets.dart';
 
 /// 下载 Tab
 class LxDownloadTab extends StatefulWidget {
@@ -83,7 +84,10 @@ class _LxDownloadTabState extends State<LxDownloadTab>
       }
 
       return ListView(
-        padding: const EdgeInsets.all(16),
+        padding: BottomBarContentInsets.addToPadding(
+          context,
+          const EdgeInsets.all(16),
+        ),
         children: [
           ...active.map((t) => _buildActiveItem(t, colorScheme)),
           ...failed.map((t) => _buildFailedItem(t, colorScheme)),
@@ -202,7 +206,10 @@ class _LxDownloadTabState extends State<LxDownloadTab>
             colorScheme);
       }
       return ListView.builder(
-        padding: const EdgeInsets.all(16),
+        padding: BottomBarContentInsets.addToPadding(
+          context,
+          const EdgeInsets.all(16),
+        ),
         itemCount: songs.length,
         itemBuilder: (context, index) {
           final song = songs[index];

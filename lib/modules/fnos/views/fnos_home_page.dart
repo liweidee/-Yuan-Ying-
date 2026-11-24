@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:yuanying/common/widgets/loading_widget/m3e_loading_indicator.dart';
+import 'package:yuanying/common/widgets/bottom_bar_content_insets.dart';
 import 'package:yuanying/core/routes/app_pages.dart';
 import 'package:yuanying/core/theme/style.dart';
 import '../controllers/fnos_home_controller.dart';
@@ -345,7 +346,11 @@ class FnosHomePage extends StatelessWidget {
                 ),
               ),
 
-            const SliverToBoxAdapter(child: SizedBox(height: 20)),
+            SliverToBoxAdapter(
+              child: SizedBox(
+                height: 20 + BottomBarContentInsets.of(context),
+              ),
+            ),
           ],
         ),
       );

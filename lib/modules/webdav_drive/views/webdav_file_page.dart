@@ -3,6 +3,7 @@ import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:get/get.dart';
 import 'package:yuanying/core/routes/app_pages.dart';
 import 'package:yuanying/t4/models/video_detail.dart';
+import 'package:yuanying/common/widgets/bottom_bar_content_insets.dart';
 
 import '../controllers/webdav_download_controller.dart';
 import '../controllers/webdav_file_controller.dart';
@@ -46,7 +47,10 @@ class WebDavFilePage extends StatelessWidget {
             return RefreshIndicator(
               onRefresh: c.refresh,
               child: ListView.builder(
-                padding: EdgeInsets.zero,
+                padding: BottomBarContentInsets.addToPadding(
+                  context,
+                  EdgeInsets.zero,
+                ),
                 itemCount: c.entries.length,
                 itemBuilder: (_, i) =>
                     _buildEntryTile(context, c, c.entries[i]),
