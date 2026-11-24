@@ -29,6 +29,7 @@ import 'package:qjs_ultra/qjs_ultra.dart';
 import 'package:yuanying/t4/models/play_url.dart';
 import 'package:yuanying/t4/models/video_detail.dart';
 import 'package:yuanying/t4/services/i_spider_service.dart';
+import 'package:yuanying/utils/business_exception.dart';
 import 'package:yuanying/utils/qjs_platform_helper.dart';
 
 // ============================================================
@@ -65,6 +66,8 @@ class QjsDrpy3Service implements ISpiderService {
   // worker 生命周期
   // ============================================================
   Future<bool> _ensureWorker() async {
+    final pluginError = QjsPlatformHelper.checkPluginUsable();
+    if (pluginError != null) throw BusinessException(pluginError);
     if (_workerReady) return true;
     if (_initInFlight) return _readyCompleter!.future;
     _initInFlight = true;
@@ -78,7 +81,7 @@ class QjsDrpy3Service implements ISpiderService {
         _initInFlight = false;
         return false;
       }
-      final libPath = QjsPlatformHelper.libPath;
+      final libPath = await QjsPlatformHelper.requireLibraryPath();
       final bundleCode = await rootBundle.loadString(_bundleAsset);
 
       _responsePort = ReceivePort();
@@ -100,9 +103,9 @@ class QjsDrpy3Service implements ISpiderService {
       );
     } catch (e, st) {
       debugPrint('[QjsDrpy3] worker 创建失败: $e\n$st');
-      _readyCompleter!.complete(false);
       _readyCompleter = null;
       _initInFlight = false;
+      if (e is BusinessException) rethrow;
       return false;
     }
     return _readyCompleter!.future;
@@ -183,8 +186,11 @@ class QjsDrpy3Service implements ISpiderService {
     }
   }
 
-  Future<dynamic> _call(String method, List<dynamic> args,
-      {Duration? timeout}) async {
+  Future<dynamic> _call(
+    String method,
+    List<dynamic> args, {
+    Duration? timeout,
+  }) async {
     if (!await _ensureWorker()) {
       throw StateError('worker not ready');
     }
@@ -232,20 +238,28 @@ class QjsDrpy3Service implements ISpiderService {
   }
 
   @override
-  Future<Map<String, dynamic>> fetchCate(String cateId, int page,
-      {String? ext}) async {
+  Future<Map<String, dynamic>> fetchCate(
+    String cateId,
+    int page, {
+    String? ext,
+  }) async {
     return _asMap(await _call('fetchCate', [cateId, page, ext]));
   }
 
   @override
-  Future<Map<String, dynamic>> search(String wd, int page,
-      {int quick = 0}) async {
+  Future<Map<String, dynamic>> search(
+    String wd,
+    int page, {
+    int quick = 0,
+  }) async {
     return _asMap(await _call('search', [wd, page, quick]));
   }
 
   @override
-  Future<VideoDetail?> getDetail(
-      {required String vodId, required String pwd}) async {
+  Future<VideoDetail?> getDetail({
+    required String vodId,
+    required String pwd,
+  }) async {
     final map = _asMap(await _call('getDetail', [vodId, pwd]));
     final list = map['list'];
     if (list is! List || list.isEmpty) return null;
@@ -281,8 +295,7 @@ class QjsDrpy3Service implements ISpiderService {
   }
 
   @override
-  Future<Map<String, dynamic>> fetchPlayUrl(String play,
-      {String? flag}) async {
+  Future<Map<String, dynamic>> fetchPlayUrl(String play, {String? flag}) async {
     return _asMap(await _call('fetchPlayUrl', [play, flag]));
   }
 
@@ -293,8 +306,7 @@ class QjsDrpy3Service implements ISpiderService {
     required String wd,
     required int page,
     int quick = 0,
-  }) =>
-      search(wd, page, quick: quick);
+  }) => search(wd, page, quick: quick);
 
   List<PlaySource> _parsePlaySources(Map<String, dynamic> map) {
     final from = map['vod_play_from']?.toString() ?? '';
@@ -337,6 +349,9 @@ class QjsDrpy3Service implements ISpiderService {
     }
     _pending.clear();
     _currentKey = null;
+    _pendingApiUrl = null;
+    _pendingSiteKey = null;
+    _pendingExt = null;
     _initInFlight = false;
     _readyCompleter?.complete(false);
     _readyCompleter = null;
@@ -361,7 +376,6 @@ void _drpy3WorkerMain(Map<String, dynamic> args) {
         await _workerImpl?.dispose();
       } catch (_) {}
       Isolate.exit();
-      return;
     }
     if (id == null || method == null) return;
     final callArgs = (msg['args'] as List?) ?? const [];
@@ -409,12 +423,14 @@ class _Drpy3WorkerImpl {
   final Completer<bool> _initDone = Completer<bool>();
   Future<void> _callChain = Future<void>.value();
 
-  final Dio _dio = Dio(BaseOptions(
-    connectTimeout: const Duration(seconds: 30),
-    receiveTimeout: const Duration(seconds: 60),
-    validateStatus: (_) => true,
-    responseType: ResponseType.bytes,
-  ));
+  final Dio _dio = Dio(
+    BaseOptions(
+      connectTimeout: const Duration(seconds: 30),
+      receiveTimeout: const Duration(seconds: 60),
+      validateStatus: (_) => true,
+      responseType: ResponseType.bytes,
+    ),
+  );
 
   // ============================================================
   // init
@@ -499,8 +515,11 @@ class _Drpy3WorkerImpl {
       case 'getPlayUrl':
         return await _callSource('play', [args[1], args[0], []]);
       case 'fetchPlayUrl':
-        return await _callSource(
-            'play', [args.length > 1 ? args[1] ?? '' : '', args[0], []]);
+        return await _callSource('play', [
+          args.length > 1 ? args[1] ?? '' : '',
+          args[0],
+          [],
+        ]);
       default:
         throw ArgumentError('unknown method: $method');
     }
@@ -544,8 +563,10 @@ class _Drpy3WorkerImpl {
       final isM3u8 = target.split('?').first.endsWith('.m3u8');
       // TS 的成功日志统一在 _proxyWithCache 里输出，这里只记录非 TS
       if (!isTs) {
-        print('[drpy3-worker][proxy] << ${isM3u8 ? 'm3u8' : 'other'} '
-            '${_shortName(target)}');
+        print(
+          '[drpy3-worker][proxy] << ${isM3u8 ? 'm3u8' : 'other'} '
+          '${_shortName(target)}',
+        );
       }
       final result = await _proxyWithCache(params);
       await _writeProxyResult(req, result);
@@ -592,8 +613,10 @@ class _Drpy3WorkerImpl {
         }
         _segmentCache[url] = bytes;
         sw.stop();
-        print('[drpy3-worker][ts] $name 解密 ${bytes.length}B '
-            '${sw.elapsedMilliseconds}ms');
+        print(
+          '[drpy3-worker][ts] $name 解密 ${bytes.length}B '
+          '${sw.elapsedMilliseconds}ms',
+        );
         return [200, result[1], bytes, result[3] ?? <String, String>{}, 0];
       } catch (e) {
         print('[drpy3-worker][ts] $name base64 解码失败: $e\n  url=$url');
@@ -602,10 +625,12 @@ class _Drpy3WorkerImpl {
     }
     sw.stop();
     final body = result.length >= 3 ? result[2]?.toString() ?? '' : '';
-    print('[drpy3-worker][ts] $name 未解密 '
-        'status=${result.isNotEmpty ? result[0] : '?'} '
-        'body=${body.length > 120 ? '${body.substring(0, 120)}...' : body}'
-        '\n  url=$url');
+    print(
+      '[drpy3-worker][ts] $name 未解密 '
+      'status=${result.isNotEmpty ? result[0] : '?'} '
+      'body=${body.length > 120 ? '${body.substring(0, 120)}...' : body}'
+      '\n  url=$url',
+    );
     return result;
   }
 
@@ -643,8 +668,7 @@ class _Drpy3WorkerImpl {
     }
   }
 
-  Future<void> _writeProxyResult(
-      HttpRequest req, List<dynamic> result) async {
+  Future<void> _writeProxyResult(HttpRequest req, List<dynamic> result) async {
     if (result.length < 3) {
       req.response.statusCode = 500;
       req.response.add(utf8.encode('invalid proxy result'));
@@ -655,8 +679,14 @@ class _Drpy3WorkerImpl {
     final contentType = result[1]?.toString() ?? 'application/octet-stream';
     final content = result[2];
     final extraHeaders = result.length > 3 && result[3] is Map
-        ? Map<String, String>.from((result[3] as Map).map((k, v) => MapEntry(
-            k.toString(), v is List ? v.join(', ') : v?.toString() ?? '')))
+        ? Map<String, String>.from(
+            (result[3] as Map).map(
+              (k, v) => MapEntry(
+                k.toString(),
+                v is List ? v.join(', ') : v?.toString() ?? '',
+              ),
+            ),
+          )
         : <String, String>{};
     final toBytes = result.length > 4 ? result[4] : null;
 
@@ -687,9 +717,13 @@ class _Drpy3WorkerImpl {
         final reqHeaders = <String, String>{};
         final range = req.headers.value('range');
         if (range != null) reqHeaders['range'] = range;
-        final resp = await _dio.get(content,
-            options: Options(
-                responseType: ResponseType.stream, headers: reqHeaders));
+        final resp = await _dio.get(
+          content,
+          options: Options(
+            responseType: ResponseType.stream,
+            headers: reqHeaders,
+          ),
+        );
         req.response.statusCode = resp.statusCode ?? 200;
         await req.response.addStream((resp.data as ResponseBody).stream);
         await req.response.close();
@@ -716,8 +750,10 @@ class _Drpy3WorkerImpl {
     final msg = (message as Map).cast<String, dynamic>();
     switch (msg['action']) {
       case 'req':
-        return await _doDioRequest(msg['url'] as String,
-            (msg['options'] as Map?)?.cast<String, dynamic>() ?? {});
+        return await _doDioRequest(
+          msg['url'] as String,
+          (msg['options'] as Map?)?.cast<String, dynamic>() ?? {},
+        );
       case 'loadAsset':
         return await _loadAsset(msg['path'] as String);
       case 'getProxy':
@@ -736,7 +772,9 @@ class _Drpy3WorkerImpl {
   }
 
   Future<Map<String, dynamic>> _doDioRequest(
-      String url, Map<String, dynamic> opts) async {
+    String url,
+    Map<String, dynamic> opts,
+  ) async {
     final method = (opts['method'] ?? 'GET').toString().toUpperCase();
     final headers = <String, String>{};
     (opts['headers'] as Map?)?.forEach((k, v) {
@@ -746,7 +784,8 @@ class _Drpy3WorkerImpl {
       headers[k.toString()] = v is List ? v.join(', ') : v.toString();
     });
     if (!headers.keys.any((k) => k.toLowerCase() == 'user-agent')) {
-      headers['User-Agent'] = 'Mozilla/5.0 (Linux; Android 11) '
+      headers['User-Agent'] =
+          'Mozilla/5.0 (Linux; Android 11) '
           'AppleWebKit/537.36 (KHTML, like Gecko) Mobile Safari/537.36';
     }
     dynamic body = opts['body'];
@@ -755,14 +794,16 @@ class _Drpy3WorkerImpl {
       headers.putIfAbsent('Content-Type', () => 'application/json');
     }
     final bufferType = opts['buffer'];
-    final resp = await _dio.request(url,
-        options: Options(
-          method: method,
-          headers: headers,
-          responseType: ResponseType.bytes,
-          validateStatus: (_) => true,
-        ),
-        data: body);
+    final resp = await _dio.request(
+      url,
+      options: Options(
+        method: method,
+        headers: headers,
+        responseType: ResponseType.bytes,
+        validateStatus: (_) => true,
+      ),
+      data: body,
+    );
     final bytes = (resp.data as List).cast<int>();
     final respHeaders = <String, String>{};
     resp.headers.forEach((k, v) {
@@ -772,19 +813,19 @@ class _Drpy3WorkerImpl {
       return {
         'content': Uint8List.fromList(bytes),
         'headers': respHeaders,
-        'buffer': 1
+        'buffer': 1,
       };
     }
     if (bufferType == 2) {
       return {
         'content': base64Encode(bytes),
         'headers': respHeaders,
-        'buffer': 2
+        'buffer': 2,
       };
     }
     return {
       'content': utf8.decode(bytes, allowMalformed: true),
-      'headers': respHeaders
+      'headers': respHeaders,
     };
   }
 
@@ -800,8 +841,9 @@ class _Drpy3WorkerImpl {
     }
     if (!base.startsWith('http://') && !base.startsWith('https://')) {
       final rel = rawPath.startsWith('./') ? rawPath.substring(2) : rawPath;
-      final sep =
-          base.endsWith(Platform.pathSeparator) ? '' : Platform.pathSeparator;
+      final sep = base.endsWith(Platform.pathSeparator)
+          ? ''
+          : Platform.pathSeparator;
       final fullPath = '$base$sep$rel';
       final bytes = await File(fullPath).readAsBytes();
       _assetCache[rawPath] = bytes;
@@ -811,8 +853,10 @@ class _Drpy3WorkerImpl {
   }
 
   Future<Uint8List> _loadAssetHttp(String cacheKey, String url) async {
-    final resp = await _dio.get<List<int>>(url,
-        options: Options(responseType: ResponseType.bytes));
+    final resp = await _dio.get<List<int>>(
+      url,
+      options: Options(responseType: ResponseType.bytes),
+    );
     if (resp.statusCode != 200) {
       throw Exception('loadAsset HTTP ${resp.statusCode}: $url');
     }
@@ -831,8 +875,7 @@ class _Drpy3WorkerImpl {
   // ============================================================
   // 源加载与六环节
   // ============================================================
-  Future<void> _loadSource(String apiUrl, String siteKey,
-      {dynamic ext}) async {
+  Future<void> _loadSource(String apiUrl, String siteKey, {dynamic ext}) async {
     _siteVersion++;
     _siteReady = Completer<void>();
     _currentKey = siteKey;
@@ -870,26 +913,31 @@ class _Drpy3WorkerImpl {
       String code;
       if (inlineCode != null) {
         code = inlineCode;
-        _currentSourceBase =
-            localPath != null ? File(localPath).parent.path : null;
+        _currentSourceBase = localPath != null
+            ? File(localPath).parent.path
+            : null;
       } else {
-        final resp = await _dio.get<List<int>>(sourceUrl!,
-            options: Options(responseType: ResponseType.bytes));
+        final resp = await _dio.get<List<int>>(
+          sourceUrl!,
+          options: Options(responseType: ResponseType.bytes),
+        );
         code = utf8.decode((resp.data ?? []), allowMalformed: true);
         final uri = Uri.parse(sourceUrl);
         final p = uri.path;
         _currentSourceBase = uri
             .replace(
-                path: p.contains('/')
-                    ? p.substring(0, p.lastIndexOf('/') + 1)
-                    : '/')
+              path: p.contains('/')
+                  ? p.substring(0, p.lastIndexOf('/') + 1)
+                  : '/',
+            )
             .toString();
       }
       if (code.trimLeft().startsWith('H4sI')) {
         try {
           code = utf8.decode(
-              gzip.decode(base64Decode(code.replaceAll(RegExp(r'\s'), ''))),
-              allowMalformed: true);
+            gzip.decode(base64Decode(code.replaceAll(RegExp(r'\s'), ''))),
+            allowMalformed: true,
+          );
         } catch (_) {}
       }
       final r = await _engine!.callAsync('__drpy3Load', [
@@ -897,10 +945,9 @@ class _Drpy3WorkerImpl {
         siteKey,
         sourceUrl ?? '',
         extStr.isNotEmpty ? jsonEncode(extStr) : null,
-        siteKey
+        siteKey,
       ]);
-      final failed =
-          r is String && r.contains('__drpy3_error');
+      final failed = r is String && r.contains('__drpy3_error');
       print('[drpy3-worker] 源加载${failed ? '失败' : '成功'}: $siteKey');
       if (failed) print('[drpy3-worker] 详情: $r');
     } catch (e) {
@@ -915,7 +962,9 @@ class _Drpy3WorkerImpl {
   }
 
   Future<Map<String, dynamic>> _callSource(
-      String fn, List<dynamic> args) async {
+    String fn,
+    List<dynamic> args,
+  ) async {
     final ready = _siteReady;
     if (ready != null && !ready.isCompleted) {
       try {
@@ -938,7 +987,7 @@ class _Drpy3WorkerImpl {
             final err = parsed['__drpy3_error'];
             return {
               'success': false,
-              'error': err is Map ? err['error']?.toString() : err.toString()
+              'error': err is Map ? err['error']?.toString() : err.toString(),
             };
           }
           return parsed.cast<String, dynamic>();

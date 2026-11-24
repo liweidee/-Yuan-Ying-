@@ -13,6 +13,7 @@ import 'package:qjs_ultra/qjs_ultra.dart';
 import 'package:yuanying/t4/models/play_url.dart';
 import 'package:yuanying/t4/models/video_detail.dart';
 import 'package:yuanying/t4/services/i_spider_service.dart';
+import 'package:yuanying/utils/business_exception.dart';
 import 'package:yuanying/utils/qjs_platform_helper.dart';
 
 // ============================================================
@@ -44,8 +45,10 @@ class _Drpy2ModuleLoader implements JsModuleLoader {
       debugPrint('[QjsDrpy2/loader] getModuleSource($name) → $n (null)');
       return null;
     }
-    debugPrint('[QjsDrpy2/loader] getModuleSource($name) → $n '
-        '(${src.length} chars)');
+    debugPrint(
+      '[QjsDrpy2/loader] getModuleSource($name) → $n '
+      '(${src.length} chars)',
+    );
     return src;
   }
 
@@ -56,19 +59,22 @@ class _Drpy2ModuleLoader implements JsModuleLoader {
 class QjsDrpy2Service implements ISpiderService {
   Isolate? _worker;
   SendPort? _commandPort;
-  final _responsePort = ReceivePort();
-  final _readyCompleter = Completer<void>();
+  ReceivePort? _responsePort;
+  StreamSubscription? _responseSub;
+  Completer<void>? _readyCompleter;
   final Map<int, Completer<dynamic>> _pending = {};
   int _nextId = 0;
 
   HttpServer? _syncProxyServer;
   int _syncProxyPort = 0;
-  final Dio _dio = Dio(BaseOptions(
-    connectTimeout: const Duration(seconds: 30),
-    receiveTimeout: const Duration(seconds: 60),
-    validateStatus: (_) => true,
-    responseType: ResponseType.bytes,
-  ));
+  final Dio _dio = Dio(
+    BaseOptions(
+      connectTimeout: const Duration(seconds: 30),
+      receiveTimeout: const Duration(seconds: 60),
+      validateStatus: (_) => true,
+      responseType: ResponseType.bytes,
+    ),
+  );
 
   bool _ready = false;
   bool _initializing = false;
@@ -93,6 +99,8 @@ class QjsDrpy2Service implements ISpiderService {
   // 初始化
   // ============================================================
   Future<bool> ensureInitialized() async {
+    final pluginError = QjsPlatformHelper.checkPluginUsable();
+    if (pluginError != null) throw BusinessException(pluginError);
     if (_ready) return true;
     if (_initializing) {
       while (_initializing) {
@@ -115,29 +123,38 @@ class QjsDrpy2Service implements ISpiderService {
       debugPrint('[QjsDrpy2] 当前平台不支持 qjs_ultra');
       return false;
     }
+    final pluginError = QjsPlatformHelper.checkPluginUsable();
+    if (pluginError != null) throw BusinessException(pluginError);
+    final libPath = await QjsPlatformHelper.requireLibraryPath();
 
     try {
       await _startSyncProxyServer();
 
       final drpyCore = await rootBundle.loadString('$_assetDir$_coreFileName');
       final drpy2Js = await rootBundle.loadString('$_assetDir$_drpy2FileName');
-      final cheerioJs = await rootBundle.loadString('$_assetPublicDir$_cheerioFileName');
-      debugPrint('[QjsDrpy2] 文件加载: '
-          '$_coreFileName=${drpyCore.length}, '
-          '$_drpy2FileName=${drpy2Js.length}, '
-          '$_cheerioFileName=${cheerioJs.length}');
+      final cheerioJs = await rootBundle.loadString(
+        '$_assetPublicDir$_cheerioFileName',
+      );
+      debugPrint(
+        '[QjsDrpy2] 文件加载: '
+        '$_coreFileName=${drpyCore.length}, '
+        '$_drpy2FileName=${drpy2Js.length}, '
+        '$_cheerioFileName=${cheerioJs.length}',
+      );
 
-      _responsePort.listen(_onWorkerMessage);
+      _responsePort = ReceivePort();
+      _responseSub = _responsePort!.listen(_onWorkerMessage);
+      _readyCompleter = Completer<void>();
       _worker = await Isolate.spawn(_workerMain, {
-        'port': _responsePort.sendPort,
+        'port': _responsePort!.sendPort,
         'proxyPort': _syncProxyPort,
-        'libPath': QjsPlatformHelper.libPath,
+        'libPath': libPath,
         'drpyCore': drpyCore,
         'drpy2Js': drpy2Js,
         'cheerioJs': cheerioJs,
       });
 
-      await _readyCompleter.future.timeout(
+      await _readyCompleter!.future.timeout(
         const Duration(seconds: 30),
         onTimeout: () => throw Exception('worker 就绪超时'),
       );
@@ -158,6 +175,7 @@ class QjsDrpy2Service implements ISpiderService {
       return true;
     } catch (e, st) {
       debugPrint('[QjsDrpy2] 初始化失败: $e\n$st');
+      dispose();
       return false;
     }
   }
@@ -189,11 +207,13 @@ class QjsDrpy2Service implements ISpiderService {
         if (v == null) return;
         final ks = k.toString();
         final lk = ks.toLowerCase();
-        if (lk == 'host' || lk == 'connection' || lk == 'content-length') return;
+        if (lk == 'host' || lk == 'connection' || lk == 'content-length')
+          return;
         headers[ks] = v is List ? v.join(', ') : v.toString();
       });
       if (!headers.keys.any((k) => k.toLowerCase() == 'user-agent')) {
-        headers['User-Agent'] = 'Mozilla/5.0 (Linux; Android 11; Pixel 5) '
+        headers['User-Agent'] =
+            'Mozilla/5.0 (Linux; Android 11; Pixel 5) '
             'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.91 Mobile Safari/537.36';
       }
 
@@ -249,8 +269,11 @@ class QjsDrpy2Service implements ISpiderService {
     final respBytes = utf8.encode(jsonEncode(respJson));
     req.response
       ..statusCode = 200
-      ..headers.contentType =
-          ContentType('application', 'json', charset: 'utf-8')
+      ..headers.contentType = ContentType(
+        'application',
+        'json',
+        charset: 'utf-8',
+      )
       ..headers.set('Content-Length', respBytes.length.toString())
       ..headers.set('Connection', 'close');
     req.response.add(respBytes);
@@ -263,12 +286,14 @@ class QjsDrpy2Service implements ISpiderService {
       return;
     }
     if (msg is Map && msg['ready'] == true) {
-      if (!_readyCompleter.isCompleted) _readyCompleter.complete();
+      final completer = _readyCompleter;
+      if (completer != null && !completer.isCompleted) completer.complete();
       return;
     }
     if (msg is Map && msg['ready'] == false) {
-      if (!_readyCompleter.isCompleted) {
-        _readyCompleter.completeError(msg['error'] ?? 'worker 启动失败');
+      final completer = _readyCompleter;
+      if (completer != null && !completer.isCompleted) {
+        completer.completeError(msg['error'] ?? 'worker 启动失败');
       }
       return;
     }
@@ -285,6 +310,8 @@ class QjsDrpy2Service implements ISpiderService {
   }
 
   Future<dynamic> _send(String cmd, [List? args]) async {
+    final pluginError = QjsPlatformHelper.checkPluginUsable();
+    if (pluginError != null) throw BusinessException(pluginError);
     if (_commandPort == null) throw Exception('worker 未就绪');
     final id = ++_nextId;
     final c = Completer<dynamic>();
@@ -328,8 +355,10 @@ class QjsDrpy2Service implements ISpiderService {
       engine.evaluate(_browserShim);
 
       // ===== 2. 直接执行 cheerio.min.js（已手动改过，无 export 语法）=====
-      debugPrint('[QjsDrpy2/worker] 加载 cheerio.min.js '
-          '(${cheerioJs.length} chars)');
+      debugPrint(
+        '[QjsDrpy2/worker] 加载 cheerio.min.js '
+        '(${cheerioJs.length} chars)',
+      );
       try {
         engine.evaluate(cheerioJs);
         final check = await engine.evaluateAsync(r'''
@@ -619,7 +648,10 @@ class QjsDrpy2Service implements ISpiderService {
         final out = <String>[];
         for (final item in items) {
           try {
-            if (item is! Map) { out.add(''); continue; }
+            if (item is! Map) {
+              out.add('');
+              continue;
+            }
             final url = item['url']?.toString() ?? '';
             final opts = (item['options'] is Map)
                 ? (item['options'] as Map).cast<String, dynamic>()
@@ -655,7 +687,8 @@ class QjsDrpy2Service implements ISpiderService {
         'buffer': opts['buffer'],
       });
       final payloadBytes = utf8.encode(payload);
-      final head = 'POST /sync-fetch HTTP/1.1\r\n'
+      final head =
+          'POST /sync-fetch HTTP/1.1\r\n'
           'Host: 127.0.0.1\r\n'
           'Content-Type: application/json; charset=utf-8\r\n'
           'Content-Length: ${payloadBytes.length}\r\n'
@@ -694,8 +727,7 @@ class QjsDrpy2Service implements ISpiderService {
 
       final result = <String, dynamic>{
         'content': respJson['content'] ?? '',
-        'headers':
-            (respJson['headers'] as Map?)?.cast<String, dynamic>() ?? {},
+        'headers': (respJson['headers'] as Map?)?.cast<String, dynamic>() ?? {},
       };
       if (respJson['buffer'] != null) result['buffer'] = respJson['buffer'];
       return result;
@@ -737,7 +769,9 @@ class QjsDrpy2Service implements ISpiderService {
         // 手动源场景：apiUrl 是本地文件路径
         try {
           ruleContent = await File(apiUrl).readAsString();
-          debugPrint('[QjsDrpy2] 本地源文件（apiUrl）: $apiUrl (${ruleContent.length} chars)');
+          debugPrint(
+            '[QjsDrpy2] 本地源文件（apiUrl）: $apiUrl (${ruleContent.length} chars)',
+          );
         } catch (e) {
           debugPrint('[QjsDrpy2] 读取本地源失败（apiUrl）: $e');
         }
@@ -782,7 +816,9 @@ class QjsDrpy2Service implements ISpiderService {
         throw Exception('drpy2 init 失败: $r');
       }
     }
-    debugPrint('[QjsDrpy2/worker] 源已加载: $siteKey (${ruleContent.length} chars)');
+    debugPrint(
+      '[QjsDrpy2/worker] 源已加载: $siteKey (${ruleContent.length} chars)',
+    );
   }
 
   static Future<dynamic> _callEngine(
@@ -818,8 +854,9 @@ class QjsDrpy2Service implements ISpiderService {
     if (v is List) return '[${v.map(_toJsLiteral).join(',')}]';
     if (v is Map) {
       final entries = v.entries
-          .map((e) =>
-              '${_toJsLiteral(e.key.toString())}:${_toJsLiteral(e.value)}')
+          .map(
+            (e) => '${_toJsLiteral(e.key.toString())}:${_toJsLiteral(e.value)}',
+          )
           .join(',');
       return '{$entries}';
     }
@@ -1080,28 +1117,48 @@ class QjsDrpy2Service implements ISpiderService {
 
   @override
   Future<Map<String, dynamic>> fetchHome({int filter = 1}) async {
-    final r = await _send('call', ['home', [filter]]);
+    final r = await _send('call', [
+      'home',
+      [filter],
+    ]);
     return r is Map ? r.cast<String, dynamic>() : <String, dynamic>{};
   }
 
   @override
-  Future<Map<String, dynamic>> fetchCate(String cateId, int page,
-      {String? ext}) async {
-    final r = await _send('call', ['category', [cateId, page, false, {}]]);
+  Future<Map<String, dynamic>> fetchCate(
+    String cateId,
+    int page, {
+    String? ext,
+  }) async {
+    final r = await _send('call', [
+      'category',
+      [cateId, page, false, {}],
+    ]);
     return r is Map ? r.cast<String, dynamic>() : <String, dynamic>{};
   }
 
   @override
-  Future<Map<String, dynamic>> search(String wd, int page,
-      {int quick = 0}) async {
-    final r = await _send('call', ['search', [wd, quick == 1, page]]);
+  Future<Map<String, dynamic>> search(
+    String wd,
+    int page, {
+    int quick = 0,
+  }) async {
+    final r = await _send('call', [
+      'search',
+      [wd, quick == 1, page],
+    ]);
     return r is Map ? r.cast<String, dynamic>() : <String, dynamic>{};
   }
 
   @override
-  Future<VideoDetail?> getDetail(
-      {required String vodId, required String pwd}) async {
-    final r = await _send('call', ['detail', [vodId]]);
+  Future<VideoDetail?> getDetail({
+    required String vodId,
+    required String pwd,
+  }) async {
+    final r = await _send('call', [
+      'detail',
+      [vodId],
+    ]);
     if (r is! Map) return null;
     final list = r['list'];
     if (list is! List || list.isEmpty) return null;
@@ -1114,21 +1171,29 @@ class QjsDrpy2Service implements ISpiderService {
     required String flag,
     required String pwd,
   }) async {
-    final r = await _send('call', ['play', [flag, playParams, []]]);
+    final r = await _send('call', [
+      'play',
+      [flag, playParams, []],
+    ]);
     if (r is Map) return PlayUrl.fromJson(r.cast<String, dynamic>());
     return null;
   }
 
   @override
   Future<Map<String, dynamic>> fetchDetail(String ids) async {
-    final r = await _send('call', ['detail', [ids]]);
+    final r = await _send('call', [
+      'detail',
+      [ids],
+    ]);
     return r is Map ? r.cast<String, dynamic>() : <String, dynamic>{};
   }
 
   @override
-  Future<Map<String, dynamic>> fetchPlayUrl(String play,
-      {String? flag}) async {
-    final r = await _send('call', ['play', [flag ?? '', play, []]]);
+  Future<Map<String, dynamic>> fetchPlayUrl(String play, {String? flag}) async {
+    final r = await _send('call', [
+      'play',
+      [flag ?? '', play, []],
+    ]);
     return r is Map ? r.cast<String, dynamic>() : <String, dynamic>{};
   }
 
@@ -1139,8 +1204,7 @@ class QjsDrpy2Service implements ISpiderService {
     required String wd,
     required int page,
     int quick = 0,
-  }) =>
-      search(wd, page, quick: quick);
+  }) => search(wd, page, quick: quick);
 
   void dispose() {
     try {
@@ -1149,8 +1213,26 @@ class QjsDrpy2Service implements ISpiderService {
     _worker?.kill(priority: Isolate.immediate);
     _worker = null;
     _commandPort = null;
+    _responseSub?.cancel();
+    _responseSub = null;
+    _responsePort?.close();
+    _responsePort = null;
     _syncProxyServer?.close(force: true);
     _syncProxyServer = null;
+    _syncProxyPort = 0;
+    for (final completer in _pending.values) {
+      if (!completer.isCompleted) completer.completeError('disposed');
+    }
+    _pending.clear();
+    final readyCompleter = _readyCompleter;
+    if (readyCompleter != null && !readyCompleter.isCompleted) {
+      readyCompleter.completeError('disposed');
+    }
+    _readyCompleter = null;
+    _currentKey = null;
+    _pendingApiUrl = null;
+    _pendingSiteKey = null;
+    _pendingExt = null;
     _ready = false;
     isReady.value = false;
   }

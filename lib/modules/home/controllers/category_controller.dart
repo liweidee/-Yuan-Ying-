@@ -7,6 +7,7 @@ import 'package:yuanying/t4/services/i_spider_service.dart';
 import 'package:yuanying/modules/home/controllers/home_controller.dart';
 import 'package:yuanying/t4/services/source_manager.dart';
 import 'package:yuanying/models/common/card_layout_mode.dart';
+import 'package:yuanying/utils/business_exception.dart';
 import 'package:yuanying/utils/error_formatter.dart';
 
 class CategoryController extends GetxController {
@@ -149,7 +150,14 @@ class CategoryController extends GetxController {
         ext = base64Encode(utf8.encode(jsonStr));
       }
 
-      print('[CategoryController] 请求: $_currentRequestCategoryId, page: $_page, filter: $filterValues');
+      // QJS worker 可能在插件关闭时被销毁。用户刷新或重试时，
+      // 仅在当前 QJS 源未运行时恢复 worker 和源；健康状态不重复切源。
+      await sourceManager.ensureCurrentSiteReady();
+      if (requestId != _requestId) return;
+
+      print(
+        '[CategoryController] 请求: $_currentRequestCategoryId, page: $_page, filter: $filterValues',
+      );
 
       final result = await apiService.fetchCate(
         _currentRequestCategoryId,
@@ -167,7 +175,7 @@ class CategoryController extends GetxController {
         if (err.isNotEmpty) {
           errorMsg.value = _truncateError(_ensurePrefix(err));
           isError.value = true;
-          return;  // finally 会复位 loading
+          return; // finally 会复位 loading
         }
       }
 
@@ -178,10 +186,12 @@ class CategoryController extends GetxController {
         if (refresh) {
           videoList.value = newList;
         } else {
-          videoList.removeWhere((item) =>
-              item.vodId == 'no_data' ||
-              item.vodName.contains('无数据') ||
-              item.vodName.contains('防无限请求'));
+          videoList.removeWhere(
+            (item) =>
+                item.vodId == 'no_data' ||
+                item.vodName.contains('无数据') ||
+                item.vodName.contains('防无限请求'),
+          );
           videoList.addAll(newList);
         }
         // isLoading.value = false; isLoadingMore.value = false; hasLoaded.value = true;
@@ -192,9 +202,12 @@ class CategoryController extends GetxController {
       if (refresh) {
         videoList.value = newList;
       } else {
-        if (newList.isNotEmpty && _lastItem != null && _lastCount == newList.length) {
+        if (newList.isNotEmpty &&
+            _lastItem != null &&
+            _lastCount == newList.length) {
           final last = newList.last;
-          if (last.vodId == _lastItem!.vodId && last.vodName == _lastItem!.vodName) {
+          if (last.vodId == _lastItem!.vodId &&
+              last.vodName == _lastItem!.vodName) {
             _isEnd = true;
             // isLoadingMore.value = false; hasLoaded.value = true;
             // 交由 finally 统一处理
@@ -207,15 +220,21 @@ class CategoryController extends GetxController {
       _lastItem = newList.isNotEmpty ? newList.last : null;
       _lastCount = newList.length;
 
-      if (newList.isEmpty) _isEnd = true;
-      else _page++;
+      if (newList.isEmpty)
+        _isEnd = true;
+      else
+        _page++;
 
       isError.value = false;
     } catch (e, stack) {
       // 旧请求的异常不覆盖新请求状态
       if (requestId != _requestId) return;
-      print('[CategoryController] error: $e');
-      print('[CategoryController] stack: $stack');
+      if (e is BusinessException) {
+        print('[CategoryController] error: ${e.message}');
+      } else {
+        print('[CategoryController] error: $e');
+        print('[CategoryController] stack: $stack');
+      }
       errorMsg.value = ErrorFormatter.formatException(e);
       isError.value = true;
     } finally {

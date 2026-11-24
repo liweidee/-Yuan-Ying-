@@ -15,6 +15,8 @@ import 'package:yuanying/modules/plugin_center/services/service_manager.dart';
 import 'package:yuanying/nodejs/nodejs_service.dart';
 import 'package:yuanying/modules/sandbox/services/sandbox_service_manager.dart';
 import 'package:yuanying/t4/services/jar_win_spider_service.dart';
+import 'package:yuanying/t4/services/qjs_drpy2_service.dart';
+import 'package:yuanying/t4/services/qjs_drpy3_service.dart';
 
 enum MarketFilter { all, updatable, installed, notInstalled }
 
@@ -245,6 +247,10 @@ class PluginCenterController extends GetxController {
         }
       }
 
+      if (id == 'qjs' || id == 'qjs-arm32' || id == 'qjs-win') {
+        _disposeQjsEngines();
+      }
+
       // ===== 禁用 proot：停掉所有沙盒服务 =====
       if (id == 'proot') {
         try {
@@ -310,8 +316,22 @@ class PluginCenterController extends GetxController {
     if (plugin.id == 'jar-win' || plugin.id == 'jar-guard') {
       await JarWinSpiderService.shutdownAll();
     }
+    if (plugin.id == 'qjs' ||
+        plugin.id == 'qjs-arm32' ||
+        plugin.id == 'qjs-win') {
+      _disposeQjsEngines();
+    }
     await InstallManager.instance.uninstall(plugin);
     reloadInstalled();
+  }
+
+  void _disposeQjsEngines() {
+    if (Get.isRegistered<QjsDrpy2Service>()) {
+      Get.find<QjsDrpy2Service>().dispose();
+    }
+    if (Get.isRegistered<QjsDrpy3Service>()) {
+      Get.find<QjsDrpy3Service>().dispose();
+    }
   }
 
   void reloadServices() {

@@ -107,6 +107,7 @@ class SourceManager extends GetxController {
   int _configLoadId = 0; // 防止异步竞态
   int _siteSwitchId = 0; // 防止连续切源时旧任务提前解除新任务状态
   Future<void> _siteSwitchQueue = Future<void>.value();
+  Future<void>? _ensureCurrentSiteTask;
 
   String _currentJarSource = '';
   String _currentJarConfigBaseUrl = '';
@@ -1330,6 +1331,44 @@ class SourceManager extends GetxController {
       onError: (Object error, StackTrace stackTrace) {},
     );
     return operation;
+  }
+
+  /// 确保当前 QJS 站点已有可用 worker 和已加载源。
+  ///
+  /// 只在插件关闭后重新开启、worker 被销毁等场景下执行恢复；
+  /// 正常运行时不切源、不重复加载。该方法由用户主动刷新/重试触发，
+  /// 不在插件开启事件中自动调用。
+  Future<void> ensureCurrentSiteReady() async {
+    final pending = _ensureCurrentSiteTask;
+    if (pending != null) {
+      await pending;
+      return;
+    }
+
+    final site = currentSite.value;
+    if (site == null) return;
+
+    final needsRecovery =
+        (isDrpy2Site(site) && !_qjsDrpy2.isRunning) ||
+        (isDrpy3Site(site) && !_qjsDrpy3.isRunning);
+    if (!needsRecovery) return;
+
+    final task = _recoverCurrentQjsSite(site);
+    _ensureCurrentSiteTask = task;
+    try {
+      await task;
+    } finally {
+      if (identical(_ensureCurrentSiteTask, task)) {
+        _ensureCurrentSiteTask = null;
+      }
+    }
+  }
+
+  Future<void> _recoverCurrentQjsSite(Map<String, dynamic> site) async {
+    final result = await _switchToSiteSerial(site);
+    if (!result.success) {
+      throw BusinessException(result.error ?? 'QJS 当前源恢复失败');
+    }
   }
 
   Future<void> refreshSites() async {
