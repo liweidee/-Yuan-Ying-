@@ -68,15 +68,15 @@ class _ActionDialogState extends State<ActionDialog>
       curve: Curves.easeOut,
     );
 
-    _scaleAnimation = Tween<double>(
-      begin: 0.9,
-      end: 1.0,
-    ).animate(
-      CurvedAnimation(
-        parent: _controller,
-        curve: Curves.easeOutCubic,
-      ),
-    );
+    _scaleAnimation =
+        Tween<double>(
+          begin: 0.9,
+          end: 1.0,
+        ).animate(
+          CurvedAnimation(
+            parent: _controller,
+            curve: Curves.easeOutCubic,
+          ),
         );
 
     if (widget.visible) {
@@ -168,10 +168,9 @@ class _ActionDialogState extends State<ActionDialog>
               onTap: _handleMaskTap,
               behavior: HitTestBehavior.opaque,
               child: Container(
-                color: Theme.of(context)
-                    .colorScheme
-                    .scrim
-                    .withValues(alpha: widget.dimAmount),
+                color: Theme.of(
+                  context,
+                ).colorScheme.scrim.withValues(alpha: widget.dimAmount),
                 width: double.infinity,
                 height: double.infinity,
               ),
