@@ -113,5 +113,7 @@ flutter {
 }
 
 dependencies {
+    // TVBox/CatVod JAR 源的宿主运行时依赖，与 DsPlayer 保持一致。
+    implementation("com.google.code.gson:gson:2.10.1")
     implementation("org.nanohttpd:nanohttpd:2.3.1")
 }

@@ -250,6 +250,14 @@
                 android:value="sandbox_service_host" />
         </service>
 
+        <!-- JAR 爬虫专用隔离进程：第三方 DEX/JAR/native 崩溃不影响主应用 -->
+        <service
+            android:name="com.dsplayer.ds_player.jar_spider.JarSpiderProcessService"
+            android:exported="false"
+            android:process=":jar_spider"
+            android:stopWithTask="false"
+            tools:ignore="Instantiatable" />
+
         <activity
             android:name="com.yalantis.ucrop.UCropActivity"
             android:theme="@style/Ucrop.CropTheme" />

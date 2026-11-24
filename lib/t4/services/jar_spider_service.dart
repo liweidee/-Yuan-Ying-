@@ -269,12 +269,16 @@ class JarSpiderService implements IJarSpiderService {
       if (map['ok'] != true) {
         final error = map['error']?.toString() ?? '未知错误';
         final kind = map['errorKind']?.toString();
+        _invalidateRuntimeAfterProcessFailure(kind);
         throw BusinessException(
           kind == null || kind.isEmpty ? error : '$error ($kind)',
         );
       }
       return map['data'];
     } on PlatformException catch (e) {
+      if (e.code == 'JAR_BRIDGE_ERR') {
+        _clearRuntimeSession();
+      }
       final details = e.details?.toString().trim() ?? '';
       throw Exception(
         details.isEmpty
@@ -282,6 +286,22 @@ class JarSpiderService implements IJarSpiderService {
             : '${e.message ?? e.code}\n$details',
       );
     }
+  }
+
+  void _invalidateRuntimeAfterProcessFailure(String? kind) {
+    if (kind != 'JAR_PROCESS_CRASHED' &&
+        kind != 'JAR_PROCESS_TIMEOUT' &&
+        kind != 'JAR_PROCESS_UNAVAILABLE') {
+      return;
+    }
+    _clearRuntimeSession();
+  }
+
+  void _clearRuntimeSession() {
+    _readyKey = null;
+    _loadedPluginKey = null;
+    _loadedJarPath = null;
+    _hostPluginKey = null;
   }
 
   Map<String, dynamic> _asMap(dynamic value, String method) {
