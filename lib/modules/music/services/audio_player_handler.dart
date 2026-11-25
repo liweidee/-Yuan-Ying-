@@ -8,7 +8,7 @@ import 'package:yuanying/t4/models/video_detail.dart';
 
 class AudioPlayerHandler extends BaseAudioHandler {
   final MusicPlayer player = MusicPlayer();
-  late PlaybackEvent _audioEvent;
+  PlaybackEvent? _audioEvent;
   final List<StreamSubscription?> _subscriptions = [];
 
   /// 系统控制栏切歌回调（由 MusicPlayerController 注入）
@@ -35,6 +35,11 @@ class AudioPlayerHandler extends BaseAudioHandler {
   }
 
   AudioPlayerHandler() {
+    _bindPlayerStreams();
+    _updateMediaItem();
+  }
+
+  void _bindPlayerStreams() {
     _subscriptions.add(player.audio.playbackEventStream.listen((event) {
       _audioEvent = event;
     }));
@@ -48,8 +53,7 @@ class AudioPlayerHandler extends BaseAudioHandler {
     _subscriptions.add(player.audio.processingStateStream.listen((_) {
       _broadcastState();
     }));
-    
-    _updateMediaItem();
+
     _subscriptions.add(player.audio.positionStream.listen((_) {
       _updatePosition();
       final now = DateTime.now();
@@ -63,6 +67,19 @@ class AudioPlayerHandler extends BaseAudioHandler {
         mediaItem.add(mediaItem.value!.copyWith(duration: duration));
       }
     }));
+  }
+
+  Future<void> _recreatePlayer() async {
+    for (final subscription in _subscriptions) {
+      await subscription?.cancel();
+    }
+    _subscriptions.clear();
+    _audioEvent = null;
+
+    await player.recreate();
+    _bindPlayerStreams();
+    _updateMediaItem();
+    _broadcastState();
   }
 
   Future<void> disposeHandler() async {
@@ -107,13 +124,15 @@ class AudioPlayerHandler extends BaseAudioHandler {
       _updateMediaItem();
 
       try {
-        await player.play(music: music, url: url, headers: headers);
-      } catch (_) {
-        try {
-          await player.audio.stop();
-        } catch (_) {}
+        await player
+            .play(music: music, url: url, headers: headers)
+            .timeout(const Duration(seconds: 20));
+      } catch (error) {
         player.current = previous;
         _updateMediaItem();
+        if (error is! PlayerInterruptedException) {
+          await _recreatePlayer();
+        }
         await PlaybackAudioSession.instance.deactivateAndNotifyOthers();
         rethrow;
       }
@@ -184,7 +203,9 @@ class AudioPlayerHandler extends BaseAudioHandler {
   }
 
   void _updatePosition() {
-    _audioEvent = _audioEvent.copyWith(
+    final event = _audioEvent;
+    if (event == null) return;
+    _audioEvent = event.copyWith(
       updatePosition: player.audio.position,
       bufferedPosition: player.audio.bufferedPosition,
       updateTime: DateTime.now(),
@@ -229,7 +250,8 @@ class AudioPlayerHandler extends BaseAudioHandler {
         updatePosition: player.audio.position,
         bufferedPosition: player.audio.bufferedPosition,
         speed: _speed,
-        queueIndex: player.audio.currentIndex ?? _audioEvent.currentIndex,
+        queueIndex:
+            player.audio.currentIndex ?? _audioEvent?.currentIndex ?? 0,
     ));
   }
 }

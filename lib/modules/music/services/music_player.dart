@@ -10,9 +10,15 @@ import 'package:yuanying/core/constants/storage_keys.dart';
 class MusicPlayer {
   // 暴露内部 AudioPlayer 给 AudioPlayerHandler 使用
   AudioPlayer get audio => _audio;
-  final AudioPlayer _audio = AudioPlayer(
-    androidApplyAudioAttributes: false, // 阻止 just_audio 调用 setAndroidAudioAttributes
-  );
+  AudioPlayer _audio = _createAudioPlayer();
+  StreamSubscription<PlayerState>? _playerStateSubscription;
+  ProcessingState _lastProcessingState = ProcessingState.idle;
+
+  static AudioPlayer _createAudioPlayer() {
+    return AudioPlayer(
+      androidApplyAudioAttributes: false,
+    );
+  }
   
   Episode? current;
   bool isLoading = false;
@@ -31,13 +37,17 @@ class MusicPlayer {
   Stream<Duration> get positionStream => _audio.positionStream;
 
   MusicPlayer() {
+    _attachPlayerStateListener();
+  }
+
+  void _attachPlayerStateListener() {
+    _lastProcessingState = ProcessingState.idle;
     // 记录上一次的 processingState——用于过滤重复的 completed 事件
     // just_audio 在歌曲播完后 playerStateStream 会持续发出相同的
     // completed 状态，如果不加过滤，onPlayCompleted 会被触发多次，
     // 导致"播放完当前曲目"定时被消耗掉多次。
-    ProcessingState _lastProcessingState = ProcessingState.idle;
-
-    _audio.playerStateStream.listen((state) {
+    _playerStateSubscription?.cancel();
+    _playerStateSubscription = _audio.playerStateStream.listen((state) {
       _playingController.add(_audio.playing);
 
       // 只在「从非 completed 变成 completed」时触发一次
@@ -48,6 +58,23 @@ class MusicPlayer {
       }
       _lastProcessingState = state.processingState;
     });
+  }
+
+  /// 重建底层播放器。
+  ///
+  /// just_audio_media_kit 在加载失败时可能遗留未完成的加载 Future，
+  /// 仅 stop() 无法恢复，必须替换平台播放器实例。
+  Future<void> recreate() async {
+    await _playerStateSubscription?.cancel();
+    _playerStateSubscription = null;
+
+    final previous = _audio;
+    _audio = _createAudioPlayer();
+    _attachPlayerStateListener();
+
+    try {
+      await previous.dispose().timeout(const Duration(seconds: 3));
+    } catch (_) {}
   }
 
   // ===== 初始化 =====
@@ -118,6 +145,8 @@ class MusicPlayer {
 
   // ===== 销毁 =====
   void dispose() {
+    _playerStateSubscription?.cancel();
+    _playerStateSubscription = null;
     _audio.dispose();
     _playingController.close();
   }

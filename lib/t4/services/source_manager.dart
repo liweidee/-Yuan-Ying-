@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'package:flutter/widgets.dart';
 import 'package:get/get.dart';
 import 'package:archive/archive.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:yuanying/t4/models/site.dart';
 import 'package:yuanying/t4/services/t4_api_service.dart';
 import 'package:yuanying/modules/home/controllers/home_controller.dart';
@@ -27,10 +26,8 @@ import 'package:yuanying/t4/services/jar_win_spider_service.dart';
 import 'package:yuanying/core/constants/storage_keys.dart';
 import 'package:yuanying/t4/services/nodejs_spider_service.dart';
 import 'package:yuanying/nodejs/nodejs_service.dart';
-import 'package:yuanying/utils/platform_utils.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:yuanying/core/constants/app_constants.dart';
-import 'package:flutter/foundation.dart';
 import 'package:yuanying/services/catvod_log_service.dart';
 import 'package:yuanying/modules/manual_source/controllers/manual_source_controller.dart';
 import 'package:yuanying/modules/plugin_center/services/install_manager.dart';
@@ -878,11 +875,6 @@ class SourceManager extends GetxController {
         throw BusinessException(pluginError);
       }
 
-      if (!nodejs.isInitialized || nodejs.managementPort == 0) {
-        await nodejs.initialize();
-      }
-      if (currentLoadId != _configLoadId) return;
-
       // ---- 获取当前选中的配置信息 ----
       final selectedKey = GStorage.getSetting<String>('selected_config_key');
       Map<String, dynamic>? selectedConfig;
@@ -906,27 +898,6 @@ class SourceManager extends GetxController {
 
       if (isLocalZip) {
         // ===== 本地 ZIP 分支 =====
-        // 确保 managementPort 就绪（等待最多3秒）
-        if (nodejs.managementPort == 0) {
-          _log('📦 本地ZIP：等待 managementPort 就绪...');
-          for (int i = 0; i < 6; i++) {
-            await Future.delayed(const Duration(milliseconds: 500));
-            if (nodejs.managementPort != 0) {
-              _log('✅ managementPort 已就绪: ${nodejs.managementPort}');
-              break;
-            }
-          }
-        }
-        if (nodejs.managementPort == 0) {
-          _log('❌ 本地ZIP：managementPort 仍未就绪，无法加载');
-          configLoadError.value = true;
-          if (currentLoadId == _configLoadId) {
-            remoteSites.clear();
-            remoteParses.clear();
-          }
-          return;
-        }
-
         final zipPath = selectedConfig!['zipFilePath'].toString();
         _log('📦 检测到本地 CatVod ZIP，解压并覆盖到固定目录');
         _log('ZIP 文件路径: $zipPath');

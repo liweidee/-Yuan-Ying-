@@ -292,6 +292,9 @@ class _PluginTabState extends State<PluginTab> with WidgetsBindingObserver {
                 // 系统安装的直装型插件卡片优先
                 if (index < sysList.length) {
                   return _SystemInstalledPluginCard(
+                    key: ValueKey(
+                      'system-plugin-card-${sysList[index].pluginId}',
+                    ),
                     info: sysList[index],
                     controller: controller,
                     onSolidified: () {
@@ -309,6 +312,7 @@ class _PluginTabState extends State<PluginTab> with WidgetsBindingObserver {
                 }
                 final plugin = list[index - sysList.length];
                 return _InstalledPluginCard(
+                  key: ValueKey('plugin-card-${plugin.id}'),
                   plugin: plugin,
                   controller: controller,
                 );
@@ -324,7 +328,7 @@ class _PluginTabState extends State<PluginTab> with WidgetsBindingObserver {
 /// ============================================================
 /// 系统安装的直装型插件卡片（待固化）
 /// ============================================================
-class _SystemInstalledPluginCard extends StatelessWidget {
+class _SystemInstalledPluginCard extends StatefulWidget {
   final SystemInstalledPlugin info;
   final PluginCenterController controller;
   final VoidCallback onSolidified;
@@ -335,149 +339,183 @@ class _SystemInstalledPluginCard extends StatelessWidget {
     required this.controller,
     required this.onSolidified,
     required this.onUninstalled,
+    super.key,
   });
+
+  @override
+  State<_SystemInstalledPluginCard> createState() =>
+      _SystemInstalledPluginCardState();
+}
+
+class _SystemInstalledPluginCardState
+    extends State<_SystemInstalledPluginCard> {
+  bool _descriptionExpanded = false;
+
+  SystemInstalledPlugin get info => widget.info;
+  PluginCenterController get controller => widget.controller;
+  VoidCallback get onSolidified => widget.onSolidified;
+  VoidCallback get onUninstalled => widget.onUninstalled;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
-    return Material(
-      color: Colors.transparent,
-      borderRadius: Style.mdRadius,
-      child: Container(
-        decoration: BoxDecoration(
-          color: colorScheme.surface,
-          borderRadius: Style.mdRadius,
-          border: Border.all(color: colorScheme.primary.withValues(alpha: 0.3)),
-          boxShadow: [
-            BoxShadow(
-              color: theme.shadowColor.withValues(alpha: 0.06),
-              blurRadius: 6,
-              offset: const Offset(0, 1),
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {
+        setState(() => _descriptionExpanded = !_descriptionExpanded);
+      },
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: Style.mdRadius,
+        child: Container(
+          decoration: BoxDecoration(
+            color: colorScheme.surface,
+            borderRadius: Style.mdRadius,
+            border: Border.all(
+              color: colorScheme.primary.withValues(alpha: 0.3),
             ),
-          ],
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // ===== 头部：图标 + 标题 + 禁用开关 =====
-            Row(
-              children: [
-                Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    color: colorScheme.primaryContainer.withValues(alpha: 0.2),
-                    borderRadius: Style.mdRadius,
-                  ),
-                  child: Icon(
-                    Icons.smart_toy_outlined,
-                    color: colorScheme.primary,
-                    size: 24,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    info.title,
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
+            boxShadow: [
+              BoxShadow(
+                color: theme.shadowColor.withValues(alpha: 0.06),
+                blurRadius: 6,
+                offset: const Offset(0, 1),
+              ),
+            ],
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // ===== 头部：图标 + 标题 + 禁用开关 =====
+              Row(
+                children: [
+                  Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      color: colorScheme.primaryContainer.withValues(
+                        alpha: 0.2,
+                      ),
+                      borderRadius: Style.mdRadius,
                     ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                    child: Icon(
+                      Icons.smart_toy_outlined,
+                      color: colorScheme.primary,
+                      size: 24,
+                    ),
                   ),
-                ),
-                // 禁用态开关（视觉为开，不可点击）
-                IgnorePointer(
-                  child: Switch(
-                    value: true,
-                    onChanged: null,
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      info.title,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            // ===== 来源行 =====
-            Text(
-              '来源：已安装应用 · 插件版本 ${info.version.isEmpty ? '未知' : info.version}',
-              style: TextStyle(
-                fontSize: 12,
-                color: colorScheme.outline,
+                  // 禁用态开关（视觉为开，不可点击）
+                  IgnorePointer(
+                    child: Switch(
+                      value: true,
+                      onChanged: null,
+                    ),
+                  ),
+                ],
               ),
-            ),
-            const SizedBox(height: 6),
-            // ===== 详细描述 =====
-            Text(
-              _descriptionFor(info.pluginId),
-              style: TextStyle(
-                fontSize: 12,
-                color: colorScheme.onSurfaceVariant,
-                height: 1.5,
-              ),
-            ),
-            const SizedBox(height: 12),
-            // ===== 高亮固化按钮 =====
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                onPressed: () => _onSolidify(context),
-                icon: const Icon(Icons.save_alt, size: 18),
-                label: Text(
-                  info.installMode == 'apk'
-                      ? '登记为已安装（系统安装型）'
-                      : '固化 APK 资源到应用内并卸载 APK',
-                ),
-                style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFFFCE9E9),
-                  foregroundColor: const Color(0xFF6B3F1F),
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(24),
-                  ),
-                  elevation: 0,
+              const SizedBox(height: 10),
+              // ===== 来源行 =====
+              Text(
+                '来源：已安装应用 · 插件版本 ${info.version.isEmpty ? '未知' : info.version}',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: colorScheme.outline,
                 ),
               ),
-            ),
-            const SizedBox(height: 8),
-            Divider(
-              height: 1,
-              color: colorScheme.outline.withValues(alpha: 0.1),
-            ),
-            const SizedBox(height: 4),
-            // ===== 底部操作栏 =====
-            Row(
-              children: [
-                // 置顶（禁用，无实际作用，仅视觉一致）
-                _ActionBtn(
-                  icon: Icons.push_pin_outlined,
-                  label: '置顶',
-                  onTap: () {},
-                  color: colorScheme.outline.withValues(alpha: 0.4),
+              const SizedBox(height: 6),
+              // ===== 详细描述 =====
+              AnimatedSize(
+                duration: Style.shortAnimDuration,
+                alignment: Alignment.topCenter,
+                curve: Curves.easeOutCubic,
+                child: Text(
+                  _descriptionFor(info.pluginId),
+                  maxLines: _descriptionExpanded ? null : 3,
+                  overflow: _descriptionExpanded
+                      ? TextOverflow.visible
+                      : TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: colorScheme.onSurfaceVariant,
+                    height: 1.5,
+                  ),
                 ),
-                const SizedBox(width: 12),
-                // 打开（agent 才有，qjs 无界面）
-                if (info.pluginId == 'agent')
+              ),
+              const SizedBox(height: 12),
+              // ===== 高亮固化按钮 =====
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: () => _onSolidify(context),
+                  icon: const Icon(Icons.save_alt, size: 18),
+                  label: Text(
+                    info.installMode == 'apk'
+                        ? '登记为已安装（系统安装型）'
+                        : '固化 APK 资源到应用内并卸载 APK',
+                  ),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFFFCE9E9),
+                    foregroundColor: const Color(0xFF6B3F1F),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(24),
+                    ),
+                    elevation: 0,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Divider(
+                height: 1,
+                color: colorScheme.outline.withValues(alpha: 0.1),
+              ),
+              const SizedBox(height: 4),
+              // ===== 底部操作栏 =====
+              Row(
+                children: [
+                  // 置顶（禁用，无实际作用，仅视觉一致）
                   _ActionBtn(
-                    icon: Icons.open_in_new_outlined,
-                    label: '打开 AI 助手',
-                    onTap: () {
-                      SmartDialog.showToast('请先固化后从插件卡打开');
-                    },
+                    icon: Icons.push_pin_outlined,
+                    label: '置顶',
+                    onTap: () {},
+                    color: colorScheme.outline.withValues(alpha: 0.4),
                   ),
-                const Spacer(),
-                // 卸载（仅拉起系统卸载，不删本地）
-                _ActionBtn(
-                  icon: Icons.delete_outline,
-                  label: '卸载',
-                  color: colorScheme.error,
-                  onTap: () => _onUninstallSystem(context),
-                ),
-              ],
-            ),
-          ],
+                  const SizedBox(width: 12),
+                  // 打开（agent 才有，qjs 无界面）
+                  if (info.pluginId == 'agent')
+                    _ActionBtn(
+                      icon: Icons.open_in_new_outlined,
+                      label: '打开 AI 助手',
+                      onTap: () {
+                        SmartDialog.showToast('请先固化后从插件卡打开');
+                      },
+                    ),
+                  const Spacer(),
+                  // 卸载（仅拉起系统卸载，不删本地）
+                  _ActionBtn(
+                    icon: Icons.delete_outline,
+                    label: '卸载',
+                    color: colorScheme.error,
+                    onTap: () => _onUninstallSystem(context),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -571,21 +609,40 @@ class _SystemInstalledPluginCard extends StatelessWidget {
 /// ============================================================
 /// 普通已装插件卡片
 /// ============================================================
-class _InstalledPluginCard extends StatelessWidget {
+class _InstalledPluginCard extends StatefulWidget {
   final InstalledPlugin plugin;
   final PluginCenterController controller;
 
   const _InstalledPluginCard({
     required this.plugin,
     required this.controller,
+    super.key,
   });
+
+  @override
+  State<_InstalledPluginCard> createState() => _InstalledPluginCardState();
+}
+
+class _InstalledPluginCardState extends State<_InstalledPluginCard> {
+  bool _descriptionExpanded = false;
+
+  InstalledPlugin get plugin => widget.plugin;
+  PluginCenterController get controller => widget.controller;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final description = plugin.desc?.trim() ?? '';
+    final hasDescription = description.isNotEmpty;
 
     return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: hasDescription
+          ? () {
+              setState(() => _descriptionExpanded = !_descriptionExpanded);
+            }
+          : null,
       onLongPress: () async {
         await controller.togglePinned(plugin.id, !plugin.pinned);
         SmartDialog.showToast(plugin.pinned ? '已取消置顶' : '已置顶');
@@ -667,14 +724,23 @@ class _InstalledPluginCard extends StatelessWidget {
                   }),
                 ],
               ),
-              if (plugin.desc != null && plugin.desc!.isNotEmpty) ...[
+              if (hasDescription) ...[
                 const SizedBox(height: 10),
-                Text(
-                  plugin.desc!,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: colorScheme.onSurfaceVariant,
-                    height: 1.5,
+                AnimatedSize(
+                  duration: Style.shortAnimDuration,
+                  alignment: Alignment.topCenter,
+                  curve: Curves.easeOutCubic,
+                  child: Text(
+                    description,
+                    maxLines: _descriptionExpanded ? null : 3,
+                    overflow: _descriptionExpanded
+                        ? TextOverflow.visible
+                        : TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: colorScheme.onSurfaceVariant,
+                      height: 1.5,
+                    ),
                   ),
                 ),
               ],

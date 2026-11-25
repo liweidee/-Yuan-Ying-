@@ -14,6 +14,7 @@ import 'package:yuanying/core/constants/plugin_storage_keys.dart';
 import 'package:yuanying/modules/plugin_center/models/service_config.dart';
 import 'package:yuanying/modules/plugin_center/services/install_manager.dart';
 import 'package:yuanying/modules/plugin_center/services/plugin_paths.dart';
+import 'package:yuanying/modules/plugin_center/services/runtime_executable_resolver.dart';
 import 'package:yuanying/modules/plugin_center/services/service_package_cleanup.dart';
 import 'package:yuanying/modules/plugin_center/services/port_cleaner.dart';
 
@@ -1267,16 +1268,21 @@ class ServiceManager {
         final pyRuntime = j['pyRuntime'];
         if (pyRuntime is Map && pyRuntime['pythonBin'] is String) {
           final rel = pyRuntime['pythonBin'] as String;
-          final candidate = p.join(installPath, rel);
-          if (File(candidate).existsSync()) return candidate;
+          final executable = RuntimeExecutableResolver.find(
+            installPath: installPath,
+            declaredPath: rel,
+          );
+          if (executable != null) return executable;
         }
 
         final binaries = j['binaries'];
         final binariesKey = Platform.isWindows ? 'win32' : 'android';
         if (binaries is Map && binaries[binariesKey] is String) {
           final rel = binaries[binariesKey] as String;
-          final candidate = p.join(installPath, rel);
-          if (File(candidate).existsSync()) return candidate;
+          return RuntimeExecutableResolver.find(
+            installPath: installPath,
+            declaredPath: rel,
+          );
         }
       } catch (_) {}
     }

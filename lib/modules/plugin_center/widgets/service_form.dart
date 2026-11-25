@@ -42,7 +42,10 @@ Future<void> showServiceForm(
   );
 }
 
-/// 内置运行时 id 白名单（含 -win 与 Android 无后缀版本 + mediaProxy 系列）
+/// 可创建服务的内置运行时白名单。
+///
+/// QJS 是宿主 FFI 加载的原生引擎库，mediaProxy 是由插件卡专用入口管理的
+/// 独立服务包，二者都不作为通用服务运行时供用户新建实例。
 const _knownRuntimes = <String>[
   'nodejs',
   'nodejs-win',
@@ -50,10 +53,6 @@ const _knownRuntimes = <String>[
   'php-win',
   'python',
   'python-win',
-  'mediaProxy',
-  'mediaProxy-win',
-  'qjs',
-  'qjs-win',
 ];
 
 const _customRuntimeKey = 'custom';
@@ -545,6 +544,7 @@ class _ServiceFormDialogState extends State<_ServiceFormDialog> {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
 
     final title = widget.existing != null
         ? '编辑服务'
@@ -552,403 +552,498 @@ class _ServiceFormDialogState extends State<_ServiceFormDialog> {
         ? '复制服务'
         : '添加服务';
 
-    return AlertDialog(
-      shape: RoundedRectangleBorder(borderRadius: Style.mdRadius),
-      backgroundColor: colorScheme.surface,
-      title: Text(
-        title,
-        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+    final dialogTheme = theme.copyWith(
+      inputDecorationTheme: theme.inputDecorationTheme.copyWith(
+        filled: true,
+        fillColor: colorScheme.surfaceContainerHighest.withValues(alpha: 0.22),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: 13,
+        ),
+        border: const OutlineInputBorder(borderRadius: Style.mdRadius),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: Style.mdRadius,
+          borderSide: BorderSide(
+            color: colorScheme.outline.withValues(alpha: 0.28),
+          ),
+        ),
+        focusedBorder: const OutlineInputBorder(
+          borderRadius: Style.mdRadius,
+          borderSide: BorderSide(width: 1.4),
+        ),
       ),
-      content: SizedBox(
-        width: 520,
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: colorScheme.primaryContainer.withValues(alpha: 0.25),
-                  borderRadius: Style.mdRadius,
-                ),
-                child: Text(
-                  widget.copyFrom != null
-                      ? '已预填原配置，名称/端口已重新生成。确认无误后保存即可。'
-                      : '只需三步：起个名字 → 点选运行时 → 填启动参数，其余保持默认即可。',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: colorScheme.onSurfaceVariant,
-                    height: 1.4,
+    );
+
+    return Theme(
+      data: dialogTheme,
+      child: AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: Style.lgRadius),
+        backgroundColor: colorScheme.surface,
+        surfaceTintColor: Colors.transparent,
+        clipBehavior: Clip.antiAlias,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+        titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
+        contentPadding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
+        actionsPadding: const EdgeInsets.fromLTRB(12, 8, 16, 12),
+        title: Text(
+          title,
+          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+        ),
+        content: SizedBox(
+          width: 520,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
                   ),
-                ),
-              ),
-              const SizedBox(height: 16),
-
-              TextField(
-                controller: _nameCtrl,
-                focusNode: _nameFocus,
-                decoration: const InputDecoration(
-                  labelText: '名称 *',
-                  hintText: '如：php-t4',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 12),
-
-              DropdownButtonFormField<String>(
-                value: _dropdownValue,
-                isExpanded: true,
-                decoration: const InputDecoration(
-                  labelText: '运行时插件 *',
-                  border: OutlineInputBorder(),
-                ),
-                items: [
-                  ..._availableRuntimes.map((pl) {
-                    final isDisabled = !pl.enabled;
-                    return DropdownMenuItem<String>(
-                      value: pl.id,
-                      // 仍可选（创建不拦截，启动时拦截）
-                      child: Text(
-                        isDisabled
-                            ? '${_runtimeLabel(pl.id)}[已关闭]'
-                            : _runtimeLabel(pl.id),
-                        overflow: TextOverflow.ellipsis,
-                        maxLines: 1,
-                        style: TextStyle(
-                          color: isDisabled
-                              ? colorScheme.outline
-                              : colorScheme.onSurface,
-                        ),
-                      ),
-                    );
-                  }),
-                  const DropdownMenuItem(
-                    value: _customRuntimeKey,
-                    child: Text(
-                      '自定义（手动指定可执行文件）',
-                      overflow: TextOverflow.ellipsis,
-                      maxLines: 1,
+                  decoration: BoxDecoration(
+                    color: colorScheme.primaryContainer.withValues(alpha: 0.16),
+                    borderRadius: Style.mdRadius,
+                    border: Border.all(
+                      color: colorScheme.primary.withValues(alpha: 0.12),
                     ),
                   ),
-                ],
-                onChanged: (v) {
-                  setState(() => _selectedRuntime = v);
-                  _applyRuntimeDefaults(v ?? '', force: true);
-                },
-              ),
-              if (_availableRuntimes.isEmpty && !_isCustomRuntime)
-                Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Text(
-                    '暂无可用运行时，请先到市场安装',
-                    style: TextStyle(fontSize: 12, color: colorScheme.error),
-                  ),
-                ),
-              const SizedBox(height: 12),
-
-              TextField(
-                controller: _portCtrl,
-                focusNode: _portFocus,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: '端口（选填）',
-                  hintText: '如：5787',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 12),
-
-              TextField(
-                controller: _argsCtrl,
-                focusNode: _argsFocus,
-                minLines: 1,
-                maxLines: 3,
-                decoration: InputDecoration(
-                  labelText: '启动参数 *',
-                  hintText: _selectedRuntime != null
-                      ? _runtimeHints[_selectedRuntime] ?? '按运行时模板填写'
-                      : '请先选择运行时',
-                  border: const OutlineInputBorder(),
-                  helperText: _selectedRuntime != null
-                      ? _runtimeHints[_selectedRuntime]
-                      : null,
-                  helperMaxLines: 2,
-                ),
-              ),
-              const SizedBox(height: 8),
-
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('自启动', style: TextStyle(fontSize: 14)),
-                subtitle: const Text(
-                  'App 冷启动时自动拉起',
-                  style: TextStyle(fontSize: 12),
-                ),
-                value: _autostart,
-                onChanged: (v) => setState(() => _autostart = v),
-              ),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('常驻前台服务', style: TextStyle(fontSize: 14)),
-                subtitle: const Text(
-                  'App 关闭时不杀，下次启动自动收养',
-                  style: TextStyle(fontSize: 12),
-                ),
-                value: _keepForeground,
-                onChanged: (v) => setState(() => _keepForeground = v),
-              ),
-
-              const SizedBox(height: 8),
-
-              ExpansionTile(
-                tilePadding: EdgeInsets.zero,
-                childrenPadding: const EdgeInsets.only(top: 8),
-                title: const Text(
-                  '高级选项',
-                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-                ),
-                children: [
-                  Row(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _exeCtrl,
-                          focusNode: _exeFocus,
-                          decoration: InputDecoration(
-                            labelText: _isCustomRuntime ? '可执行文件 *' : '可执行文件',
-                            hintText: _isCustomRuntime
-                                ? '点击右侧浏览选择 .exe'
-                                : '自动从插件解析',
-                            helperText: _isCustomRuntime
-                                ? '自定义环境必填'
-                                : '默认 __plugin:<运行时>__/bin/<exe>，可改',
-                            border: const OutlineInputBorder(),
-                          ),
-                        ),
+                      Icon(
+                        Icons.auto_awesome_outlined,
+                        size: 16,
+                        color: colorScheme.primary,
                       ),
                       const SizedBox(width: 8),
-                      IconButton(
-                        tooltip: '浏览',
-                        icon: const Icon(Icons.folder_open),
-                        onPressed: _pickExe,
-                        style: IconButton.styleFrom(
-                          backgroundColor: colorScheme.surfaceContainerHighest
-                              .withValues(alpha: 0.5),
+                      Expanded(
+                        child: Text(
+                          widget.copyFrom != null
+                              ? '已预填原配置，名称/端口已重新生成。确认无误后保存即可。'
+                              : '只需三步：起个名字 → 点选运行时 → 填启动参数，其余保持默认即可。',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: colorScheme.onSurfaceVariant,
+                            height: 1.4,
+                          ),
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 12),
+                ),
+                const SizedBox(height: 16),
 
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _cwdCtrl,
-                          focusNode: _cwdFocus,
-                          decoration: const InputDecoration(
-                            labelText: '工作目录',
-                            hintText: '默认 __filesDir__/services/{id}',
-                            helperText: '支持占位符',
-                            border: OutlineInputBorder(),
+                TextField(
+                  controller: _nameCtrl,
+                  focusNode: _nameFocus,
+                  decoration: const InputDecoration(
+                    labelText: '名称 *',
+                    hintText: '如：php-t4',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+
+                DropdownButtonFormField<String>(
+                  value: _dropdownValue,
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                    labelText: '运行时插件 *',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: [
+                    ..._availableRuntimes.map((pl) {
+                      final isDisabled = !pl.enabled;
+                      return DropdownMenuItem<String>(
+                        value: pl.id,
+                        // 仍可选（创建不拦截，启动时拦截）
+                        child: Text(
+                          isDisabled
+                              ? '${_runtimeLabel(pl.id)}[已关闭]'
+                              : _runtimeLabel(pl.id),
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
+                          style: TextStyle(
+                            color: isDisabled
+                                ? colorScheme.outline
+                                : colorScheme.onSurface,
                           ),
                         ),
+                      );
+                    }),
+                    const DropdownMenuItem(
+                      value: _customRuntimeKey,
+                      child: Text(
+                        '自定义（手动指定可执行文件）',
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
                       ),
-                      const SizedBox(width: 8),
-                      IconButton(
-                        tooltip: '选择目录',
-                        icon: const Icon(Icons.folder_open),
-                        onPressed: _pickCwd,
-                        style: IconButton.styleFrom(
-                          backgroundColor: colorScheme.surfaceContainerHighest
-                              .withValues(alpha: 0.5),
-                        ),
-                      ),
-                    ],
+                    ),
+                  ],
+                  onChanged: (v) {
+                    setState(() => _selectedRuntime = v);
+                    _applyRuntimeDefaults(v ?? '', force: true);
+                  },
+                ),
+                if (_availableRuntimes.isEmpty && !_isCustomRuntime)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      '暂无可用运行时，请先到市场安装',
+                      style: TextStyle(fontSize: 12, color: colorScheme.error),
+                    ),
                   ),
-                  const SizedBox(height: 12),
+                const SizedBox(height: 12),
 
-                  _buildHealthTypeSection(colorScheme),
-                  const SizedBox(height: 12),
+                TextField(
+                  controller: _portCtrl,
+                  focusNode: _portFocus,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: '端口（选填）',
+                    hintText: '如：5787',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
 
-                  if (_isCustomRuntime) ...[
+                TextField(
+                  controller: _argsCtrl,
+                  focusNode: _argsFocus,
+                  minLines: 1,
+                  maxLines: 3,
+                  decoration: InputDecoration(
+                    labelText: '启动参数 *',
+                    hintText: _selectedRuntime != null
+                        ? _runtimeHints[_selectedRuntime] ?? '按运行时模板填写'
+                        : '请先选择运行时',
+                    border: const OutlineInputBorder(),
+                    helperText: _selectedRuntime != null
+                        ? _runtimeHints[_selectedRuntime]
+                        : null,
+                    helperMaxLines: 2,
+                  ),
+                ),
+                const SizedBox(height: 8),
+
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('自启动', style: TextStyle(fontSize: 14)),
+                  subtitle: const Text(
+                    'App 冷启动时自动拉起',
+                    style: TextStyle(fontSize: 12),
+                  ),
+                  value: _autostart,
+                  onChanged: (v) => setState(() => _autostart = v),
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('常驻前台服务', style: TextStyle(fontSize: 14)),
+                  subtitle: const Text(
+                    'App 关闭时不杀，下次启动自动收养',
+                    style: TextStyle(fontSize: 12),
+                  ),
+                  value: _keepForeground,
+                  onChanged: (v) => setState(() => _keepForeground = v),
+                ),
+
+                const SizedBox(height: 8),
+
+                ExpansionTile(
+                  tilePadding: const EdgeInsets.symmetric(horizontal: 12),
+                  childrenPadding: const EdgeInsets.fromLTRB(12, 10, 12, 14),
+                  collapsedBackgroundColor: colorScheme.surfaceContainerHighest
+                      .withValues(alpha: 0.18),
+                  backgroundColor: colorScheme.surfaceContainerHighest
+                      .withValues(alpha: 0.12),
+                  collapsedShape: RoundedRectangleBorder(
+                    borderRadius: Style.mdRadius,
+                    side: BorderSide(
+                      color: colorScheme.outline.withValues(alpha: 0.16),
+                    ),
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: Style.mdRadius,
+                    side: BorderSide(
+                      color: colorScheme.primary.withValues(alpha: 0.28),
+                    ),
+                  ),
+                  title: const Text(
+                    '高级选项',
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                  ),
+                  children: [
                     Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Expanded(
                           child: TextField(
-                            controller: _pidFileCtrl,
-                            focusNode: _pidFileFocus,
-                            decoration: const InputDecoration(
-                              labelText: 'PID 文件（选填）',
-                              hintText: '留空自动生成 __filesDir__/services/{id}.pid',
-                              border: OutlineInputBorder(),
+                            controller: _exeCtrl,
+                            focusNode: _exeFocus,
+                            decoration: InputDecoration(
+                              labelText: _isCustomRuntime ? '可执行文件 *' : '可执行文件',
+                              hintText: _isCustomRuntime
+                                  ? '点击右侧浏览选择 .exe'
+                                  : '自动从插件解析',
+                              helperText: _isCustomRuntime
+                                  ? '自定义环境必填'
+                                  : '默认 __plugin:<运行时>__/bin/<exe>，可改',
+                              border: const OutlineInputBorder(),
                             ),
                           ),
                         ),
                         const SizedBox(width: 8),
-                        IconButton(
-                          tooltip: '选择文件',
-                          icon: const Icon(Icons.insert_drive_file_outlined),
-                          onPressed: _pickPidFile,
-                          style: IconButton.styleFrom(
-                            backgroundColor: colorScheme.surfaceContainerHighest
-                                .withValues(alpha: 0.5),
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: IconButton(
+                            tooltip: '浏览',
+                            icon: const Icon(Icons.folder_open),
+                            onPressed: _pickExe,
+                            constraints: const BoxConstraints.tightFor(
+                              width: 48,
+                              height: 48,
+                            ),
+                            style: IconButton.styleFrom(
+                              backgroundColor: colorScheme
+                                  .surfaceContainerHighest
+                                  .withValues(alpha: 0.5),
+                            ),
                           ),
                         ),
                       ],
                     ),
                     const SizedBox(height: 12),
-                  ],
 
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      const Text(
-                        '环境变量',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _cwdCtrl,
+                            focusNode: _cwdFocus,
+                            decoration: const InputDecoration(
+                              labelText: '工作目录',
+                              hintText: '默认 __filesDir__/services/{id}',
+                              helperText: '支持占位符',
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
                         ),
-                      ),
-                      const Spacer(),
-                      TextButton.icon(
-                        onPressed: _addEnvEntry,
-                        icon: const Icon(Icons.add, size: 16),
-                        label: const Text('添加'),
-                      ),
-                    ],
-                  ),
-                  if (_envEntries.isNotEmpty)
-                    ..._envEntries.asMap().entries.map((e) {
-                      final idx = e.key;
-                      final entry = e.value;
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 6),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: TextField(
-                                controller: entry.keyCtrl,
-                                focusNode: entry.keyFocus,
-                                decoration: const InputDecoration(
-                                  isDense: true,
-                                  hintText: 'KEY',
-                                  border: OutlineInputBorder(),
-                                  contentPadding: EdgeInsets.symmetric(
-                                    horizontal: 10,
-                                    vertical: 10,
-                                  ),
-                                ),
-                              ),
+                        const SizedBox(width: 8),
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: IconButton(
+                            tooltip: '选择目录',
+                            icon: const Icon(Icons.folder_open),
+                            onPressed: _pickCwd,
+                            constraints: const BoxConstraints.tightFor(
+                              width: 48,
+                              height: 48,
                             ),
-                            Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 6,
-                              ),
-                              child: Text(
-                                '=',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w600,
-                                  color: colorScheme.outline,
-                                ),
-                              ),
+                            style: IconButton.styleFrom(
+                              backgroundColor: colorScheme
+                                  .surfaceContainerHighest
+                                  .withValues(alpha: 0.5),
                             ),
-                            Expanded(
-                              flex: 2,
-                              child: TextField(
-                                controller: entry.valueCtrl,
-                                focusNode: entry.valueFocus,
-                                decoration: const InputDecoration(
-                                  isDense: true,
-                                  hintText: 'VALUE（支持占位符）',
-                                  border: OutlineInputBorder(),
-                                  contentPadding: EdgeInsets.symmetric(
-                                    horizontal: 10,
-                                    vertical: 10,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            IconButton(
-                              icon: Icon(
-                                Icons.close,
-                                size: 18,
-                                color: colorScheme.error,
-                              ),
-                              onPressed: () => _removeEnvEntry(idx),
-                            ),
-                          ],
+                          ),
                         ),
-                      );
-                    }),
-                  const SizedBox(height: 16),
-
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      '快捷占位符（点击插入到当前焦点输入框）',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: colorScheme.outline,
-                      ),
+                      ],
                     ),
-                  ),
-                  const SizedBox(height: 6),
-                  SizedBox(
-                    width: double.infinity,
-                    child: Wrap(
-                      alignment: WrapAlignment.start,
-                      spacing: 6,
-                      runSpacing: 6,
-                      children: _placeholders.map((ph) {
-                        return InkWell(
-                          onTap: () => _insertPlaceholder(ph),
-                          borderRadius: BorderRadius.circular(4),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              border: Border.all(
-                                color: colorScheme.primary.withValues(
-                                  alpha: 0.5,
-                                ),
-                              ),
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Text(
-                              ph,
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontFamily: 'monospace',
-                                color: colorScheme.primary,
+                    const SizedBox(height: 12),
+
+                    _buildHealthTypeSection(colorScheme),
+                    const SizedBox(height: 12),
+
+                    if (_isCustomRuntime) ...[
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _pidFileCtrl,
+                              focusNode: _pidFileFocus,
+                              decoration: const InputDecoration(
+                                labelText: 'PID 文件（选填）',
+                                hintText:
+                                    '留空自动生成 __filesDir__/services/{id}.pid',
+                                border: OutlineInputBorder(),
                               ),
                             ),
                           ),
-                        );
-                      }).toList(),
+                          const SizedBox(width: 8),
+                          IconButton(
+                            tooltip: '选择文件',
+                            icon: const Icon(Icons.insert_drive_file_outlined),
+                            onPressed: _pickPidFile,
+                            style: IconButton.styleFrom(
+                              backgroundColor: colorScheme
+                                  .surfaceContainerHighest
+                                  .withValues(alpha: 0.5),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        const Text(
+                          '环境变量',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const Spacer(),
+                        TextButton.icon(
+                          onPressed: _addEnvEntry,
+                          icon: const Icon(Icons.add, size: 16),
+                          label: const Text('添加'),
+                        ),
+                      ],
                     ),
-                  ),
-                  const SizedBox(height: 16),
-                ],
-              ),
-            ],
+                    if (_envEntries.isNotEmpty)
+                      ..._envEntries.asMap().entries.map((e) {
+                        final idx = e.key;
+                        final entry = e.value;
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 6),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: TextField(
+                                  controller: entry.keyCtrl,
+                                  focusNode: entry.keyFocus,
+                                  decoration: const InputDecoration(
+                                    isDense: true,
+                                    hintText: 'KEY',
+                                    border: OutlineInputBorder(),
+                                    contentPadding: EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 10,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                ),
+                                child: Text(
+                                  '=',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600,
+                                    color: colorScheme.outline,
+                                  ),
+                                ),
+                              ),
+                              Expanded(
+                                flex: 2,
+                                child: TextField(
+                                  controller: entry.valueCtrl,
+                                  focusNode: entry.valueFocus,
+                                  decoration: const InputDecoration(
+                                    isDense: true,
+                                    hintText: 'VALUE（支持占位符）',
+                                    border: OutlineInputBorder(),
+                                    contentPadding: EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 10,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              IconButton(
+                                icon: Icon(
+                                  Icons.close,
+                                  size: 18,
+                                  color: colorScheme.error,
+                                ),
+                                onPressed: () => _removeEnvEntry(idx),
+                              ),
+                            ],
+                          ),
+                        );
+                      }),
+                    const SizedBox(height: 16),
+
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        '快捷占位符（点击插入到当前焦点输入框）',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: colorScheme.outline,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    SizedBox(
+                      width: double.infinity,
+                      child: Wrap(
+                        alignment: WrapAlignment.start,
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: _placeholders.map((ph) {
+                          return InkWell(
+                            onTap: () => _insertPlaceholder(ph),
+                            borderRadius: BorderRadius.circular(4),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                border: Border.all(
+                                  color: colorScheme.primary.withValues(
+                                    alpha: 0.5,
+                                  ),
+                                ),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                ph,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontFamily: 'monospace',
+                                  color: colorScheme.primary,
+                                ),
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            style: Style.buttonStyle,
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: _submit,
+            style: Style.buttonStyle.copyWith(
+              padding: const WidgetStatePropertyAll(
+                EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+              ),
+              shape: const WidgetStatePropertyAll(
+                RoundedRectangleBorder(borderRadius: Style.mdRadius),
+              ),
+            ),
+            child: const Text('保存'),
+          ),
+        ],
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('取消'),
-        ),
-        FilledButton(
-          onPressed: _submit,
-          child: const Text('保存'),
-        ),
-      ],
     );
   }
 

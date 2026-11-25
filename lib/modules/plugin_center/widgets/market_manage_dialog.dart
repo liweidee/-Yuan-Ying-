@@ -151,72 +151,86 @@ class _MarketManageDialogState extends State<_MarketManageDialog> {
         color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
         borderRadius: Style.mdRadius,
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
+          Expanded(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
                   source.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-              ),
-              PopupMenuButton<_MarketSourceAction>(
-                tooltip: '更多',
-                icon: Icon(
-                  Icons.more_vert,
-                  size: 20,
-                  color: colorScheme.outline,
+                const SizedBox(height: 3),
+                Text(
+                  source.url,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: colorScheme.outline,
+                  ),
                 ),
-                padding: EdgeInsets.zero,
-                onSelected: (action) => _onSourceAction(source, action),
-                itemBuilder: (context) => [
-                  const PopupMenuItem(
-                    value: _MarketSourceAction.edit,
-                    child: _SourceMenuItem(
-                      icon: Icons.edit_outlined,
-                      label: '编辑配置',
-                    ),
-                  ),
-                  const PopupMenuItem(
-                    value: _MarketSourceAction.copyUrl,
-                    child: _SourceMenuItem(
-                      icon: Icons.link,
-                      label: '复制链接',
-                    ),
-                  ),
-                  PopupMenuItem(
-                    value: _MarketSourceAction.delete,
-                    child: _SourceMenuItem(
-                      icon: Icons.delete_outline,
-                      label: '删除',
-                      color: colorScheme.error,
-                    ),
-                  ),
-                ],
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          PopupMenuButton<_MarketSourceAction>(
+            tooltip: '更多',
+            icon: Icon(
+              Icons.more_vert,
+              size: 20,
+              color: colorScheme.outline,
+            ),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(
+              minWidth: 36,
+              minHeight: 40,
+            ),
+            onSelected: (action) => _onSourceAction(source, action),
+            itemBuilder: (context) => [
+              const PopupMenuItem(
+                value: _MarketSourceAction.edit,
+                child: _SourceMenuItem(
+                  icon: Icons.edit_outlined,
+                  label: '编辑配置',
+                ),
               ),
-              Switch(
-                value: source.enabled,
-                onChanged: (v) {
-                  setState(() {
-                    final i = _sources.indexWhere((e) => e.id == source.id);
-                    if (i >= 0) {
-                      _sources[i] = _sources[i].copyWith(enabled: v);
-                    }
-                  });
-                },
+              const PopupMenuItem(
+                value: _MarketSourceAction.copyUrl,
+                child: _SourceMenuItem(
+                  icon: Icons.link,
+                  label: '复制链接',
+                ),
+              ),
+              PopupMenuItem(
+                value: _MarketSourceAction.delete,
+                child: _SourceMenuItem(
+                  icon: Icons.delete_outline,
+                  label: '删除',
+                  color: colorScheme.error,
+                ),
               ),
             ],
           ),
-          Text(
-            source.url,
-            style: TextStyle(fontSize: 11, color: colorScheme.outline),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
+          Switch(
+            value: source.enabled,
+            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            onChanged: (v) {
+              setState(() {
+                final i = _sources.indexWhere((e) => e.id == source.id);
+                if (i >= 0) {
+                  _sources[i] = _sources[i].copyWith(enabled: v);
+                }
+              });
+            },
           ),
         ],
       ),

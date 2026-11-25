@@ -241,23 +241,6 @@ class MainActivity : AudioServiceActivity() {
             }
         }
 
-        // Android Node 运行时改由插件提供，原生侧仅同步 assets 项目资源。
-        MethodChannel(
-            flutterEngine.dartExecutor.binaryMessenger,
-            "com.example.yuanying/node_assets"
-        ).setMethodCallHandler { call, result ->
-            when (call.method) {
-                "prepareProject" -> {
-                    try {
-                        result.success(NodeAssetsManager.prepareProject(applicationContext))
-                    } catch (e: Exception) {
-                        result.error("NODE_ASSETS_FAILED", e.message ?: "unknown error", null)
-                    }
-                }
-                else -> result.notImplemented()
-            }
-        }
-        
         // ===== 服务托管前台服务（沙盒/插件与猫影视 Node 保活） =====
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,

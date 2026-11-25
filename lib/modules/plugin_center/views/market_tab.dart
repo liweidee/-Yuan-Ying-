@@ -112,66 +112,99 @@ class _MarketTabState extends State<MarketTab> {
 
   Widget _buildFilterChips(ColorScheme colorScheme) {
     return Obx(() {
-      return SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-        child: Row(
-          children: [
-            _buildFilterChip(
-              label: '全部',
-              selected: _controller.marketFilter.value == MarketFilter.all,
-              onTap: () => _controller.marketFilter.value = MarketFilter.all,
-            ),
-            _buildFilterChip(
-              label: '可更新 ${_controller.updatableCount}',
-              selected:
-                  _controller.marketFilter.value == MarketFilter.updatable,
-              onTap: () =>
-                  _controller.marketFilter.value = MarketFilter.updatable,
-            ),
-            _buildFilterChip(
-              label: '已安装 ${_controller.installedCount}',
-              selected:
-                  _controller.marketFilter.value == MarketFilter.installed,
-              onTap: () =>
-                  _controller.marketFilter.value = MarketFilter.installed,
-            ),
-            _buildFilterChip(
-              label: '未安装',
-              selected:
-                  _controller.marketFilter.value == MarketFilter.notInstalled,
-              onTap: () =>
-                  _controller.marketFilter.value = MarketFilter.notInstalled,
-            ),
-            const SizedBox(width: 12),
-            Container(
-              width: 1,
-              height: 20,
-              color: colorScheme.outline.withValues(alpha: 0.2),
-            ),
-            const SizedBox(width: 12),
-            _buildFilterChip(
-              label: '全类别',
-              selected: _controller.marketCategory.value == MarketCategory.all,
-              onTap: () =>
-                  _controller.marketCategory.value = MarketCategory.all,
-            ),
-            _buildFilterChip(
-              label: '环境',
-              selected: _controller.marketCategory.value == MarketCategory.env,
-              onTap: () =>
-                  _controller.marketCategory.value = MarketCategory.env,
-            ),
-            _buildFilterChip(
-              label: '应用',
-              selected: _controller.marketCategory.value == MarketCategory.app,
-              onTap: () =>
-                  _controller.marketCategory.value = MarketCategory.app,
-            ),
-          ],
+      final statusChips = <Widget>[
+        _buildFilterChip(
+          label: '全部',
+          selected: _controller.marketFilter.value == MarketFilter.all,
+          onTap: () => _controller.marketFilter.value = MarketFilter.all,
         ),
+        _buildFilterChip(
+          label: '可更新 ${_controller.updatableCount}',
+          selected: _controller.marketFilter.value == MarketFilter.updatable,
+          onTap: () => _controller.marketFilter.value = MarketFilter.updatable,
+        ),
+        _buildFilterChip(
+          label: '已安装 ${_controller.installedCount}',
+          selected: _controller.marketFilter.value == MarketFilter.installed,
+          onTap: () => _controller.marketFilter.value = MarketFilter.installed,
+        ),
+        _buildFilterChip(
+          label: '未安装',
+          selected: _controller.marketFilter.value == MarketFilter.notInstalled,
+          onTap: () =>
+              _controller.marketFilter.value = MarketFilter.notInstalled,
+        ),
+      ];
+      final categoryChips = <Widget>[
+        _buildFilterChip(
+          label: '全类别',
+          selected: _controller.marketCategory.value == MarketCategory.all,
+          onTap: () => _controller.marketCategory.value = MarketCategory.all,
+        ),
+        _buildFilterChip(
+          label: '环境',
+          selected: _controller.marketCategory.value == MarketCategory.env,
+          onTap: () => _controller.marketCategory.value = MarketCategory.env,
+        ),
+        _buildFilterChip(
+          label: '应用',
+          selected: _controller.marketCategory.value == MarketCategory.app,
+          onTap: () => _controller.marketCategory.value = MarketCategory.app,
+        ),
+      ];
+
+      return LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxWidth >= 720) {
+            return SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 4,
+              ),
+              child: Row(
+                children: [
+                  ...statusChips,
+                  const SizedBox(width: 4),
+                  Container(
+                    width: 1,
+                    height: 20,
+                    color: colorScheme.outline.withValues(alpha: 0.2),
+                  ),
+                  const SizedBox(width: 12),
+                  ...categoryChips,
+                ],
+              ),
+            );
+          }
+
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildScrollableFilterRow(statusChips),
+                const SizedBox(height: 6),
+                _buildScrollableFilterRow(categoryChips),
+              ],
+            ),
+          );
+        },
       );
     });
+  }
+
+  Widget _buildScrollableFilterRow(List<Widget> chips) {
+    return SizedBox(
+      width: double.infinity,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: chips,
+        ),
+      ),
+    );
   }
 
   Widget _buildFilterChip({
