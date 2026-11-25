@@ -77,8 +77,6 @@ import 'package:yuanying/services/media_proxy/media_proxy_server.dart';
 
 import 'package:yuanying/modules/download/services/cache_service.dart';
 
-import 'package:yuanying/services/silence_keeper.dart';
-
 import 'package:yuanying/core/constants/plugin_storage_keys.dart';
 import 'package:yuanying/modules/plugin_center/services/plugin_center_bootstrap.dart';
 import 'package:yuanying/modules/manual_source/controllers/manual_source_controller.dart';
@@ -165,19 +163,6 @@ class _CustomHttpOverrides extends HttpOverrides {
 class _AppLifecycleObserver extends WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.paused) {
-      // 仅 iOS：App 切到后台时，如果音乐已暂停，
-      // 立即启动静音保活，避免 2 秒 timer 在后台不触发导致被杀。
-      if (Platform.isIOS) {
-        if (Get.isRegistered<MusicPlayerController>()) {
-          final controller = Get.find<MusicPlayerController>();
-          if (!controller.isPlaying) {
-            SilenceKeeper.start();
-          }
-        }
-      }
-    }
-    
     if (state == AppLifecycleState.detached) {
       PythonRuntime.dispose();
 

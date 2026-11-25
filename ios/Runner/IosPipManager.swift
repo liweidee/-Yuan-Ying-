@@ -35,7 +35,6 @@ final class IosPipManager: NSObject, AVPictureInPictureControllerDelegate {
   private func handle(call: FlutterMethodCall, result: @escaping FlutterResult) {
     switch call.method {
     case "pictureInPictureStatus":
-      ensureAudioSession()
       result([
         "supported": AVPictureInPictureController.isPictureInPictureSupported(),
         "active": pipController?.isPictureInPictureActive ?? false,

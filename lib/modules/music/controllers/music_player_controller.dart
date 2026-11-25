@@ -19,7 +19,7 @@ import 'package:yuanying/core/constants/storage_keys.dart';
 import 'package:yuanying/utils/toast_utils.dart';
 import 'package:yuanying/utils/storage.dart';
 import 'package:yuanying/core/constants/app_constants.dart';
-import 'package:yuanying/services/silence_keeper.dart';
+import 'package:yuanying/services/playback_audio_session.dart';
 
 // ===== 音频文件后缀列表 =====
 const List<String> _audioExtensions = [
@@ -137,12 +137,6 @@ class MusicPlayerController extends GetxController {
   final RxBool stopAfterCurrent = false.obs;
   Timer? _timer;
 
-  /// 暂停后延时启动静音保活的 timer
-  ///
-  /// 用户暂停音乐时，2 秒后如果仍未恢复播放，启动静音保活，
-  /// 填补无音频输出的空窗期，保持控制栏不丢失。
-  Timer? _pauseResumeTimer;
-
   // ===== 倍速 =====
   final RxDouble speed = 1.0.obs;
   final List<double> speedOptions = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
@@ -176,34 +170,9 @@ class MusicPlayerController extends GetxController {
     _handler.onSkipToPrevious = () => playPrev();
     _handler.onSkipToNext = () => playNext();
 
-    // ===== 统一监听播放状态变化，驱动静音保活 =====
-    //
-    // 播放中：主播放器占用音频会话，无需静音保活，SilenceKeeper 停止。
-    // 暂停中：主播放器释放音频 I/O，静音保活接管，保证控制栏不丢失。
-    // 切歌窗口：playingStream 会经历 true→false→true，
-    //          短暂停止时会触发 2 秒 timer，若期间恢复播放则 timer 被取消。
-    //
-    // 这样，任何来源的暂停/恢复（页面底部、系统控制栏、定时器、自动切歌）
-    // 都会被统一处理。
-    bool wasPlaying = false;
+    // 暂停时保留音频会话和 Now Playing 状态，不启动静音音频。
     _handler.player.playingStream.listen((isPlaying) {
       playing.value = isPlaying;
-
-      if (isPlaying && !wasPlaying) {
-        // 从暂停恢复播放：取消待恢复 timer，停止静音保活
-        _pauseResumeTimer?.cancel();
-        _pauseResumeTimer = null;
-        SilenceKeeper.stop();
-      } else if (!isPlaying && wasPlaying) {
-        // 从播放变为暂停：2 秒后如果仍未恢复，启动静音保活
-        _pauseResumeTimer?.cancel();
-        _pauseResumeTimer = Timer(const Duration(seconds: 2), () {
-          if (!playing.value) {
-            SilenceKeeper.start();
-          }
-        });
-      }
-      wasPlaying = isPlaying;
     });
 
     // 监听位置变化以实现跳过片头片尾
@@ -215,7 +184,7 @@ class MusicPlayerController extends GetxController {
   @override
   void onClose() {
     _cancelTimer();
-    _pauseResumeTimer?.cancel();
+    unawaited(PlaybackAudioSession.instance.deactivateAndNotifyOthers());
     _handler.disposeHandler();
     super.onClose();
   }
@@ -769,36 +738,26 @@ class MusicPlayerController extends GetxController {
 
   /// 用户主动关闭播放条
   ///
-  /// 停止音乐播放，但通过 SilenceKeeper 保持音频会话活跃，
-  /// 让锁屏控制栏保留，用户可从锁屏快速恢复播放。
+  /// 停止音乐播放并释放音频会话，让其他应用恢复播放。
   Future<void> closePlayer() async {
     try {
       await _handler.player.stop();
     } catch (_) {}
     playing.value = false;
 
-    // 立即启动静音保活（不等 2 秒 timer，避免用户立即切后台被挂起）
-    _pauseResumeTimer?.cancel();
-    _pauseResumeTimer = null;
-    await SilenceKeeper.start();
+    await PlaybackAudioSession.instance.deactivateAndNotifyOthers();
   }
 
   /// 内部切歌——统一路径
   Future<void> _playIndexWithFetcher(int index) async {
     if (index < 0 || index >= playlist.length) return;
 
-    // 切歌是主动行为，取消待恢复 timer
-    _pauseResumeTimer?.cancel();
-    _pauseResumeTimer = null;
+    await PlaybackAudioSession.instance.activateForPlayback();
 
     currentIndex.value = index;
     if (_currentVodId != null && _currentVodId!.isNotEmpty) {
       _saveCurrentIndex(_currentVodId!, index);
     }
-
-    // 主动启动静音保活（独占模式，覆盖整个切歌静音窗口）
-    // 新曲开始后由 playingStream 自动停止
-    await SilenceKeeper.start(timeout: const Duration(seconds: 30));
 
     _handler.isSwitchingTrack = true;
     _handler.notifyStateChanged();
@@ -819,9 +778,6 @@ class MusicPlayerController extends GetxController {
       onPlayCompleted?.call();
     } finally {
       _handler.isSwitchingTrack = false;
-      // 注意：不在这里 stop SilenceKeeper。
-      // 若新曲开始播放，playingStream 会触发并停止它；
-      // 若切歌失败（无新曲），保活的 30 秒 timeout 会自动兜底停止。
       _handler.notifyStateChanged();
     }
   }

@@ -11,7 +11,6 @@ import 'package:path/path.dart' as p;
 import 'package:synchronized/synchronized.dart';
 
 import 'package:yuanying/core/constants/plugin_storage_keys.dart';
-import 'package:yuanying/modules/plugin_center/models/installed_plugin.dart';
 import 'package:yuanying/modules/plugin_center/models/service_config.dart';
 import 'package:yuanying/modules/plugin_center/services/install_manager.dart';
 import 'package:yuanying/modules/plugin_center/services/plugin_paths.dart';
@@ -1215,18 +1214,46 @@ class ServiceManager {
   }
 
   Future<String?> _resolveExecutableRaw(ServiceConfig config) async {
-    // 1. 自定义 exe 优先
-    if (config.executable != null && config.executable!.isNotEmpty) {
-      final resolved = await _resolvePlaceholders(config.executable!);
-      if (File(resolved).existsSync()) return resolved;
-      return null;
+    // 自定义环境必须显式提供可执行文件。
+    if (config.runtime == 'custom') {
+      if (config.executable == null || config.executable!.isEmpty) return null;
+      final resolved = await _resolvePlaceholders(config.executable!.trim());
+      return File(resolved).existsSync() ? resolved : null;
     }
 
-    // 2. 自定义环境但没填 exe → 报错
-    if (config.runtime == 'custom') return null;
+    // 内置运行时允许使用有效的手动覆盖路径。
+    if (config.executable != null && config.executable!.isNotEmpty) {
+      final resolved = await _resolvePlaceholders(config.executable!.trim());
+      if (File(resolved).existsSync()) return resolved;
+    }
 
-    // 3. 标准运行时：从 plugin.json 解析
-    final installed = InstallManager.instance.findInstalled(config.runtime);
+    // 内置运行时以 plugin.json 为唯一权威来源。
+    // 无论输入框为空、保留默认模板还是保存了旧错误模板，都能回退到这里。
+    return _resolveRuntimeExecutable(config.runtime);
+  }
+
+  /// 为服务表单生成跨设备可移植的真实可执行文件模板。
+  ///
+  /// Android 优先使用 plugin.json 的 binaries.android / pyRuntime.pythonBin，
+  /// Windows 使用 binaries.win32；最终路径始终相对 `__plugin:<runtime>__`。
+  Future<String?> resolveRuntimeExecutableTemplate(String runtimeId) async {
+    final installed = InstallManager.instance.findInstalled(runtimeId);
+    if (installed == null) return null;
+    final executable = await _resolveRuntimeExecutable(runtimeId);
+    if (executable == null) return null;
+    final installDir = Directory(installed.installPath);
+    if (!PluginPaths.isWithin(installDir, executable)) return null;
+    final relative = p
+        .relative(executable, from: installed.installPath)
+        .replaceAll('\\', '/');
+    if (relative.isEmpty || relative == '.' || relative.startsWith('../')) {
+      return null;
+    }
+    return '__plugin:${runtimeId}__/$relative';
+  }
+
+  Future<String?> _resolveRuntimeExecutable(String runtimeId) async {
+    final installed = InstallManager.instance.findInstalled(runtimeId);
     if (installed == null) return null;
     final installPath = installed.installPath;
 
@@ -1248,42 +1275,10 @@ class ServiceManager {
         final binariesKey = Platform.isWindows ? 'win32' : 'android';
         if (binaries is Map && binaries[binariesKey] is String) {
           final rel = binaries[binariesKey] as String;
-          final candidates = [
-            p.join(installPath, rel),
-            p.join(installPath, 'bin', rel),
-            p.join(installPath, p.basename(rel)),
-            p.join(installPath, 'bin', p.basename(rel)),
-          ];
-          for (final c in candidates) {
-            if (File(c).existsSync()) return c;
-          }
+          final candidate = p.join(installPath, rel);
+          if (File(candidate).existsSync()) return candidate;
         }
       } catch (_) {}
-    }
-
-    final exeName = _executableNameFor(config.runtime);
-    if (exeName == null) return null;
-    try {
-      final entities = Directory(installPath).listSync(recursive: true);
-      for (final e in entities) {
-        if (e is File &&
-            p.basename(e.path).toLowerCase() == exeName.toLowerCase()) {
-          return e.path;
-        }
-      }
-    } catch (_) {}
-    return null;
-  }
-
-  String? _executableNameFor(String runtimeId) {
-    final ext = Platform.isWindows ? '.exe' : '';
-    if (runtimeId.startsWith('nodejs')) return 'node$ext';
-    if (runtimeId.startsWith('php')) return 'php$ext';
-    if (runtimeId.startsWith('python')) {
-      return Platform.isWindows ? 'python.exe' : 'python3.12';
-    }
-    if (runtimeId.startsWith('mediaProxy')) {
-      return Platform.isWindows ? 'mediaProxy-win.exe' : 'mediaProxy';
     }
     return null;
   }

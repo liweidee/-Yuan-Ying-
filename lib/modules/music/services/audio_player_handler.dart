@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:audio_service/audio_service.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:yuanying/modules/music/services/music_player.dart';
+import 'package:yuanying/services/playback_audio_session.dart';
 import 'package:yuanying/t4/models/video_detail.dart';
 
 class AudioPlayerHandler extends BaseAudioHandler {
@@ -97,32 +98,43 @@ class AudioPlayerHandler extends BaseAudioHandler {
 
   @override
   Future<void> play({Episode? music, String? url, Map<String, String>? headers}) async {
-      if (music != null) {
-        // 先设置 current 并刷新 mediaItem，再启动播放。
-        // 避免 playingStream 先触发广播时 mediaItem 仍为 null，
-        // 导致 Android MediaSession 收到 "playing=true + 无元数据" 而拒绝创建通知。
-        final previous = player.current;
-        player.current = music;
-        _updateMediaItem();
+    await PlaybackAudioSession.instance.activateForPlayback();
+    if (music != null) {
+      // 先设置 current 并刷新 mediaItem，再启动播放。
+      // 避免 playingStream 先触发广播时 mediaItem 仍为 null，
+      // 导致 Android MediaSession 收到 "playing=true + 无元数据" 而拒绝创建通知。
+      final previous = player.current;
+      player.current = music;
+      _updateMediaItem();
 
-        try {
-          await player.play(music: music, url: url, headers: headers);
-        } catch (_) {
-          player.current = previous;
-          _updateMediaItem();
-          rethrow;
-        }
-      } else {
-        if (player.current == null) return;
-        await player.audio.play();
+      try {
+        await player.play(music: music, url: url, headers: headers);
+      } catch (_) {
+        player.current = previous;
+        _updateMediaItem();
+        await PlaybackAudioSession.instance.deactivateAndNotifyOthers();
+        rethrow;
       }
-      _updatePosition();
-      _broadcastState();
+    } else {
+      if (player.current == null) return;
+      await player.audio.play();
+    }
+    _updatePosition();
+    _broadcastState();
   }
 
   @override
   Future<void> pause() async {
     await player.audio.pause();
+    await PlaybackAudioSession.instance.keepForPause();
+    _updatePosition();
+    _broadcastState();
+  }
+
+  @override
+  Future<void> stop() async {
+    await player.audio.stop();
+    await PlaybackAudioSession.instance.deactivateAndNotifyOthers();
     _updatePosition();
     _broadcastState();
   }

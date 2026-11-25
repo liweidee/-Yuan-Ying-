@@ -414,10 +414,21 @@ class _ServiceFormDialogState extends State<_ServiceFormDialog> {
       return;
     }
 
-    // 可执行文件：用占位符（跨设备可移植）
-    final exeName = _exeNameFor(runtime);
-    if (exeName != null) {
-      _exeCtrl.text = '__plugin:${runtime}__/bin/$exeName';
+    // 可执行文件：从运行时插件的真实布局生成跨设备模板。
+    String? executableTemplate;
+    try {
+      executableTemplate = await ServiceManager.instance
+          .resolveRuntimeExecutableTemplate(runtime);
+    } catch (_) {}
+    if (!mounted || _selectedRuntime != runtime) return;
+    if (executableTemplate != null) {
+      _exeCtrl.text = executableTemplate;
+    } else {
+      // 插件未就绪时保留旧的逻辑模板；启动阶段仍会从 plugin.json 回退解析。
+      final exeName = _exeNameFor(runtime);
+      if (exeName != null) {
+        _exeCtrl.text = '__plugin:${runtime}__/bin/$exeName';
+      }
     }
 
     // 启动参数
