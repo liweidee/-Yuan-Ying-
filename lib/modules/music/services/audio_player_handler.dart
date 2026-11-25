@@ -98,7 +98,6 @@ class AudioPlayerHandler extends BaseAudioHandler {
 
   @override
   Future<void> play({Episode? music, String? url, Map<String, String>? headers}) async {
-    await PlaybackAudioSession.instance.activateForPlayback();
     if (music != null) {
       // 先设置 current 并刷新 mediaItem，再启动播放。
       // 避免 playingStream 先触发广播时 mediaItem 仍为 null，
@@ -110,6 +109,9 @@ class AudioPlayerHandler extends BaseAudioHandler {
       try {
         await player.play(music: music, url: url, headers: headers);
       } catch (_) {
+        try {
+          await player.audio.stop();
+        } catch (_) {}
         player.current = previous;
         _updateMediaItem();
         await PlaybackAudioSession.instance.deactivateAndNotifyOthers();
@@ -117,6 +119,7 @@ class AudioPlayerHandler extends BaseAudioHandler {
       }
     } else {
       if (player.current == null) return;
+      await PlaybackAudioSession.instance.activateForPlayback();
       await player.audio.play();
     }
     _updatePosition();

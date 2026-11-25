@@ -2,6 +2,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:yuanying/services/playback_audio_session.dart';
 import 'package:yuanying/t4/models/video_detail.dart';
 import 'package:yuanying/utils/storage_manager.dart';
 import 'package:yuanying/core/constants/storage_keys.dart';
@@ -71,6 +72,7 @@ class MusicPlayer {
       await _audio.stop();
       final playUrl = url ?? music.url;
       await _audio.setUrl(playUrl, headers: headers ?? {});
+      await PlaybackAudioSession.instance.activateForPlayback();
       await _audio.play();
     } finally {
       isLoading = false;

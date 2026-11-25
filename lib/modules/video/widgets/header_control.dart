@@ -430,22 +430,32 @@ class _HeaderControlState extends State<HeaderControl> {
         pageBuilder: (context, animation, secondaryAnimation) {
           final padding = MediaQuery.viewPaddingOf(context);
           final availableHeight = size.height - padding.top - padding.bottom;
+          final useMobileFullscreenInset =
+              (Platform.isIOS || Platform.isAndroid) &&
+              controller.playerController.isFullScreen.value &&
+              size.width > size.height;
+          final rightInset = useMobileFullscreenInset
+              ? padding.right + 12
+              : 0.0;
 
-          return Align(
-            alignment: Alignment.centerRight,
-            child: Material(
-              color: Colors.transparent,
-              child: Container(
-                width: rightWidth,
-                height: availableHeight,
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surface,
-                  borderRadius: const BorderRadius.only(
-                    topLeft: Radius.circular(12),
-                    bottomLeft: Radius.circular(12),
+          return Padding(
+            padding: EdgeInsets.only(right: rightInset),
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: Material(
+                color: Colors.transparent,
+                child: Container(
+                  width: rightWidth,
+                  height: availableHeight,
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surface,
+                    borderRadius: const BorderRadius.only(
+                      topLeft: Radius.circular(12),
+                      bottomLeft: Radius.circular(12),
+                    ),
                   ),
+                  child: SettingSheet(controller: controller, isWide: true),
                 ),
-                child: SettingSheet(controller: controller, isWide: true),
               ),
             ),
           );

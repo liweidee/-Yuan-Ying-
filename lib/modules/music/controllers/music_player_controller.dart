@@ -752,8 +752,6 @@ class MusicPlayerController extends GetxController {
   Future<void> _playIndexWithFetcher(int index) async {
     if (index < 0 || index >= playlist.length) return;
 
-    await PlaybackAudioSession.instance.activateForPlayback();
-
     currentIndex.value = index;
     if (_currentVodId != null && _currentVodId!.isNotEmpty) {
       _saveCurrentIndex(_currentVodId!, index);
