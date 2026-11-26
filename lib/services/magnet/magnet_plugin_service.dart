@@ -4,6 +4,7 @@ import 'dart:ffi';
 import 'dart:io';
 
 import 'package:ffi/ffi.dart';
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:get/get.dart';
 import 'package:path/path.dart' as p;
 import 'package:synchronized/synchronized.dart';
@@ -160,6 +161,11 @@ class MagnetPluginService {
       _initialized = true;
       _cacheDirectoryPath = cacheDir.path;
       _loadedPluginVersion = availability.pluginVersion;
+      debugPrint(
+        '[Magnet] initialized abi=${Abi.current()} '
+        'version=${availability.pluginVersion ?? '-'} '
+        'cache=${cacheDir.path}',
+      );
     });
   }
 
@@ -182,11 +188,24 @@ class MagnetPluginService {
     if (parseTaskId <= 0) {
       throw const MagnetPluginException('磁力链接解析失败');
     }
+    debugPrint(
+      '[Magnet] parse task=$parseTaskId timeout=${timeout.inSeconds}s',
+    );
     _parseTaskOwners[parseTaskId] = ownerTag;
     final deadline = DateTime.now().add(timeout);
+    MagnetTaskSnapshot? lastSnapshot;
+    var lastLoggedState = '';
     try {
       while (DateTime.now().isBefore(deadline)) {
         final snapshot = await _poll(parseTaskId);
+        lastSnapshot = snapshot;
+        if (snapshot.state != lastLoggedState) {
+          lastLoggedState = snapshot.state;
+          debugPrint(
+            '[Magnet] parse state=${snapshot.state} '
+            'error=${snapshot.error.isEmpty ? '-' : snapshot.error}',
+          );
+        }
         if (snapshot.isError) {
           throw MagnetPluginException(
             snapshot.error.isEmpty ? '磁力元数据解析失败' : snapshot.error,
@@ -202,7 +221,15 @@ class MagnetPluginService {
         }
         await Future<void>.delayed(const Duration(milliseconds: 400));
       }
-      throw const MagnetPluginException('磁力元数据解析超时');
+      debugPrint(
+        '[Magnet] metadata timeout infohash='
+        '${MagnetUri.infoHashFromMagnet(magnet) ?? '-'} '
+        'state=${lastSnapshot?.state ?? 'unknown'}',
+      );
+      throw MagnetPluginException(
+        '磁力元数据解析超时（${timeout.inSeconds} 秒内未获取到种子信息）。'
+        '请检查种子是否有可用节点、网络是否允许 BT/DHT，或尝试关闭代理后重试',
+      );
     } finally {
       _parseTaskOwners.remove(parseTaskId);
       await _lock.synchronized(() {

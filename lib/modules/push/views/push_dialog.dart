@@ -12,10 +12,8 @@ import 'package:yuanying/t4/models/play_url.dart';
 import 'package:yuanying/t4/services/video_api_service.dart';
 import 'package:yuanying/t4/services/source_manager.dart';
 import 'package:yuanying/services/parser_service.dart';
-import 'package:yuanying/services/magnet/magnet_episode_adapter.dart';
 import 'package:yuanying/services/magnet/magnet_models.dart';
 import 'package:yuanying/services/magnet/magnet_plugin_gate.dart';
-import 'package:yuanying/services/magnet/magnet_plugin_service.dart';
 
 // ===== 解析模式枚举（必须在类外部定义） =====
 enum ParseMode { direct, parser, api, magnet }
@@ -192,7 +190,8 @@ class _PushDialogState extends State<PushDialog> {
                     controller: _inputController,
                     focusNode: _inputFocusNode,
                     onChanged: (text) {
-                      if (text.isNotEmpty && _selectedFilePath.value.isNotEmpty) {
+                      if (text.isNotEmpty &&
+                          _selectedFilePath.value.isNotEmpty) {
                         _selectedFilePath.value = '';
                       }
                     },
@@ -386,8 +385,9 @@ class _PushDialogState extends State<PushDialog> {
                             color: isSelected
                                 ? colorScheme.primary
                                 : colorScheme.outline,
-                            fontWeight:
-                                isSelected ? FontWeight.bold : FontWeight.normal,
+                            fontWeight: isSelected
+                                ? FontWeight.bold
+                                : FontWeight.normal,
                           ),
                         ),
                       ],
@@ -478,44 +478,27 @@ class _PushDialogState extends State<PushDialog> {
       SmartDialog.showToast('请输入 magnet: 开头的磁力链接');
       return;
     }
+    final availability = MagnetPluginGate.check();
+    debugPrint(
+      '[Magnet] push plugin=${availability.state.name} '
+      'version=${availability.pluginVersion ?? '-'}',
+    );
     if (!await MagnetPluginGate.ensureReady()) return;
 
-    _isLoading.value = true;
     final tag = 'push_${DateTime.now().millisecondsSinceEpoch}';
-    try {
-      final expansion = await MagnetPluginService.instance.expandMagnet(
-        input,
-        ownerTag: tag,
-        timeout: const Duration(seconds: 30),
-      );
-      final detail = MagnetEpisodeAdapter.buildPushDetail(
-        magnet: input,
-        expansion: expansion,
-      );
-      final first = MagnetEpisodeAdapter.selectDefaultEpisode(detail);
-      if (first == null) {
-        SmartDialog.showToast('种子中没有可播放文件');
-        return;
-      }
-      Get.toNamed(
-        AppPages.detail,
-        arguments: {
-          'isPush': true,
-          'isDirectPushMode': true,
-          'directUrl': first.url,
-          'directTitle': first.name,
-          'sourceName': '磁力',
-          'videoDetail': detail,
-          '_controllerTag': tag,
-        },
-        preventDuplicates: false,
-      );
-      SmartDialog.showToast('种子已解析，正在准备播放...');
-    } catch (e) {
-      SmartDialog.showToast('磁力解析失败: ${e.toString()}');
-    } finally {
-      _isLoading.value = false;
-    }
+    final title = MagnetUri.displayNameFromMagnet(input) ?? '磁力播放';
+    Get.toNamed(
+      AppPages.detail,
+      arguments: {
+        'isMagnetMode': true,
+        'magnetUrl': input,
+        'magnetAutoPlay': true,
+        'directTitle': title,
+        'sourceName': '磁力',
+        '_controllerTag': tag,
+      },
+      preventDuplicates: false,
+    );
   }
 
   // ===== 直链播放 =====
@@ -526,7 +509,8 @@ class _PushDialogState extends State<PushDialog> {
       final tag = 'push_${DateTime.now().millisecondsSinceEpoch}';
       final site = _sourceManager.currentSite.value;
 
-      final isLocalFile = input.startsWith('file://') ||
+      final isLocalFile =
+          input.startsWith('file://') ||
           (Uri.tryParse(input)?.scheme == 'file') ||
           (File(input).existsSync());
 
@@ -541,7 +525,7 @@ class _PushDialogState extends State<PushDialog> {
         arguments: {
           'isPush': true,
           'directUrl': isLocalFile ? 'file://$input' : input,
-          'directTitle': '直链播放',  // ← 新增
+          'directTitle': '直链播放', // ← 新增
           '_controllerTag': tag,
         },
         preventDuplicates: false,
@@ -585,7 +569,8 @@ class _PushDialogState extends State<PushDialog> {
         );
         final data = response.data;
         if (data is Map) {
-          parsedUrl = data['url']?.toString() ??
+          parsedUrl =
+              data['url']?.toString() ??
               data['playUrl']?.toString() ??
               data['play_url']?.toString();
         }
@@ -619,7 +604,8 @@ class _PushDialogState extends State<PushDialog> {
             try {
               final jsonData = jsonDecode(html);
               if (jsonData is Map) {
-                parsedUrl = jsonData['url']?.toString() ??
+                parsedUrl =
+                    jsonData['url']?.toString() ??
                     jsonData['playUrl']?.toString() ??
                     jsonData['play_url']?.toString();
               }
@@ -643,9 +629,9 @@ class _PushDialogState extends State<PushDialog> {
           'isPush': true,
           'directUrl': parsedUrl,
           'directTitle': '解析播放',
-          'isParserMode': true,              // ← 标记解析模式
-          'parserSources': parseList,         // ← 解析源列表
-          'currentParser': parser.toJson(),   // ← 当前解析源
+          'isParserMode': true, // ← 标记解析模式
+          'parserSources': parseList, // ← 解析源列表
+          'currentParser': parser.toJson(), // ← 当前解析源
           '_controllerTag': tag,
         },
         preventDuplicates: false,

@@ -86,6 +86,9 @@ abstract final class MagnetEpisodeAdapter {
     required String magnet,
     required MagnetExpansion expansion,
     String? title,
+    String? vodPic,
+    String? vodContent,
+    String? typeName,
   }) {
     final episodes = expansion.files
         .map(
@@ -101,8 +104,9 @@ abstract final class MagnetEpisodeAdapter {
       vodName: title?.trim().isNotEmpty == true
           ? title!.trim()
           : MagnetUri.displayNameFromMagnet(magnet) ?? '磁力播放',
-      vodPic: '',
-      vodContent: '来自磁力推送播放',
+      vodPic: vodPic ?? '',
+      vodContent: vodContent ?? '来自磁力推送播放',
+      typeName: typeName,
       playSources: [
         PlaySource(name: '磁力', episodes: episodes),
       ],

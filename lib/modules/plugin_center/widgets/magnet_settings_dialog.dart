@@ -115,23 +115,31 @@ class _MagnetSettingsDialogState extends State<_MagnetSettingsDialog> {
         ),
       ),
       actions: [
-        TextButton(
-          onPressed: _saving ? null : _clearCache,
-          child: const Text('清除磁力缓存'),
-        ),
-        TextButton(
-          onPressed: _saving ? null : () => Navigator.of(context).pop(),
-          child: const Text('取消'),
-        ),
-        FilledButton(
-          onPressed: _saving ? null : _save,
-          child: _saving
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Text('保存'),
+        SizedBox(
+          width: double.infinity,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton(
+                onPressed: _saving ? null : _clearCache,
+                child: const Text('清理'),
+              ),
+              TextButton(
+                onPressed: _saving ? null : () => Navigator.of(context).pop(),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: _saving ? null : _save,
+                child: _saving
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('保存'),
+              ),
+            ],
+          ),
         ),
       ],
     );

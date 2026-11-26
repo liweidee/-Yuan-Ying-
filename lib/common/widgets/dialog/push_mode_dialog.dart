@@ -18,7 +18,7 @@ extension PushModeExtension on PushMode {
       case PushMode.manual:
         return '需要手动点击推送按钮';
       case PushMode.auto:
-        return '检测到推送链接时自动推送';
+        return '检测到网盘或磁力推送时自动跳转';
     }
   }
 }
@@ -120,7 +120,7 @@ class _PushModeDialogState extends State<PushModeDialog> {
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    '自动模式下检测到推送链接将直接跳转，无需手动点击',
+                    '自动模式下检测到网盘或磁力推送将直接跳转，无需手动点击',
                     style: textTheme.bodySmall?.copyWith(
                       color: colorScheme.outline,
                       fontSize: 12,
@@ -204,8 +204,12 @@ class _PushModeDialogState extends State<PushModeDialog> {
                   Text(
                     mode.label,
                     style: textTheme.bodyLarge?.copyWith(
-                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                      color: isSelected ? colorScheme.primary : colorScheme.onSurface,
+                      fontWeight: isSelected
+                          ? FontWeight.w600
+                          : FontWeight.normal,
+                      color: isSelected
+                          ? colorScheme.primary
+                          : colorScheme.onSurface,
                     ),
                   ),
                   const SizedBox(height: 2),

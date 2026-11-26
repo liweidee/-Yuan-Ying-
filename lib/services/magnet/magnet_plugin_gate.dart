@@ -54,6 +54,6 @@ abstract final class MagnetPluginGate {
       AppPages.pluginCenter,
       arguments: {'initialTab': initialTab},
     );
-    return check().isReady;
+    return false;
   }
 }
