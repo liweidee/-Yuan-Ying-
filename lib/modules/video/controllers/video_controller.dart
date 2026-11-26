@@ -2388,7 +2388,10 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     required bool autoPlay,
     Duration? seekTo,
   }) async {
-    if (!_isMagnetDetailMode) return;
+    if (!_isMagnetDetailMode &&
+        !(_isDirectPushMode && MagnetUri.isMagnetPlay(source))) {
+      return;
+    }
     if (!await MagnetPluginGate.ensureReady()) return;
     const loadingTag = 'magnet_loading';
     SmartDialog.show(
@@ -4476,6 +4479,18 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
       if (!_isMagnetDetailMode) {
         isLoadingDetail.value = false;
         autoPlay.value = false;
+        if (MagnetUri.isMagnetPlay(url)) {
+          await _playMagnetSource(
+            url,
+            fileNameHint:
+                _currentDirectTitle ??
+                introController.videoDetail.value?.vodName ??
+                '磁力播放',
+            autoPlay: true,
+            seekTo: seekTo,
+          );
+          return;
+        }
         final episode = _currentEpisode?.url == url
             ? _currentEpisode!
             : Episode(
