@@ -12,6 +12,10 @@ import 'package:yuanying/t4/models/play_url.dart';
 import 'package:yuanying/t4/services/video_api_service.dart';
 import 'package:yuanying/t4/services/source_manager.dart';
 import 'package:yuanying/services/parser_service.dart';
+import 'package:yuanying/services/magnet/magnet_episode_adapter.dart';
+import 'package:yuanying/services/magnet/magnet_models.dart';
+import 'package:yuanying/services/magnet/magnet_plugin_gate.dart';
+import 'package:yuanying/services/magnet/magnet_plugin_service.dart';
 
 // ===== 解析模式枚举（必须在类外部定义） =====
 enum ParseMode { direct, parser, api, magnet }
@@ -464,8 +468,53 @@ class _PushDialogState extends State<PushDialog> {
         await _playWithApi(input);
         break;
       case ParseMode.magnet:
-        SmartDialog.showToast('磁力播放功能开发中');
+        await _playMagnet(input);
         break;
+    }
+  }
+
+  Future<void> _playMagnet(String input) async {
+    if (!MagnetUri.isMagnet(input)) {
+      SmartDialog.showToast('请输入 magnet: 开头的磁力链接');
+      return;
+    }
+    if (!await MagnetPluginGate.ensureReady()) return;
+
+    _isLoading.value = true;
+    final tag = 'push_${DateTime.now().millisecondsSinceEpoch}';
+    try {
+      final expansion = await MagnetPluginService.instance.expandMagnet(
+        input,
+        ownerTag: tag,
+        timeout: const Duration(seconds: 30),
+      );
+      final detail = MagnetEpisodeAdapter.buildPushDetail(
+        magnet: input,
+        expansion: expansion,
+      );
+      final first = MagnetEpisodeAdapter.selectDefaultEpisode(detail);
+      if (first == null) {
+        SmartDialog.showToast('种子中没有可播放文件');
+        return;
+      }
+      Get.toNamed(
+        AppPages.detail,
+        arguments: {
+          'isPush': true,
+          'isDirectPushMode': true,
+          'directUrl': first.url,
+          'directTitle': first.name,
+          'sourceName': '磁力',
+          'videoDetail': detail,
+          '_controllerTag': tag,
+        },
+        preventDuplicates: false,
+      );
+      SmartDialog.showToast('种子已解析，正在准备播放...');
+    } catch (e) {
+      SmartDialog.showToast('磁力解析失败: ${e.toString()}');
+    } finally {
+      _isLoading.value = false;
     }
   }
 

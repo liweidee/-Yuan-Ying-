@@ -17,6 +17,8 @@ import 'package:yuanying/services/external_player_service.dart';
 import 'package:yuanying/modules/video/widgets/danmaku_settings.dart';
 import 'package:yuanying/utils/android_pip_helper.dart';
 import 'package:yuanying/utils/ios_pip_helper.dart';
+import 'package:yuanying/services/magnet/magnet_models.dart';
+import 'package:yuanying/services/magnet/magnet_plugin_service.dart';
 
 class HeaderControl extends StatefulWidget {
   final String controllerTag;
@@ -66,6 +68,10 @@ class _HeaderControlState extends State<HeaderControl> {
       final rawSpeed = playerController.downloadSpeed.value;
       final speed = _smoothSpeed(rawSpeed);
       final isFvpEngine = PlayerPref.playerEngine == PlayerEngineType.fvp;
+      final magnet = MagnetPluginService.instance.currentStatus.value;
+      final ownMagnetStatus = magnet?.ownerTag == controller.magnetOwnerTag
+          ? magnet
+          : null;
       // iOS 画中画入口必须保持可见。系统能力、视频格式和播放器状态
       // 只在点击后校验，避免用户完全找不到入口。
       final showIosPip = Platform.isIOS;
@@ -93,6 +99,10 @@ class _HeaderControlState extends State<HeaderControl> {
         if (speedText.isNotEmpty) {
           info += '  $speedText';
         }
+      }
+      final magnetText = _formatMagnetStatus(ownMagnetStatus);
+      if (magnetText.isNotEmpty) {
+        info = magnetText;
       }
 
       return Container(
@@ -395,7 +405,7 @@ class _HeaderControlState extends State<HeaderControl> {
                 alignment: Alignment.centerLeft,
                 child: Padding(
                   padding: const EdgeInsets.only(left: 8.0),
-                  child: _shouldShowLegacyInfo(info)
+                  child: magnetText.isNotEmpty || _shouldShowLegacyInfo(info)
                       ? Text(
                           info,
                           style: const TextStyle(
@@ -419,9 +429,6 @@ class _HeaderControlState extends State<HeaderControl> {
     final isWide = size.width > 800;
 
     if (isWide) {
-      // 固定右侧宽度 400px（与内容区一致）
-      const double rightWidth = 400.0;
-
       showGeneralDialog(
         context: context,
         barrierDismissible: true,
@@ -434,9 +441,18 @@ class _HeaderControlState extends State<HeaderControl> {
               (Platform.isIOS || Platform.isAndroid) &&
               controller.playerController.isFullScreen.value &&
               size.width > size.height;
+          final rightWidth = useMobileFullscreenInset
+              ? (size.width * 0.44).clamp(340.0, 380.0).toDouble()
+              : 400.0;
           final rightInset = useMobileFullscreenInset
               ? padding.right + 12
               : 0.0;
+          final borderRadius = useMobileFullscreenInset
+              ? const BorderRadius.all(Radius.circular(12))
+              : const BorderRadius.only(
+                  topLeft: Radius.circular(12),
+                  bottomLeft: Radius.circular(12),
+                );
 
           return Padding(
             padding: EdgeInsets.only(right: rightInset),
@@ -447,14 +463,16 @@ class _HeaderControlState extends State<HeaderControl> {
                 child: Container(
                   width: rightWidth,
                   height: availableHeight,
+                  clipBehavior: Clip.antiAlias,
                   decoration: BoxDecoration(
                     color: Theme.of(context).colorScheme.surface,
-                    borderRadius: const BorderRadius.only(
-                      topLeft: Radius.circular(12),
-                      bottomLeft: Radius.circular(12),
-                    ),
+                    borderRadius: borderRadius,
                   ),
-                  child: SettingSheet(controller: controller, isWide: true),
+                  child: SettingSheet(
+                    controller: controller,
+                    isWide: true,
+                    roundRightCorners: useMobileFullscreenInset,
+                  ),
                 ),
               ),
             ),
@@ -503,6 +521,28 @@ class _HeaderControlState extends State<HeaderControl> {
         PlayerPref.infoResolutionPosition != 0 ||
         PlayerPref.infoSpeedPosition != 0;
     return !infoOverlayActive;
+  }
+
+  String _formatMagnetStatus(MagnetPlaybackStatus? status) {
+    if (status == null) return '';
+    if (status.isError) {
+      return status.error.isEmpty ? '磁力播放异常' : '磁力 ${status.error}';
+    }
+    if (status.isStarting || status.total <= 0) {
+      return '磁力连接中...';
+    }
+    final percent = (status.progress * 100).clamp(0, 100);
+    final percentText = percent >= 10
+        ? percent.toStringAsFixed(0)
+        : percent.toStringAsFixed(1);
+    final parts = <String>['磁力 $percentText%'];
+    if (status.downRate > 0) {
+      parts.add('${formatMagnetBytes(status.downRate)}/s');
+    }
+    if (status.peers > 0) {
+      parts.add('${status.peers} 节点');
+    }
+    return parts.join(' · ');
   }
 
   /// 录制按钮（仅 FVP 内核）

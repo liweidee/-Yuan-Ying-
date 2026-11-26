@@ -82,11 +82,13 @@ class _DialogSpec {
 class SettingSheet extends StatefulWidget {
   final DetailController controller;
   final bool isWide; // 桌面端为 true
+  final bool roundRightCorners;
 
   const SettingSheet({
     super.key,
     required this.controller,
     this.isWide = false,
+    this.roundRightCorners = false,
   });
 
   @override
@@ -115,12 +117,15 @@ class _SettingSheetState extends State<SettingSheet> {
     if (isWide) {
       // 桌面端：普通 ListView，从顶部开始显示
       return Container(
+        clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
           color: colorScheme.surface,
-          borderRadius: const BorderRadius.only(
-            topLeft: Radius.circular(12),
-            bottomLeft: Radius.circular(12),
-          ),
+          borderRadius: widget.roundRightCorners
+              ? const BorderRadius.all(Radius.circular(12))
+              : const BorderRadius.only(
+                  topLeft: Radius.circular(12),
+                  bottomLeft: Radius.circular(12),
+                ),
         ),
         child: ScrollConfiguration(
           behavior: const NoScrollbarBehavior(),

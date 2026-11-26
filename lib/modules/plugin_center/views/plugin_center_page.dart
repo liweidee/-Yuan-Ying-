@@ -47,6 +47,15 @@ class _PluginCenterPageState extends State<PluginCenterPage>
     });
 
     _eventSub = ServiceManager.instance.onEvent.listen(_onServiceEvent);
+    final args = Get.arguments;
+    if (args is Map) {
+      final initialTab = (args['initialTab'] as num?)?.toInt();
+      if (initialTab != null && initialTab >= 0 && initialTab < 3) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _tabController.animateTo(initialTab);
+        });
+      }
+    }
   }
 
   @override

@@ -59,6 +59,10 @@ import 'package:yuanying/modules/subtitle_translation/services/subtitle_translat
 import 'package:yuanying/modules/subtitle_translation/services/translation_engine.dart';
 import 'package:yuanying/modules/agent_llm/models/playback_context.dart';
 import 'package:yuanying/services/mpd_parser.dart';
+import 'package:yuanying/services/magnet/magnet_episode_adapter.dart';
+import 'package:yuanying/services/magnet/magnet_models.dart';
+import 'package:yuanying/services/magnet/magnet_plugin_gate.dart';
+import 'package:yuanying/services/magnet/magnet_plugin_service.dart';
 
 /// 从历史恢复播放的位置信息
 class _ResumeInfo {
@@ -246,6 +250,8 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
 
   /// 自动播放状态（用于控制封面显示）
   final RxBool autoPlay = false.obs;
+
+  String get magnetOwnerTag => 'detail:${_tag ?? 'default'}';
 
   /// 播放失败状态（用于切集失败时回退到封面 + 错误提示）
   final RxBool playFailed = false.obs;
@@ -1424,9 +1430,10 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
   Future<void> loadVideoDetail() async {
     // _apiService = Get.find<SourceManager>().currentApiService;
     try {
-      final detail = await _apiService.getDetail(vodId: vodId, pwd: pwd);
+      var detail = await _apiService.getDetail(vodId: vodId, pwd: pwd);
 
       if (detail != null) {
+        detail = await _expandMagnetDetail(detail);
         introController.setVideoDetail(detail);
         if (detail.playSources.isNotEmpty) {
           final firstSource = detail.playSources.first;
@@ -1446,6 +1453,12 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
             if (firstEpisode.url.startsWith('push://')) {
               // 推送链接：显示按钮和 toast，不自动播放
               checkAndHandlePushEpisode(firstEpisode);
+              return;
+            }
+
+            // 插件不可用或元数据展开超时时保留原磁力项，不自动尝试播放。
+            if (MagnetUri.isMagnet(firstEpisode.url)) {
+              isLoadingDetail.value = false;
               return;
             }
 
@@ -1483,6 +1496,21 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     } catch (e) {
       detailError.value = '请求异常: ${e.toString()}';
       isLoadingDetail.value = false;
+    }
+  }
+
+  Future<VideoDetail> _expandMagnetDetail(VideoDetail detail) async {
+    if (!MagnetEpisodeAdapter.containsMagnet(detail)) return detail;
+    if (!MagnetPluginGate.check().isReady) return detail;
+    try {
+      return await MagnetEpisodeAdapter.expandDetail(
+        detail,
+        ownerTag: magnetOwnerTag,
+        perMagnetTimeout: const Duration(seconds: 8),
+      );
+    } catch (e) {
+      debugPrint('[DetailController] 磁力资源展开失败: $e');
+      return detail;
     }
   }
 
@@ -1776,6 +1804,16 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     isPlaying.value = false;
     showParserButton.value = false;
 
+    if (MagnetUri.isMagnetSource(episode.url)) {
+      await _playMagnetSource(
+        episode.url,
+        fileNameHint: episode.name,
+        autoPlay: autoPlay,
+        seekTo: seekTo,
+      );
+      return;
+    }
+
     // 直链推送模式：直接用 episode.url 播放，不走 _apiService
     // 适用于 Emby / AList 等外部来源，其 Episode.url 已是完整 HTTP 直链
     // if (_isDirectPushMode) {
@@ -1858,6 +1896,16 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
 
       if (playUrl == null) {
         _handlePlayFailure('获取播放地址失败');
+        return;
+      }
+
+      if (MagnetUri.isMagnetSource(playUrl.defaultUrl)) {
+        await _playMagnetSource(
+          playUrl.defaultUrl!,
+          fileNameHint: episode.name,
+          autoPlay: autoPlay,
+          seekTo: seekTo,
+        );
         return;
       }
 
@@ -2033,6 +2081,75 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
       // 保留原用户提示，仅补充日志便于排查（此前异常信息被完全吞掉）
       debugPrint('[DetailController] _playEpisode 异常: $e\n$stackTrace');
       _handlePlayFailure('获取播放地址失败');
+    }
+  }
+
+  Future<void> _playMagnetSource(
+    String source, {
+    required String fileNameHint,
+    required bool autoPlay,
+    Duration? seekTo,
+  }) async {
+    if (!await MagnetPluginGate.ensureReady()) return;
+    const loadingTag = 'magnet_loading';
+    SmartDialog.show(
+      tag: loadingTag,
+      maskColor: Colors.black54,
+      clickMaskDismiss: false,
+      animationType: SmartAnimationType.scale,
+      builder: (_) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
+        decoration: BoxDecoration(
+          color: Colors.black87,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: const Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 36,
+              height: 36,
+              child: CircularProgressIndicator(
+                strokeWidth: 3,
+                color: Colors.white,
+              ),
+            ),
+            SizedBox(height: 14),
+            Text(
+              '正在准备磁力播放...',
+              style: TextStyle(color: Colors.white, fontSize: 14),
+            ),
+          ],
+        ),
+      ),
+    );
+    try {
+      final result = await MagnetPluginService.instance.resolveToStream(
+        source: source,
+        ownerTag: magnetOwnerTag,
+        fileNameHint: fileNameHint,
+      );
+      if (isClosed) {
+        await MagnetPluginService.instance.disposeOwner(
+          magnetOwnerTag,
+          deleteMedia: null,
+        );
+        return;
+      }
+      final playUrl = PlayUrl(
+        parse: 0,
+        qualities: [
+          PlayQuality(label: '磁力', url: result.streamUrl),
+        ],
+        headers: const {},
+      );
+      await _startPlay(playUrl, autoPlay, seekTo: seekTo);
+    } catch (e) {
+      if (!isClosed) {
+        _handlePlayFailure('磁力播放失败: ${e.toString()}');
+      }
+    } finally {
+      SmartDialog.dismiss(tag: loadingTag, force: true);
     }
   }
 
@@ -3865,6 +3982,13 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     playerController.skipStartDuration.value = 0;
     playerController.skipEndDuration.value = 0;
 
+    unawaited(
+      MagnetPluginService.instance.disposeOwner(
+        magnetOwnerTag,
+        deleteMedia: null,
+      ),
+    );
+
     autoPlay.value = false;
 
     playerController.dispose();
@@ -4029,6 +4153,15 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
 
   /// 直链播放（跳过详情 API 请求）
   Future<void> _playDirect(String url, {Duration? seekTo}) async {
+    if (MagnetUri.isMagnetSource(url)) {
+      await _playMagnetSource(
+        url,
+        fileNameHint: _currentDirectTitle ?? '磁力播放',
+        autoPlay: true,
+        seekTo: seekTo,
+      );
+      return;
+    }
     currentPlayUrl.value = url;
     currentQualities.value = [PlayQuality(label: '直链', url: url)];
     // 直链模式绕过了 getPlayUrl，不能沿用上一个源的 DASH 元数据。

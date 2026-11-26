@@ -76,6 +76,7 @@ import 'package:yuanying/services/tmdb_match_cache_service.dart';
 import 'package:yuanying/services/media_proxy/media_proxy_server.dart';
 
 import 'package:yuanying/modules/download/services/cache_service.dart';
+import 'package:yuanying/services/magnet/magnet_cache_manager.dart';
 
 import 'package:yuanying/core/constants/plugin_storage_keys.dart';
 import 'package:yuanying/modules/plugin_center/services/plugin_center_bootstrap.dart';
@@ -463,7 +464,14 @@ void main() async {
 
   // 缓存服务
   Get.put(CacheService(), permanent: true);
-  
+  if (Platform.isAndroid) {
+    try {
+      await MagnetCacheManager.instance.init();
+    } catch (_) {
+      // 磁力缓存初始化失败不能阻断应用其它功能。
+    }
+  }
+
   // Emby 控制器（懒加载）
   Get.lazyPut(() => EmbyServerController(), fenix: true);
   Get.lazyPut(() => EmbyHomeController(), fenix: true);

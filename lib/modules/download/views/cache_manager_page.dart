@@ -1,4 +1,6 @@
 // lib/modules/download/views/cache_manager_page.dart
+import 'dart:io';
+
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
@@ -10,6 +12,9 @@ import 'package:yuanying/modules/download/services/cache_service.dart';
 import 'package:yuanying/modules/download/widgets/cache_item.dart';
 import 'package:yuanying/t4/models/video_detail.dart';
 import 'package:yuanying/modules/setting/models/setting_pref.dart';
+import 'package:yuanying/services/magnet/magnet_cache_manager.dart';
+import 'package:yuanying/services/magnet/magnet_models.dart';
+import 'package:yuanying/services/magnet/magnet_plugin_service.dart';
 
 class CacheManagerPage extends StatefulWidget {
   const CacheManagerPage({super.key});
@@ -20,6 +25,7 @@ class CacheManagerPage extends StatefulWidget {
 
 class _CacheManagerPageState extends State<CacheManagerPage> {
   final _service = Get.find<CacheService>();
+  final _magnetService = MagnetCacheManager.instance;
   final _selected = <String>{};
   final _searchController = TextEditingController();
 
@@ -94,6 +100,7 @@ class _CacheManagerPageState extends State<CacheManagerPage> {
       final completed = _filter(
         all.where((e) => e.isCompleted).toList(),
       );
+      final magnetEntries = _magnetService.entries;
 
       return PopScope(
         canPop: !_multiSelect && !_searching,
@@ -147,11 +154,25 @@ class _CacheManagerPageState extends State<CacheManagerPage> {
                 ),
               ],
 
+              // ===== 磁力缓存 =====
+              if (magnetEntries.isNotEmpty) ...[
+                _buildSectionHeader(
+                  '磁力缓存 (${magnetEntries.length})',
+                  top: downloading.isEmpty ? 12 : 16,
+                ),
+                SliverList.builder(
+                  itemCount: magnetEntries.length,
+                  itemBuilder: (context, index) {
+                    return _buildMagnetItem(magnetEntries[index]);
+                  },
+                ),
+              ],
+
               // ===== 已缓存视频 =====
               if (completed.isNotEmpty) ...[
                 _buildSectionHeader(
                   '已缓存视频 (${completed.length})',
-                  top: downloading.isEmpty ? 12 : 16,
+                  top: downloading.isEmpty && magnetEntries.isEmpty ? 12 : 16,
                 ),
                 SliverList.builder(
                   itemCount: completed.length,
@@ -172,7 +193,9 @@ class _CacheManagerPageState extends State<CacheManagerPage> {
               ],
 
               // ===== 空状态 =====
-              if (downloading.isEmpty && completed.isEmpty)
+              if (downloading.isEmpty &&
+                  completed.isEmpty &&
+                  magnetEntries.isEmpty)
                 SliverFillRemaining(
                   hasScrollBody: false,
                   child: _buildEmptyState(theme),
@@ -271,7 +294,7 @@ class _CacheManagerPageState extends State<CacheManagerPage> {
           onPressed: () => setState(() => _multiSelect = true),
         ),
         IconButton(
-          tooltip: '清空全部缓存',
+          tooltip: '清空普通下载缓存',
           icon: const Icon(Icons.delete_sweep_outlined),
           onPressed:
               _service.entries.isEmpty || _service.isMigrating.value
@@ -333,6 +356,110 @@ class _CacheManagerPageState extends State<CacheManagerPage> {
         ],
       ),
     );
+  }
+
+  Widget _buildMagnetItem(MagnetCacheEntry entry) {
+    final mediaExists =
+        entry.mediaPath != null &&
+        entry.mediaPath!.isNotEmpty &&
+        File(entry.mediaPath!).existsSync();
+    final size = formatMagnetBytes(
+      entry.complete && entry.totalBytes > 0
+          ? entry.totalBytes
+          : entry.downloadedBytes,
+    );
+    final subtitle = entry.complete
+        ? '${mediaExists ? '已缓存' : '已完成'} · $size'
+        : '缓存中 ${formatMagnetBytes(entry.downloadedBytes)} / '
+              '${formatMagnetBytes(entry.totalBytes)}';
+    return ListTile(
+      leading: Icon(
+        entry.complete ? Icons.movie_filter : Icons.downloading,
+      ),
+      title: Text(
+        entry.fileName,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+      subtitle: Text(
+        subtitle,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+      onTap: () => _onMagnetTap(entry),
+      trailing: IconButton(
+        tooltip: '删除磁力缓存',
+        icon: const Icon(Icons.delete_outline),
+        onPressed: () => _onMagnetDelete(entry),
+      ),
+    );
+  }
+
+  Future<void> _onMagnetTap(MagnetCacheEntry entry) async {
+    final canPlayLocal =
+        entry.complete &&
+        entry.mediaPath != null &&
+        entry.mediaPath!.isNotEmpty &&
+        File(entry.mediaPath!).existsSync();
+    final localUrl = canPlayLocal ? 'file://${entry.mediaPath}' : null;
+    final magnetUrl = MagnetUri.build(
+      infoHash: entry.infoHash,
+      fileIndex: entry.fileIndex,
+      originalMagnet: entry.originalMagnet,
+      fileName: entry.fileName,
+    );
+    final url = localUrl ?? magnetUrl;
+    final detail = VideoDetail(
+      vodId: 'magnet_${entry.infoHash}_${entry.fileIndex}',
+      vodName: entry.fileName,
+      vodPic: '',
+      playSources: [
+        PlaySource(
+          name: localUrl == null ? '磁力缓存' : '本地缓存',
+          episodes: [Episode(name: entry.fileName, url: url)],
+        ),
+      ],
+    );
+    await Get.toNamed(
+      AppPages.detail,
+      arguments: {
+        'isPush': true,
+        'isDirectPushMode': true,
+        'directUrl': url,
+        'directTitle': entry.fileName,
+        'videoDetail': detail,
+        '_controllerTag':
+            'magnet_cache_${DateTime.now().millisecondsSinceEpoch}',
+      },
+    );
+  }
+
+  Future<void> _onMagnetDelete(MagnetCacheEntry entry) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('删除磁力缓存'),
+        content: Text('确定删除「${entry.fileName}」的磁力媒体文件吗？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    final session = MagnetPluginService.instance.currentSession;
+    if (session?.infoHash == entry.infoHash &&
+        session?.file.index == entry.fileIndex) {
+      await MagnetPluginService.instance.stopCurrent(deleteMedia: true);
+    }
+    await _magnetService.deleteEntry(entry);
+    if (mounted) SmartDialog.showToast('磁力缓存已删除');
   }
 
   // ============================================================
@@ -458,7 +585,7 @@ class _CacheManagerPageState extends State<CacheManagerPage> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('清空全部缓存'),
+        title: const Text('清空普通下载缓存'),
         content: Text(
           '确定删除全部 ${_service.entries.length} 条离线缓存吗？'
           '对应视频文件也会被删除，此操作不可撤销。',

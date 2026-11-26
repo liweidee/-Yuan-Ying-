@@ -19,6 +19,7 @@ import 'package:yuanying/modules/plugin_center/widgets/plugin_icon.dart';
 import 'package:yuanying/modules/plugin_center/widgets/python_deps_sheet.dart';
 import 'package:yuanying/modules/plugin_center/widgets/qjs_concurrency_dialog.dart';
 import 'package:yuanying/modules/plugin_center/widgets/py_keep_alive_dialog.dart';
+import 'package:yuanying/modules/plugin_center/widgets/magnet_settings_dialog.dart';
 import 'package:yuanying/modules/setting/controllers/ai_config_controller.dart';
 import 'package:yuanying/modules/plugin_center/widgets/binary_service_actions.dart';
 
@@ -983,6 +984,16 @@ class _InstalledPluginCardState extends State<_InstalledPluginCard> {
             icon: Icons.speed_outlined,
             label: '引擎并发',
             onTap: () => showQjsConcurrencyDialog(context, plugin),
+          ),
+        );
+        break;
+
+      case 'magnet':
+        actions.add(
+          _ActionBtn(
+            icon: Icons.settings_outlined,
+            label: '磁力设置',
+            onTap: () => showMagnetSettingsDialog(context, plugin),
           ),
         );
         break;

@@ -17,6 +17,7 @@ import 'package:yuanying/modules/sandbox/services/sandbox_service_manager.dart';
 import 'package:yuanying/t4/services/jar_win_spider_service.dart';
 import 'package:yuanying/t4/services/qjs_drpy2_service.dart';
 import 'package:yuanying/t4/services/qjs_drpy3_service.dart';
+import 'package:yuanying/services/magnet/magnet_plugin_service.dart';
 
 enum MarketFilter { all, updatable, installed, notInstalled }
 
@@ -251,6 +252,14 @@ class PluginCenterController extends GetxController {
         _disposeQjsEngines();
       }
 
+      if (id == 'magnet') {
+        try {
+          await MagnetPluginService.instance.shutdownForPluginDisabled();
+        } catch (e) {
+          debugPrint('[PluginCenterController] stop magnet failed: $e');
+        }
+      }
+
       // ===== 禁用 proot：停掉所有沙盒服务 =====
       if (id == 'proot') {
         try {
@@ -320,6 +329,9 @@ class PluginCenterController extends GetxController {
         plugin.id == 'qjs-arm32' ||
         plugin.id == 'qjs-win') {
       _disposeQjsEngines();
+    }
+    if (plugin.id == 'magnet') {
+      await MagnetPluginService.instance.shutdownForPluginDisabled();
     }
     await InstallManager.instance.uninstall(plugin);
     reloadInstalled();
