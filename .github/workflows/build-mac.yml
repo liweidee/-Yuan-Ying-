@@ -9,7 +9,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -19,17 +19,23 @@ jobs:
           channel: stable
           flutter-version-file: pubspec.yaml
 
-      - name: Read version from pubspec.yaml
-        run: |
-          VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: //' | sed 's/+.*//')
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
-          echo "✅ Version: $VERSION"
+      - name: Resolve Version
+        id: version
+        run: bash tool/ci/resolve_version.sh
 
       - name: Build macOS app
         run: |
           flutter clean
           flutter pub get
-          flutter build macos --release --no-pub
+          flutter build macos \
+            --release \
+            --no-pub \
+            --build-name="${{ steps.version.outputs.app_version }}" \
+            --build-number="${{ steps.version.outputs.build_number }}" \
+            --dart-define=pili.name="${{ steps.version.outputs.app_version }}" \
+            --dart-define=pili.code="${{ steps.version.outputs.build_number }}" \
+            --dart-define=pili.run="${{ steps.version.outputs.run_number }}" \
+            --dart-define=pili.hash="${{ steps.version.outputs.commit_short }}"
 
       - name: Create DMG using hdiutil
         run: |
@@ -73,16 +79,17 @@ jobs:
           hdiutil detach "$MOUNT_DIR" -force
 
           # 9. 将生成的 DMG 移动到当前工作目录，并重命名为带版本号的英文名
-          mv "$DMG_PATH" "Yuanying_macos_${{ env.VERSION }}.dmg"
-          echo "✅ DMG created: Yuanying_macos_${{ env.VERSION }}.dmg"
+          DMG_FILE="yuanying-macos-v${{ steps.version.outputs.display_version }}-r${{ steps.version.outputs.run_number }}.dmg"
+          mv "$DMG_PATH" "$DMG_FILE"
+          echo "✅ DMG created: $DMG_FILE"
 
           # 清理临时目录
           rm -rf "$TEMP_DIR"
 
       - name: Upload DMG
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           archive: false
-          name: macOS-dmg
-          path: Yuanying_macos_*.dmg
+          name: macos-dmg
+          path: yuanying-macos-*.dmg
           retention-days: 30

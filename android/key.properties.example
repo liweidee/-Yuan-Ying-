@@ -1,0 +1,6 @@
+# 复制为 android/key.properties 后填写本地签名信息。
+# 相对路径优先按 android/app/ 解析，找不到时再按 android/ 解析。
+storeFile=yuanying-release.jks
+storePassword=change-me
+keyAlias=yuanying
+keyPassword=change-me

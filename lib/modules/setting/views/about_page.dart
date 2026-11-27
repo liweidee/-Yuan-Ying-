@@ -5,7 +5,6 @@ import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:get/get.dart';
 import 'package:hive_ce/hive.dart';
 
-import 'package:yuanying/build_config.dart';
 import 'package:yuanying/common/assets.dart';
 import 'package:yuanying/common/extensions/num_ext.dart';
 import 'package:yuanying/common/widgets/dialog/backup_dialog.dart';
@@ -14,6 +13,7 @@ import 'package:yuanying/core/theme/style.dart';
 import 'package:yuanying/services/debug_log_service.dart';
 import 'package:yuanying/services/system_log_service.dart';
 import 'package:yuanying/t4/services/source_manager.dart';
+import 'package:yuanying/utils/app_version.dart';
 import 'package:yuanying/utils/page_utils.dart';
 import 'package:yuanying/utils/platform_utils.dart';
 import 'package:yuanying/utils/storage.dart';
@@ -33,7 +33,6 @@ class AboutPage extends StatefulWidget {
 }
 
 class _AboutPageState extends State<AboutPage> {
-  final String _version = BuildConfig.versionName;
   int _pressCount = 0;
 
   void _showDebugDialog() {
@@ -269,9 +268,15 @@ class _AboutPageState extends State<AboutPage> {
               height: 150,
               excludeFromSemantics: true,
               cacheWidth: 150.cacheSize(context),
-              theme.brightness == Brightness.dark ? Assets.logoDark : Assets.logoLight,
+              theme.brightness == Brightness.dark
+                  ? Assets.logoDark
+                  : Assets.logoLight,
               errorBuilder: (context, error, stackTrace) {
-                return Icon(Icons.broken_image, size: 150, color: Colors.grey);
+                return const Icon(
+                  Icons.broken_image,
+                  size: 150,
+                  color: Colors.grey,
+                );
               },
             ),
           ),
@@ -297,20 +302,22 @@ class _AboutPageState extends State<AboutPage> {
           // ===== 当前版本 =====
           ListTile(
             onTap: () => Update.checkUpdate(false),
-            onLongPress: () => Utils.copyText(_version),
+            onLongPress: () => Utils.copyText(AppVersion.display),
             title: const Text('当前版本'),
             leading: const Icon(Icons.commit_outlined),
-            trailing: Text(_version, style: subTitleStyle),
+            trailing: Text('v${AppVersion.display}', style: subTitleStyle),
           ),
 
           // ===== 构建信息 =====
           ListTile(
             title: Text(
-              '版本号: $_version (code: ${BuildConfig.versionCode})',
+              '版本号: ${AppVersion.name} '
+              '(build: ${AppVersion.code}'
+              '${AppVersion.ciRunNumber > 0 ? ', CI #${AppVersion.ciRunNumber}' : ''})',
               style: const TextStyle(fontSize: 14),
             ),
             leading: const Icon(Icons.info_outline),
-            onLongPress: () => Utils.copyText(_version),
+            onLongPress: () => Utils.copyText(AppVersion.detail),
           ),
 
           Divider(

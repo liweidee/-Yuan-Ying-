@@ -8,8 +8,8 @@ import 'package:hive_ce/hive.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
-import 'package:yuanying/build_config.dart';
 import 'package:yuanying/modules/setting/models/setting_pref.dart';
+import 'package:yuanying/utils/app_version.dart';
 import 'package:yuanying/utils/device_utils.dart';
 
 import 'backup_category.dart';
@@ -182,8 +182,8 @@ abstract final class BackupService {
     final manifest = BackupManifest(
       formatName: BackupManifest.format,
       formatVersion: BackupManifest.currentFormatVersion,
-      appVersion: BuildConfig.versionName,
-      appVersionCode: BuildConfig.versionCode,
+      appVersion: AppVersion.name,
+      appVersionCode: AppVersion.code,
       platform: DeviceUtils.platformName,
       exportedAt: DateTime.now(),
       boxes: boxInfos,

@@ -13,4 +13,10 @@ abstract final class BuildConfig {
     'pili.hash',
     defaultValue: 'N/A',
   );
+
+  /// GitHub Actions 的 GITHUB_RUN_NUMBER；本地构建为 -1。
+  static const int runNumber = int.fromEnvironment(
+    'pili.run',
+    defaultValue: -1,
+  );
 }

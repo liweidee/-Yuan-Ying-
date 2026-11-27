@@ -85,6 +85,64 @@
 
 可以通过右侧release进行下载或拉取代码到本地进行编译
 
+## 构建、签名与在线更新
+
+版本由 `pubspec.yaml` 的语义版本和 CI run 共同生成：
+
+- 实际构建号：`pubspec 基础构建号 + GITHUB_RUN_NUMBER`
+- 关于页显示：`2.0.8+43 · CI #42`
+- Android 产物：`yuanying-android-arm64-v8a-v2.0.8+43-r42.apk`
+- iOS 产物：`yuanying-ios-trollstore-v2.0.8+43-r42.ipa`
+- macOS 产物：`yuanying-macos-v2.0.8+43-r42.dmg`
+- Windows 安装包：`yuanying-windows-x64-v2.0.8+43-r42.exe`
+- Windows 便携包：`yuanying-windows-x64-portable-v2.0.8+43-r42.zip`
+
+Android Release 使用固定签名。首次迁移时，如果设备上安装的是旧 debug 签名包，
+需要先卸载旧包一次；之后所有 CI 产物必须使用同一份密钥，才能直接覆盖安装。
+
+本地生成密钥（命令会交互式要求输入密码）：
+
+```powershell
+& "C:\Users\tinyd\Desktop\jdk-21.0.13.1+2-jre\bin\keytool.exe" `
+  -genkeypair -v `
+  -keystore "android\yuanying-release.jks" `
+  -storetype PKCS12 `
+  -keyalg RSA -keysize 4096 -validity 10000 `
+  -alias yuanying `
+  -dname "CN=YuanYing, OU=Mobile, O=YuanYing, L=Shanghai, ST=Shanghai, C=CN"
+```
+
+PKCS12 格式下 `keyPassword` 应与 `storePassword` 保持一致。
+
+本地构建时，将 `android/key.properties.example` 复制为 `android/key.properties`
+并填写密码。该文件与 `*.jks` 已被 Git 忽略，不要提交。
+
+GitHub Actions 需要配置以下 Secrets：
+
+- `ANDROID_KEYSTORE_BASE64`：JKS 文件的 Base64 内容
+- `ANDROID_KEYSTORE_PASSWORD`：keystore 密码
+- `ANDROID_KEY_ALIAS`：密钥别名
+- `ANDROID_KEY_PASSWORD`：密钥密码
+
+Windows PowerShell 可把密钥内容写入剪贴板：
+
+```powershell
+[Convert]::ToBase64String(
+  [IO.File]::ReadAllBytes("android\yuanying-release.jks")
+) | Set-Clipboard
+```
+
+版本唯一维护点是 `pubspec.yaml` 的 `version`。发布前只需要修改这一行，
+然后手动运行需要平台对应的 GitHub Actions 工作流。CI 不会自动创建 tag
+或发布 Release，只上传已命名的构建产物。
+
+Windows 使用 `Build Windows EXE` 工作流，会同时生成 Inno Setup 安装包和
+便携 ZIP；Windows 程序与安装包的版本均来自同一个 `pubspec.yaml` 版本源。
+
+在线更新读取当前仓库的 GitHub Releases。需要发布时，请手动创建
+`v2.0.8` 形式的 Release 并上传对应平台产物；Android 会按设备 ABI 选择 APK，
+下载后拉起系统安装器。设置 → 关于 → 当前版本即可在线检查更新。
+
 <br/>
 
 ## 声明

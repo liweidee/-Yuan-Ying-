@@ -11,6 +11,9 @@ GeneratedPluginRegistrant.java
 key.properties
 **/*.keystore
 **/*.jks
+**/*.jks.base64
+**/*.keystore.base64
+**/*-keystore-base64.txt
 
 /build
 /.kotlin

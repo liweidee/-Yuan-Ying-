@@ -13,14 +13,26 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Select Xcode 26.1+
-        run: sudo xcode-select -switch /Applications/Xcode_26.1.app/Contents/Developer
+        run: |
+          set -euo pipefail
+          XCODE_APP="/Applications/Xcode_26.1.app"
+          if [ ! -d "${XCODE_APP}" ]; then
+            XCODE_APP="$(find /Applications -maxdepth 1 -name 'Xcode_*.app' -type d | sort | tail -n 1)"
+          fi
+          test -n "${XCODE_APP}"
+          sudo xcode-select --switch "${XCODE_APP}/Contents/Developer"
+          xcodebuild -version
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.44.1'
+          flutter-version-file: pubspec.yaml
           channel: 'stable'
           cache: false
+
+      - name: Resolve Version
+        id: version
+        run: bash tool/ci/resolve_version.sh
 
       - name: Download and Setup NodeMobile.xcframework
         run: |
@@ -91,7 +103,16 @@ jobs:
           PYEOF
 
           cd ..
-          flutter build ios --release --no-codesign --no-tree-shake-icons
+          flutter build ios \
+            --release \
+            --no-codesign \
+            --no-tree-shake-icons \
+            --build-name="${{ steps.version.outputs.app_version }}" \
+            --build-number="${{ steps.version.outputs.build_number }}" \
+            --dart-define=pili.name="${{ steps.version.outputs.app_version }}" \
+            --dart-define=pili.code="${{ steps.version.outputs.build_number }}" \
+            --dart-define=pili.run="${{ steps.version.outputs.run_number }}" \
+            --dart-define=pili.hash="${{ steps.version.outputs.commit_short }}"
 
       - name: Copy Node.js files to App Bundle
         run: |
@@ -147,14 +168,16 @@ jobs:
 
           mkdir -p Build
           cd "$TEMP_DIR"
-          zip -r -q -X "$GITHUB_WORKSPACE/Build/yuanying.ipa" Payload
+          IPA_NAME="yuanying-ios-trollstore-v${{ steps.version.outputs.display_version }}-r${{ steps.version.outputs.run_number }}.ipa"
+          zip -r -q -X "$GITHUB_WORKSPACE/Build/${IPA_NAME}" Payload
 
           echo "✅ IPA created"
-          ls -lh "$GITHUB_WORKSPACE/Build/yuanying.ipa"
+          ls -lh "$GITHUB_WORKSPACE/Build/${IPA_NAME}"
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: app-ipa
-          path: Build/yuanying.ipa
+          name: ios-trollstore-ipa
+          path: Build/*.ipa
+          archive: false
           retention-days: 30

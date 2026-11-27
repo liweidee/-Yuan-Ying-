@@ -2,7 +2,8 @@ name: yuanying
 description: 基于T4结构的播放项目.
 publish_to: "none"
 
-version: 2.0.8+1
+# 应用版本唯一维护点。发布前只修改这里，CI 会自动叠加 GITHUB_RUN_NUMBER。
+version: 1.0.0+1
 
 environment:
   sdk: ">=3.12.0"

@@ -30,6 +30,7 @@ import 'package:yuanying/t4/services/drpy2_api_service.dart';
 import 'package:yuanying/t4/services/qjs_drpy2_service.dart';
 import 'package:yuanying/t4/services/drpy3_api_service.dart';
 import 'package:yuanying/t4/services/qjs_drpy3_service.dart';
+import 'package:yuanying/utils/app_version.dart';
 import 'package:yuanying/utils/platform_utils.dart';
 import 'package:yuanying/utils/storage.dart';
 import 'package:yuanying/utils/storage_manager.dart';
@@ -574,6 +575,7 @@ void main() async {
   // ==========================================================================
   // 第十步：启动应用
   // ==========================================================================
+  await AppVersion.load();
   WidgetsBinding.instance.addObserver(_AppLifecycleObserver());
   runApp(const MyApp());
 }
