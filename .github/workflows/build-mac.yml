@@ -21,7 +21,7 @@ jobs:
 
       - name: Resolve Version
         id: version
-        run: bash tool/ci/resolve_version.sh
+        run: bash .github/scripts/resolve_version.sh
 
       - name: Build macOS app
         run: |

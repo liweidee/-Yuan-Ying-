@@ -29,7 +29,7 @@ jobs:
       - name: Resolve Version
         id: version
         shell: bash
-        run: bash tool/ci/resolve_version.sh
+        run: bash .github/scripts/resolve_version.sh
 
       - name: Install Dependencies
         run: flutter pub get
