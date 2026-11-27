@@ -82,7 +82,7 @@ abstract final class MagnetEpisodeAdapter {
     );
   }
 
-  static VideoDetail buildPushDetail({
+  static VideoDetail? buildPushDetail({
     required String magnet,
     required MagnetExpansion expansion,
     String? title,
@@ -90,7 +90,10 @@ abstract final class MagnetEpisodeAdapter {
     String? vodContent,
     String? typeName,
   }) {
-    final episodes = expansion.files
+    final videos = expansion.files.where((file) => file.isLikelyVideo).toList();
+    if (videos.isEmpty) return null;
+
+    final episodes = videos
         .map(
           (file) => episodeFromFile(
             originalMagnet: magnet,

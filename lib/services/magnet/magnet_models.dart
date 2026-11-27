@@ -30,12 +30,14 @@ class MagnetFileInfo {
   final String name;
   final int size;
   final String? ext;
+  final String? mimeType;
 
   const MagnetFileInfo({
     required this.index,
     required this.name,
     required this.size,
     this.ext,
+    this.mimeType,
   });
 
   factory MagnetFileInfo.fromJson(
@@ -44,6 +46,7 @@ class MagnetFileInfo {
   }) {
     final name = json['name']?.toString() ?? '';
     final dot = name.lastIndexOf('.');
+    final mimeType = json['mimeType']?.toString().trim();
     return MagnetFileInfo(
       index: (json['index'] as num?)?.toInt() ?? fallbackIndex,
       name: name,
@@ -53,10 +56,14 @@ class MagnetFileInfo {
           (dot >= 0 && dot < name.length - 1
               ? name.substring(dot + 1).toLowerCase()
               : null),
+      mimeType: mimeType == null || mimeType.isEmpty ? null : mimeType,
     );
   }
 
   bool get isLikelyVideo {
+    if (mimeType?.toLowerCase().startsWith('video/') == true) {
+      return true;
+    }
     const videoExts = {
       'mp4',
       'mkv',
@@ -74,7 +81,11 @@ class MagnetFileInfo {
       'mpeg',
       'strm',
     };
-    final value = ext?.toLowerCase();
+    final dot = name.lastIndexOf('.');
+    final inferredExt = dot >= 0 && dot < name.length - 1
+        ? name.substring(dot + 1)
+        : null;
+    final value = (ext ?? inferredExt)?.toLowerCase();
     return value != null && videoExts.contains(value);
   }
 }

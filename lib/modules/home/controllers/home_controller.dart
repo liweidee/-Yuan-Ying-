@@ -289,6 +289,8 @@ class HomeController extends GetxController with GetTickerProviderStateMixin {
     isHomeError.value = false;
 
     try {
+      await _sourceManager.ensureCurrentSiteReady();
+      if (loadId != _homeLoadId) return;
       final apiService = _sourceManager.currentApiService;
       final result = await apiService.fetchHome();
 

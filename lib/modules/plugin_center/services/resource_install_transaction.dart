@@ -106,7 +106,7 @@ class _SourceFileTransaction {
   final String _transactionId = '${DateTime.now().microsecondsSinceEpoch}-$pid';
 
   final List<String> _directories = [];
-  final List<String> _files = [];
+  final Map<String, String> _files = {};
   final List<String> _createdDirectories = [];
   final List<_SourceFileMutation> _mutations = [];
   final List<File> _temporaryFiles = [];
@@ -145,10 +145,10 @@ class _SourceFileTransaction {
       _createdDirectories.add(relativePath);
     }
 
-    for (final relativePath in _files) {
+    for (final entry in _files.entries) {
       _throwIfCancelled();
-      final source = File(p.join(staging.path, relativePath));
-      final target = File(_targetPath(relativePath));
+      final source = File(p.join(staging.path, entry.value));
+      final target = File(_targetPath(entry.key));
       await target.parent.create(recursive: true);
 
       final temporary = File(
@@ -161,7 +161,7 @@ class _SourceFileTransaction {
       File? backup;
       if (target.existsSync()) {
         backup = File(
-          p.join(_backupRoot!.path, 'files', relativePath),
+          p.join(_backupRoot!.path, 'files', entry.key),
         );
         await backup.parent.create(recursive: true);
         await target.rename(backup.path);
@@ -254,7 +254,7 @@ class _SourceFileTransaction {
 
     final seen = <String>{};
     final directories = <String>{};
-    final files = <String>[];
+    final files = <String, String>{};
 
     await for (final entity in staging.list(
       recursive: true,
@@ -263,8 +263,13 @@ class _SourceFileTransaction {
       if (entity is Link) {
         throw Exception('源码包包含不支持的符号链接：${entity.path}');
       }
-      final relativePath = _safeRelativePath(entity.path);
-      if (relativePath == 'source.json') continue;
+      final sourceRelativePath = _safeRelativePath(entity.path);
+      if (sourceRelativePath == 'source.json') continue;
+      final relativePath = _stripPayloadPrefix(sourceRelativePath);
+      if (relativePath.isEmpty) {
+        if (entity is Directory) continue;
+        throw Exception('源码包顶层 payload 必须是目录');
+      }
 
       final normalizedForReservedCheck = relativePath.replaceAll('\\', '/');
       if (normalizedForReservedCheck ==
@@ -288,7 +293,7 @@ class _SourceFileTransaction {
       if (!seen.add(key)) {
         throw Exception('源码包包含重复目标文件：$relativePath');
       }
-      files.add(relativePath);
+      files[relativePath] = sourceRelativePath;
       _addDirectoryAndParents(p.dirname(relativePath), directories);
     }
 
@@ -306,11 +311,11 @@ class _SourceFileTransaction {
       }
     }
 
-    files.sort();
+    final sortedFiles = files.keys.toList()..sort();
     final directoryKeys = directories
         .map((path) => Platform.isWindows ? path.toLowerCase() : path)
         .toSet();
-    for (final relativePath in files) {
+    for (final relativePath in sortedFiles) {
       final key = Platform.isWindows
           ? relativePath.toLowerCase()
           : relativePath;
@@ -333,6 +338,14 @@ class _SourceFileTransaction {
     _files
       ..clear()
       ..addAll(files);
+  }
+
+  String _stripPayloadPrefix(String relativePath) {
+    final parts = p.split(relativePath);
+    if (parts.isNotEmpty && parts.first == 'payload') {
+      parts.removeAt(0);
+    }
+    return p.joinAll(parts);
   }
 
   void _addDirectoryAndParents(String relativePath, Set<String> result) {

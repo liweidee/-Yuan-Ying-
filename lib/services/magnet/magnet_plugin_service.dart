@@ -16,6 +16,8 @@ import 'package:yuanying/services/magnet/magnet_models.dart';
 
 typedef _DmAbiVersionNative = Int32 Function();
 typedef _DmAbiVersionDart = int Function();
+typedef _DmVersionNative = Pointer<Utf8> Function();
+typedef _DmVersionDart = Pointer<Utf8> Function();
 typedef _DmInitNative = Int32 Function(Pointer<Utf8>, Pointer<Utf8>);
 typedef _DmInitDart = int Function(Pointer<Utf8>, Pointer<Utf8>);
 typedef _DmParseNative = Int64 Function(Pointer<Utf8>);
@@ -32,6 +34,12 @@ typedef _DmDisposeNative = Void Function(Int64);
 typedef _DmDisposeDart = void Function(int);
 typedef _DmFreeNative = Void Function(Pointer<Utf8>);
 typedef _DmFreeDart = void Function(Pointer<Utf8>);
+
+const magnetInitOptions = <String, Object>{
+  'upload': false,
+  'readahead': 16 * 1024 * 1024,
+  'metaTimeoutSec': 30,
+};
 
 class MagnetPluginException implements Exception {
   final String message;
@@ -62,6 +70,7 @@ class MagnetPluginService {
   bool _pollingStatus = false;
 
   _DmAbiVersionDart? _dmAbiVersion;
+  _DmVersionDart? _dmVersion;
   _DmInitDart? _dmInit;
   _DmParseDart? _dmParse;
   _DmPollDart? _dmPoll;
@@ -146,9 +155,10 @@ class MagnetPluginService {
       if (_dmAbiVersion!() != _abiVersion) {
         throw const MagnetPluginException('磁力播放插件 ABI 不兼容');
       }
+      final nativeVersion = _readNativeVersion();
 
       final cachePtr = cacheDir.path.toNativeUtf8();
-      final optionsPtr = jsonEncode({'metaTimeoutSec': 30}).toNativeUtf8();
+      final optionsPtr = jsonEncode(magnetInitOptions).toNativeUtf8();
       try {
         final ok = _dmInit!(cachePtr, optionsPtr);
         if (ok != 1) {
@@ -163,7 +173,8 @@ class MagnetPluginService {
       _loadedPluginVersion = availability.pluginVersion;
       debugPrint(
         '[Magnet] initialized abi=${Abi.current()} '
-        'version=${availability.pluginVersion ?? '-'} '
+        'abiVersion=$_abiVersion native=${nativeVersion ?? '-'} '
+        'manifest=${availability.pluginVersion ?? '-'} '
         'cache=${cacheDir.path}',
       );
     });
@@ -414,6 +425,9 @@ class MagnetPluginService {
         .lookupFunction<_DmAbiVersionNative, _DmAbiVersionDart>(
           'dm_abi_version',
         );
+    _dmVersion = _library!.lookupFunction<_DmVersionNative, _DmVersionDart>(
+      'dm_version',
+    );
     _dmInit = _library!.lookupFunction<_DmInitNative, _DmInitDart>(
       'dm_init',
     );
@@ -438,6 +452,12 @@ class MagnetPluginService {
     _dmFree = _library!.lookupFunction<_DmFreeNative, _DmFreeDart>(
       'dm_free',
     );
+  }
+
+  String? _readNativeVersion() {
+    final ptr = _dmVersion!();
+    if (ptr == nullptr) return null;
+    return _takeString(ptr);
   }
 
   Future<MagnetTaskSnapshot> _poll(int taskId) {
@@ -527,6 +547,7 @@ class MagnetPluginService {
             name: session.file.name,
             size: snapshot.total,
             ext: session.file.ext,
+            mimeType: session.file.mimeType,
           )
         : session.file;
     currentStatus.value = MagnetPlaybackStatus.fromSession(

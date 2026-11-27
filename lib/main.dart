@@ -44,6 +44,7 @@ import 'package:yuanying/http/init.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:path/path.dart' as path;
 import 'package:yuanying/t4/services/catvod_open_service.dart';
+import 'package:yuanying/utils/qjs_platform_helper.dart';
 import 'package:yuanying/t4/services/python_runtime.dart';
 import 'package:yuanying/services/debug_log_service.dart';
 import 'package:yuanying/nodejs/nodejs_service.dart';
@@ -245,7 +246,8 @@ void main() async {
   // 第三步：UI 缩放适配（现在可以安全调用 getSetting）
   // ==========================================================================
   ScaledWidgetsFlutterBinding.ensureInitialized(
-    scaleFactor: StorageManager.getSetting<double>(SettingBoxKey.uiScale) ?? 1.0,
+    scaleFactor:
+        StorageManager.getSetting<double>(SettingBoxKey.uiScale) ?? 1.0,
   );
 
   AndroidPipHelper.init();
@@ -257,19 +259,22 @@ void main() async {
 
   // 配置 iOS 音频会话（Android 上也有益，但 iOS 上是必须的）
   final session = await AudioSession.instance;
-  await session.configure(AudioSessionConfiguration(
-    avAudioSessionCategory: AVAudioSessionCategory.playback,
-    avAudioSessionCategoryOptions: null,  // null 表示无额外选项
-    avAudioSessionMode: AVAudioSessionMode.defaultMode,
-    avAudioSessionRouteSharingPolicy: AVAudioSessionRouteSharingPolicy.defaultPolicy,
-    avAudioSessionSetActiveOptions: AVAudioSessionSetActiveOptions.none,
-    androidAudioAttributes: const AndroidAudioAttributes(
-      contentType: AndroidAudioContentType.music,
-      usage: AndroidAudioUsage.media,
+  await session.configure(
+    AudioSessionConfiguration(
+      avAudioSessionCategory: AVAudioSessionCategory.playback,
+      avAudioSessionCategoryOptions: null, // null 表示无额外选项
+      avAudioSessionMode: AVAudioSessionMode.defaultMode,
+      avAudioSessionRouteSharingPolicy:
+          AVAudioSessionRouteSharingPolicy.defaultPolicy,
+      avAudioSessionSetActiveOptions: AVAudioSessionSetActiveOptions.none,
+      androidAudioAttributes: const AndroidAudioAttributes(
+        contentType: AndroidAudioContentType.music,
+        usage: AndroidAudioUsage.media,
+      ),
+      androidAudioFocusGainType: AndroidAudioFocusGainType.gain,
+      androidWillPauseWhenDucked: true,
     ),
-    androidAudioFocusGainType: AndroidAudioFocusGainType.gain,
-    androidWillPauseWhenDucked: true,
-  ));
+  );
 
   // ==========================================================================
   // 第四步：媒体播放器初始化
@@ -277,7 +282,7 @@ void main() async {
   media_kit.MediaKit.ensureInitialized();
 
   JustAudioMediaKit.ensureInitialized(
-    android: false,  // 改为 false，让 just_audio 使用其原生 Android 实现
+    android: false, // 改为 false，让 just_audio 使用其原生 Android 实现
     iOS: true,
     windows: true,
     linux: true,
@@ -285,38 +290,40 @@ void main() async {
   );
 
   if (!kIsWeb) {
-    fvp.registerWith(options: {
-      /// 全平台接管核心
-      /// 不设置或置空时，FVP 会自动无缝接管全部 5+1 个移动与桌面端平台。
-      // 'platforms': ['windows', 'macos', 'linux', 'android', 'ios'], 
+    fvp.registerWith(
+      options: {
+        /// 全平台接管核心
+        /// 不设置或置空时，FVP 会自动无缝接管全部 5+1 个移动与桌面端平台。
+        // 'platforms': ['windows', 'macos', 'linux', 'android', 'ios'],
 
-      /// ============================================================
-      /// 关于硬解链（video.decoders）—— 故意不再手动指定
-      /// ============================================================
-      /// 曾经的做法：手动返回 ['D3D11', 'NVDEC', ...] 之类的列表，
-      ///              试图覆盖各平台的最优硬解。
-      ///
-      /// 为什么改回不设置：
-      ///   1. fvp 内部默认就会启用硬件解码（Hardware decoders are enabled by default），
-      ///      并根据平台/GPU 自动选择最优解码器；
-      ///   2. 官方在 0.3.0 版本已专门修复了 Android 模拟器黑屏问题，
-      ///      内部会检测模拟器并自动强制使用软解；
-      ///   3. 手动指定静态列表，反而会绕过官方的动态自适应逻辑，
-      ///      可能导致模拟器黑屏、跳帧、重复帧等异常。
-      ///
-      /// 参考实现见文件底部的 _getGlobalOptimalDecoders()（未使用）。
-      // 'video.decoders': _getGlobalOptimalDecoders(),
+        /// ============================================================
+        /// 关于硬解链（video.decoders）—— 故意不再手动指定
+        /// ============================================================
+        /// 曾经的做法：手动返回 ['D3D11', 'NVDEC', ...] 之类的列表，
+        ///              试图覆盖各平台的最优硬解。
+        ///
+        /// 为什么改回不设置：
+        ///   1. fvp 内部默认就会启用硬件解码（Hardware decoders are enabled by default），
+        ///      并根据平台/GPU 自动选择最优解码器；
+        ///   2. 官方在 0.3.0 版本已专门修复了 Android 模拟器黑屏问题，
+        ///      内部会检测模拟器并自动强制使用软解；
+        ///   3. 手动指定静态列表，反而会绕过官方的动态自适应逻辑，
+        ///      可能导致模拟器黑屏、跳帧、重复帧等异常。
+        ///
+        /// 参考实现见文件底部的 _getGlobalOptimalDecoders()（未使用）。
+        // 'video.decoders': _getGlobalOptimalDecoders(),
 
-      /// 极速寻帧优化
-      /// 默认为 false（即精确寻帧，但高码率视频拖动进度条会卡顿）。
-      /// 设置为 true 后，开启关键帧快速寻帧，进度条瞬间响应，体验极佳。
-      'fastSeek': true, 
+        /// 极速寻帧优化
+        /// 默认为 false（即精确寻帧，但高码率视频拖动进度条会卡顿）。
+        /// 设置为 true 后，开启关键帧快速寻帧，进度条瞬间响应，体验极佳。
+        'fastSeek': true,
 
-      /// 网络流低延迟优化
-      /// 专为直播流、RTMP/RTSP、监控等网络视频流设计。
-      /// 显著降低首帧加载时间，若只做本地点播可将此行注释。
-      'lowLatency': 1, 
-    });
+        /// 网络流低延迟优化
+        /// 专为直播流、RTMP/RTSP、监控等网络视频流设计。
+        /// 显著降低首帧加载时间，若只做本地点播可将此行注释。
+        'lowLatency': 1,
+      },
+    );
   }
 
   // ==========================================================================
@@ -325,8 +332,12 @@ void main() async {
   if (PlatformUtils.isDesktop) {
     await windowManager.ensureInitialized();
 
-    final savedSize = StorageManager.getSetting<String>(SettingBoxKey.windowSize);
-    final isMaximized = StorageManager.getSetting<bool>(SettingBoxKey.isWindowMaximized) ?? false;
+    final savedSize = StorageManager.getSetting<String>(
+      SettingBoxKey.windowSize,
+    );
+    final isMaximized =
+        StorageManager.getSetting<bool>(SettingBoxKey.isWindowMaximized) ??
+        false;
 
     Size? windowSize;
     if (savedSize != null && savedSize.isNotEmpty) {
@@ -379,7 +390,10 @@ void main() async {
       if (await WebViewEnvironment.getAvailableVersion() != null) {
         webViewEnvironment = await WebViewEnvironment.create(
           settings: WebViewEnvironmentSettings(
-            userDataFolder: path.join(appSupportDir.path, 'flutter_inappwebview'),
+            userDataFolder: path.join(
+              appSupportDir.path,
+              'flutter_inappwebview',
+            ),
           ),
         );
       }
@@ -446,7 +460,9 @@ void main() async {
   Get.put(QjsDrpy2Service(), permanent: true);
   Get.put(Drpy3ApiService(), permanent: true);
   Get.put(QjsDrpy3Service(), permanent: true);
-  Get.put(CatvodOpenService(), permanent: true);
+  if (!QjsPlatformHelper.isSupported) {
+    Get.put(CatvodOpenService(), permanent: true);
+  }
   Get.put(NodeJSService(), permanent: true);
   Get.put(NodeJSSpiderService(), permanent: true);
   Get.put(ManualSourceController(), permanent: true);
@@ -496,7 +512,7 @@ void main() async {
   // 初始化智能广告过滤代理
   await AdBlockProxyService.instance.init(
     enabled: SettingPref.enableAdBlock,
-  );        
+  );
 
   // 初始化 AudioService（全平台：移动端锁屏/通知栏 + 桌面端媒体控制）
   await AudioService.init(
@@ -505,7 +521,7 @@ void main() async {
       androidNotificationChannelId: 'com.yuanying.music.channel',
       androidNotificationChannelName: '音乐播放',
       androidNotificationOngoing: false,
-      androidStopForegroundOnPause: false,   // 暂停时通知栏依然常驻
+      androidStopForegroundOnPause: false, // 暂停时通知栏依然常驻
       androidNotificationIcon: 'mipmap/ic_launcher',
     ),
   );
@@ -765,10 +781,10 @@ class MyApp extends StatelessWidget {
         GlobalCupertinoLocalizations.delegate,
       ],
       supportedLocales: const [
-        Locale('zh', 'CN'),  // 中文
-        Locale('en', 'US'),  // 英文（可选，用于未来切换）
+        Locale('zh', 'CN'), // 中文
+        Locale('en', 'US'), // 英文（可选，用于未来切换）
       ],
-      locale: const Locale('zh', 'CN'),  // 强制默认中
+      locale: const Locale('zh', 'CN'), // 强制默认中
     );
   }
 }
@@ -793,20 +809,20 @@ class MyApp extends StatelessWidget {
 List<String> _getGlobalOptimalDecoders() {
   // 1. Windows 端：优先使用 D3D11 渲染架构，追加 NVDEC 压榨 NVIDIA 独显性能
   if (Platform.isWindows) {
-    return ['D3D11', 'NVDEC', 'DXVA', 'FFmpeg']; 
-  } 
+    return ['D3D11', 'NVDEC', 'DXVA', 'FFmpeg'];
+  }
   // 2. 苹果生态 (macOS & iOS)：强制优先走 Apple 官方原生 VideoToolbox (VT) 核心硬解
   else if (Platform.isMacOS || Platform.isIOS) {
-    return ['VT', 'FFmpeg']; 
-  } 
+    return ['VT', 'FFmpeg'];
+  }
   // 3. 安卓端：强制优先走系统级 AMediaCodec 硬解（完美融合新版 Flutter 的 Impeller 引擎渲染）
   else if (Platform.isAndroid) {
-    return ['AMediaCodec', 'FFmpeg']; 
-  } 
+    return ['AMediaCodec', 'FFmpeg'];
+  }
   // 4. Linux 端：兼容常见的 VAAPI 与 VDPAU 显卡硬解方案
   else if (Platform.isLinux) {
-    return ['VAAPI', 'VDPAU', 'FFmpeg']; 
-  } 
+    return ['VAAPI', 'VDPAU', 'FFmpeg'];
+  }
   // 5. 鸿蒙等其他平台兜底
-  return ['FFmpeg']; 
+  return ['FFmpeg'];
 }

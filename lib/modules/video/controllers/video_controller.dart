@@ -1462,19 +1462,19 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
         vodContent: placeholder.vodContent,
         typeName: placeholder.typeName,
       );
+      if (detail == null) {
+        _handlePlayFailure('种子中没有可播放的视频文件');
+        return;
+      }
       introController.setVideoDetail(detail);
       isLoadingDetail.value = false;
       autoPlay.value = false;
       SmartDialog.dismiss(tag: loadingTag, force: true);
 
       if (!shouldAutoPlay || detail.playSources.isEmpty) return;
-      final files = expansion.files;
-      if (files.isEmpty) {
-        _handlePlayFailure('种子中没有可播放文件');
-        return;
-      }
-
-      final videos = files.where((file) => file.isLikelyVideo).toList();
+      final videos = expansion.files
+          .where((file) => file.isLikelyVideo)
+          .toList();
       MagnetFileInfo? selected;
       if (videos.length == 1) {
         selected = videos.first;
@@ -1484,7 +1484,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
         selected = await showMagnetFilePickerSheet(
           context,
           title: videos.length > 1 ? '选择要播放的视频文件' : '选择种子文件',
-          files: videos.isNotEmpty ? videos : files,
+          files: videos,
         );
       }
       if (selected == null || isClosed) return;
@@ -1933,6 +1933,16 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
     int sourceIndex = 0,
     String? magnetOverride,
   }) {
+    // 磁力详情页内部已经完成磁力分流，不能再把其中的 magnet/magnetplay
+    // 当作外部推送内容，否则会显示无效的“推送”按钮。
+    if (_isMagnetDetailMode) {
+      showPushButton.value = false;
+      pushVodId.value = '';
+      _pendingMagnetPushEpisode = null;
+      _pendingMagnetPushSourceIndex = 0;
+      return false;
+    }
+
     final url = episode.url;
     final magnet = magnetOverride ?? (MagnetUri.isMagnet(url) ? url : null);
     final isCloudPush = url.startsWith('push://');
@@ -1985,6 +1995,8 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
 
   /// 执行推送跳转
   Future<void> pushToDetail({bool showToast = true}) async {
+    if (_isMagnetDetailMode) return;
+
     final magnetEpisode = _pendingMagnetPushEpisode;
     if (magnetEpisode != null) {
       if (showToast) SmartDialog.showToast('正在跳转到推送详情...');

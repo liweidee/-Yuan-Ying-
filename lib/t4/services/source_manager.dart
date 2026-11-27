@@ -17,6 +17,7 @@ import 'package:yuanying/t4/services/i_spider_service.dart';
 import 'package:yuanying/t4/services/xbpq_service.dart';
 import 'package:yuanying/t4/services/xyq_service.dart';
 import 'package:yuanying/t4/services/catvod_open_service.dart';
+import 'package:yuanying/t4/services/qjs_catvod_service.dart';
 import 'package:yuanying/t4/services/py3_spider_service.dart';
 import 'package:yuanying/t4/services/app_cms_service.dart';
 import 'package:yuanying/t4/services/app_ysv2_service.dart';
@@ -53,6 +54,7 @@ class SourceManager extends GetxController {
 
   final Drpy3ApiService _drpy3Legacy = Get.find<Drpy3ApiService>();
   final QjsDrpy3Service _qjsDrpy3 = Get.find<QjsDrpy3Service>();
+  CatvodOpenService get _catVodLegacy => Get.find<CatvodOpenService>();
 
   ISpiderService get _drpy3Service =>
       QjsPlatformHelper.isSupported ? _qjsDrpy3 : _drpy3Legacy;
@@ -382,7 +384,7 @@ class SourceManager extends GetxController {
     }
     if (isDrpy3Site(site)) return _drpy3Service;
     if (isDrpy2Site(site)) return _drpy2Service;
-    if (isCatVodOpenSite(site)) return Get.find<CatvodOpenService>();
+    if (isCatVodOpenSite(site)) return _getOrCreateCatvodOpenService(site);
     if (isNodeJSSite(site)) return _getNodeJSService();
     if (isAppCmsSite(site)) {
       final tag = 'appcms_$key';
@@ -582,8 +584,8 @@ class SourceManager extends GetxController {
       isAvailableSourceEmpty.value = false;
       configLoadErrorMessage.value = '';
 
-      await _switchToSite(currentSite.value!);
-      _notifyHomeController();
+      final switchResult = await _switchToSite(currentSite.value!);
+      _notifySiteSwitchResult(switchResult);
       _updatePushAgentCache();
       _saveCurrentSiteKey();
     } else {
@@ -1260,8 +1262,21 @@ class SourceManager extends GetxController {
       currentSite.value = target;
       currentParses.value = List.from(parseList);
 
+      SiteSwitchResult? preflightFailure;
+      if (QjsPlatformHelper.isSupported && isCatVodOpenSite(target)) {
+        final qjsService =
+            _getOrCreateCatvodOpenService(target) as QjsCatVodService;
+        final pluginError = qjsService.checkPluginUsable();
+        if (pluginError != null) {
+          preflightFailure = SiteSwitchResult.failure(
+            pluginError,
+            siteKey: siteKey,
+          );
+        }
+      }
+
       // 等待切换结果（所有分支都返回 SiteSwitchResult，异常已在 _switchToSite 内 catch）
-      final result = await _switchToSiteSerial(target);
+      final result = preflightFailure ?? await _switchToSiteSerial(target);
 
       // 连续切源时，只允许最新一次任务提交最终状态。
       if (switchId != _siteSwitchId) return;
@@ -1269,15 +1284,7 @@ class SourceManager extends GetxController {
       _updatePushAgentCache();
       _saveCurrentSiteKey();
 
-      if (result.success) {
-        _notifyHomeController();
-      } else {
-        final raw = result.error;
-        final errorMsg = (raw != null && raw.isNotEmpty)
-            ? ErrorFormatter.formatSwitchError(raw) // 幂等，已带切源前缀原样返回
-            : '切换源失败：未知错误';
-        _notifyHomeControllerFailure(errorMsg);
-      }
+      _notifySiteSwitchResult(result);
     } catch (e) {
       // 即使切源之外的收尾逻辑异常，也必须结束首页的切源锁定状态。
       if (switchId == _siteSwitchId) {
@@ -1319,9 +1326,19 @@ class SourceManager extends GetxController {
     final site = currentSite.value;
     if (site == null) return;
 
+    QjsCatVodService? qjsCatVod;
+    if (QjsPlatformHelper.isSupported && isCatVodOpenSite(site)) {
+      qjsCatVod = _getOrCreateCatvodOpenService(site) as QjsCatVodService;
+      final pluginError = qjsCatVod.checkPluginUsable();
+      if (pluginError != null) {
+        throw BusinessException(pluginError);
+      }
+    }
+
     final needsRecovery =
         (isDrpy2Site(site) && !_qjsDrpy2.isRunning) ||
-        (isDrpy3Site(site) && !_qjsDrpy3.isRunning);
+        (isDrpy3Site(site) && !_qjsDrpy3.isRunning) ||
+        (qjsCatVod != null && !qjsCatVod.isSourceLoaded);
     if (!needsRecovery) return;
 
     final task = _recoverCurrentQjsSite(site);
@@ -1572,8 +1589,14 @@ class SourceManager extends GetxController {
     }
   }
 
-  CatvodOpenService _getOrCreateCatvodOpenService(Map<String, dynamic> site) {
-    return Get.find<CatvodOpenService>();
+  ISpiderService _getOrCreateCatvodOpenService(Map<String, dynamic> site) {
+    if (QjsPlatformHelper.isSupported) {
+      if (!Get.isRegistered<QjsCatVodService>()) {
+        Get.put(QjsCatVodService(), permanent: true);
+      }
+      return Get.find<QjsCatVodService>();
+    }
+    return _catVodLegacy;
   }
 
   Future<SiteSwitchResult> _switchToCatVodOpenSite(
@@ -1583,11 +1606,29 @@ class SourceManager extends GetxController {
     try {
       final service = _getOrCreateCatvodOpenService(site);
       print('Service obtained, calling switchSiteSafe...');
-      final result = await service.switchSiteSafe(
-        site['api']?.toString() ?? '',
-        site['key']?.toString() ?? '',
-        ext: site['ext'],
-      );
+      final apiUrl = site['api']?.toString() ?? '';
+      final siteKey = site['key']?.toString() ?? '';
+      final SiteSwitchResult result;
+      if (QjsPlatformHelper.isSupported) {
+        final qjsService = service as QjsCatVodService;
+        final pluginError = qjsService.checkPluginUsable();
+        if (pluginError != null) {
+          result = SiteSwitchResult.failure(pluginError, siteKey: siteKey);
+        } else {
+          await qjsService.switchSite(
+            apiUrl,
+            siteKey,
+            ext: site['ext'],
+          );
+          result = SiteSwitchResult.success(siteKey: siteKey);
+        }
+      } else {
+        result = await _catVodLegacy.switchSiteSafe(
+          apiUrl,
+          siteKey,
+          ext: site['ext'],
+        );
+      }
       print(
         '_switchToCatVodOpenSite: '
         '${result.success ? "ready" : "fail: ${result.error}"}',
@@ -1752,6 +1793,18 @@ class SourceManager extends GetxController {
     if (Get.isRegistered<HomeController>()) {
       Get.find<HomeController>().onSiteChangedFailure(error);
     }
+  }
+
+  void _notifySiteSwitchResult(SiteSwitchResult result) {
+    if (result.success) {
+      _notifyHomeController();
+      return;
+    }
+    final raw = result.error;
+    final errorMsg = (raw != null && raw.isNotEmpty)
+        ? ErrorFormatter.formatSwitchError(raw)
+        : '切换源失败：未知错误';
+    _notifyHomeControllerFailure(errorMsg);
   }
 
   void _updatePushAgentCache() {

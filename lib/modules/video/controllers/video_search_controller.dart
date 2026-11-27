@@ -7,7 +7,6 @@ import 'package:yuanying/t4/services/i_spider_service.dart';
 import 'package:yuanying/t4/services/t4_api_service.dart';
 import 'package:yuanying/t4/services/drpy2_api_service.dart';
 import 'package:yuanying/t4/services/xbpq_service.dart';
-import 'package:yuanying/t4/services/catvod_open_service.dart';
 import 'package:yuanying/t4/services/py3_spider_service.dart';
 
 /// 每个源的分页状态
@@ -112,7 +111,7 @@ class DetailSearchController extends GetxController {
   @override
   void onInit() {
     super.onInit();
-    
+
     // 监听 onlyDefaultSource 和 enabledSourceKeys 的变化，自动更新源列表
     ever(_filterService.onlyDefaultSource, (_) {
       reinitSources();
@@ -122,7 +121,7 @@ class DetailSearchController extends GetxController {
         reinitSources();
       }
     });
-    
+
     _updateSourceKeys();
     _initSources();
   }
@@ -258,7 +257,7 @@ class DetailSearchController extends GetxController {
       return Get.find<XbpqService>(tag: tag);
     }
     if (SourceManager.isCatVodOpenSite(site)) {
-      return Get.find<CatvodOpenService>();
+      return _sourceManager.createIndependentService(site);
     }
     if (SourceManager.isPurePy3Site(site)) {
       final tag = 'py3_$key';

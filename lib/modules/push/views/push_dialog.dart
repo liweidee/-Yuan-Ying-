@@ -483,6 +483,12 @@ class _PushDialogState extends State<PushDialog> {
       '[Magnet] push plugin=${availability.state.name} '
       'version=${availability.pluginVersion ?? '-'}',
     );
+    if (availability.state == MagnetPluginState.unsupportedPlatform) {
+      SmartDialog.showToast(
+        '本机磁力播放仅支持 Android，非 Android 端请使用“网盘”离线转存',
+      );
+      return;
+    }
     if (!await MagnetPluginGate.ensureReady()) return;
 
     final tag = 'push_${DateTime.now().millisecondsSinceEpoch}';

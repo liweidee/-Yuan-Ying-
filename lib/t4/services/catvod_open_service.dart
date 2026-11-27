@@ -5,13 +5,13 @@ import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_js/flutter_js.dart';
-import 'package:get/get.dart';
 import 'package:flutter/foundation.dart';
 import 'package:yuanying/utils/storage.dart';
 import '../models/play_url.dart';
 import '../models/video_detail.dart';
 import 'i_spider_service.dart';
 import 'package:yuanying/services/debug_log_service.dart';
+import 'package:yuanying/t4/services/qjs_catvod_runtime_js.dart';
 import 'package:yuanying/utils/error_formatter.dart';
 import 'site_switch_result.dart';
 
@@ -19,16 +19,17 @@ class CatvodOpenService implements ISpiderService {
   String? _currentKey;
   Map<String, dynamic>? _currentExtMap;
   Map<String, String>? _methodMap;
-  bool _apiReady = false;
 
   bool _isBroken = false;
   bool get isBroken => _isBroken;
+  String? _lastSwitchError;
+  dynamic _currentRawExt;
 
   late JavascriptRuntime _runtime;
   final Dio _reqDio = _createReqDio();
 
-  /// switchSite 之间的简单互斥，防止两个切站打架
-  Future<void>? _switchMutex;
+  static String? _cheerioSource;
+  Future<void> _operationChain = Future<void>.value();
 
   /// 防止 _resetRuntime 重入的标志
   bool _resetting = false;
@@ -40,10 +41,12 @@ class CatvodOpenService implements ISpiderService {
   }
 
   static Dio _createReqDio() {
-    final dio = Dio(BaseOptions(
-      connectTimeout: const Duration(seconds: 15),
-      receiveTimeout: const Duration(seconds: 30),
-    ));
+    final dio = Dio(
+      BaseOptions(
+        connectTimeout: const Duration(seconds: 15),
+        receiveTimeout: const Duration(seconds: 30),
+      ),
+    );
     dio.httpClientAdapter = IOHttpClientAdapter(
       createHttpClient: () {
         final client = HttpClient()
@@ -89,9 +92,35 @@ class CatvodOpenService implements ISpiderService {
 
     _runtime.evaluate('''
       (function() {
+        globalThis.print = function() {
+          console.log.apply(console, arguments);
+        };
+        globalThis.log = globalThis.print;
         if (typeof sendMessage === 'undefined') {
           window.sendMessage = function(channel, message) {
             console.error('sendMessage not available');
+          };
+        }
+
+        if (typeof atob === 'undefined') {
+          globalThis.atob = function(input) {
+            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+            let output = '';
+            let buffer = 0;
+            let bits = 0;
+            for (let i = 0; i < input.length; i++) {
+              const ch = input.charAt(i);
+              if (ch === '=') break;
+              const value = chars.indexOf(ch);
+              if (value < 0 || value >= 64) continue;
+              buffer = (buffer << 6) | value;
+              bits += 6;
+              if (bits >= 8) {
+                bits -= 8;
+                output += String.fromCharCode((buffer >> bits) & 0xff);
+              }
+            }
+            return output;
           };
         }
 
@@ -109,6 +138,7 @@ class CatvodOpenService implements ISpiderService {
           });
         };
 
+        window._localCallbacks = {};
         window.local = {
           get: async (scope, key) => {
             return new Promise((resolve) => {
@@ -147,6 +177,19 @@ class CatvodOpenService implements ISpiderService {
 
         globalThis.req = window.req;
         globalThis.local = window.local;
+
+        // 二进制响应经 JSON 桥传入时先恢复为 Uint8Array。
+        window.__catNormalizeResponse = function(value) {
+          if (value && value.buffer === 1 && typeof value.content === 'string') {
+            const binary = atob(value.content);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) {
+              bytes[i] = binary.charCodeAt(i);
+            }
+            value.content = bytes;
+          }
+          return value;
+        };
 
         var BaseSpider = class BaseSpider {
           constructor() {}
@@ -204,21 +247,27 @@ class CatvodOpenService implements ISpiderService {
       dynamic payload = args;
       if (args is List && args.isNotEmpty) payload = args.first;
       if (payload is Map) payload = jsonEncode(payload);
-      if (payload is String && payload.isNotEmpty) handleCatLocalGet(payload);
+      if (payload is String && payload.isNotEmpty) {
+        unawaited(handleCatLocalGet(payload));
+      }
       return null;
     });
     _runtime.onMessage('catLocalSet', (args) {
       dynamic payload = args;
       if (args is List && args.isNotEmpty) payload = args.first;
       if (payload is Map) payload = jsonEncode(payload);
-      if (payload is String && payload.isNotEmpty) handleCatLocalSet(payload);
+      if (payload is String && payload.isNotEmpty) {
+        unawaited(handleCatLocalSet(payload));
+      }
       return null;
     });
     _runtime.onMessage('catLocalDelete', (args) {
       dynamic payload = args;
       if (args is List && args.isNotEmpty) payload = args.first;
       if (payload is Map) payload = jsonEncode(payload);
-      if (payload is String && payload.isNotEmpty) handleCatLocalDelete(payload);
+      if (payload is String && payload.isNotEmpty) {
+        unawaited(handleCatLocalDelete(payload));
+      }
       return null;
     });
   }
@@ -249,7 +298,7 @@ class CatvodOpenService implements ISpiderService {
     }
   }
 
-  void handleCatLocalGet(String payload) {
+  Future<void> handleCatLocalGet(String payload) async {
     try {
       final data = jsonDecode(payload);
       final id = data['id'] as String;
@@ -257,11 +306,12 @@ class CatvodOpenService implements ISpiderService {
       final key = data['key'] as String;
       final fullKey = 'cat_${scope}_$key';
       final value = GStorage.setting.get(fullKey);
+      final encoded = _encodeLocalValue(value);
       _runtime.evaluate('''
         (function() {
           const cb = window._localCallbacks && window._localCallbacks["$id"];
           if (cb) {
-            cb(${value == null ? 'null' : jsonEncode(value.toString())});
+            cb($encoded);
             delete window._localCallbacks["$id"];
           }
         })();
@@ -269,7 +319,16 @@ class CatvodOpenService implements ISpiderService {
     } catch (e) {}
   }
 
-  void handleCatLocalSet(String payload) {
+  String _encodeLocalValue(dynamic value) {
+    if (value == null) return 'null';
+    try {
+      return jsonEncode(value);
+    } catch (_) {
+      return jsonEncode(value.toString());
+    }
+  }
+
+  Future<void> handleCatLocalSet(String payload) async {
     try {
       final data = jsonDecode(payload);
       final id = data['id'] as String;
@@ -277,7 +336,7 @@ class CatvodOpenService implements ISpiderService {
       final key = data['key'] as String;
       final value = data['value'];
       final fullKey = 'cat_${scope}_$key';
-      GStorage.setting.put(fullKey, value.toString());
+      await GStorage.setting.put(fullKey, value);
       _runtime.evaluate('''
         (function() {
           const cb = window._localCallbacks && window._localCallbacks["$id"];
@@ -290,14 +349,14 @@ class CatvodOpenService implements ISpiderService {
     } catch (e) {}
   }
 
-  void handleCatLocalDelete(String payload) {
+  Future<void> handleCatLocalDelete(String payload) async {
     try {
       final data = jsonDecode(payload);
       final id = data['id'] as String;
       final scope = data['scope'] as String;
       final key = data['key'] as String;
       final fullKey = 'cat_${scope}_$key';
-      GStorage.setting.delete(fullKey);
+      await GStorage.setting.delete(fullKey);
       _runtime.evaluate('''
         (function() {
           const cb = window._localCallbacks && window._localCallbacks["$id"];
@@ -310,29 +369,62 @@ class CatvodOpenService implements ISpiderService {
     } catch (e) {}
   }
 
-  Future<void> _executeReq(String id, String url, Map<String, dynamic> options) async {
-    final method = (options['method'] as String? ?? 'GET').toUpperCase();
-    final headers = Map<String, String>.from(options['headers'] as Map? ?? {});
-    String? body = options['body'] as String?;
-
-    DebugLogService.instance.logRequest(
-      method: method,
-      url: url,
-      headers: headers,
-      requestBody: body,
-      source: 'catvod',
-    );
-
-    final startTime = DateTime.now();
-
+  Future<void> _executeReq(
+    String id,
+    String url,
+    Map<String, dynamic> options,
+  ) async {
+    var method = 'GET';
+    final headers = <String, String>{};
+    String? body;
     try {
-      if (options['data'] != null) {
-        final dataMap = options['data'] as Map<dynamic, dynamic>;
-        body = Uri(queryParameters: Map.from(dataMap)).query;
-        headers['Content-Type'] = 'application/x-www-form-urlencoded';
+      method = (options['method']?.toString() ?? 'GET').toUpperCase();
+      final rawHeaders = options['headers'];
+      if (rawHeaders is Map) {
+        rawHeaders.forEach((key, value) {
+          if (value == null) return;
+          final name = key.toString();
+          final lower = name.toLowerCase();
+          if (lower == 'host' ||
+              lower == 'content-length' ||
+              lower == 'connection') {
+            return;
+          }
+          headers[name] = value is List ? value.join(', ') : value.toString();
+        });
       }
 
-      final response = await _reqDio.request(
+      final rawBody = options['body'];
+      if (rawBody is String) {
+        body = rawBody;
+      } else if (rawBody is Map || rawBody is List) {
+        body = jsonEncode(rawBody);
+        headers.putIfAbsent('Content-Type', () => 'application/json');
+      }
+
+      final data = options['data'];
+      if (data != null) {
+        if (data is Map) {
+          body = Uri(queryParameters: Map.from(data)).query;
+          headers['Content-Type'] = 'application/x-www-form-urlencoded';
+        } else if (data is String) {
+          body = data;
+        } else {
+          body = jsonEncode(data);
+          headers['Content-Type'] = 'application/json';
+        }
+      }
+
+      DebugLogService.instance.logRequest(
+        method: method,
+        url: url,
+        headers: headers,
+        requestBody: body,
+        source: 'catvod',
+      );
+
+      final startTime = DateTime.now();
+      final response = await _reqDio.request<List<int>>(
         url,
         options: Options(
           method: method,
@@ -343,60 +435,94 @@ class CatvodOpenService implements ISpiderService {
         ),
         data: body,
       );
-
       final duration = DateTime.now().difference(startTime).inMilliseconds;
-
-      List<int>? bytes = response.data as List<int>?;
-      if (bytes == null) {
-        DebugLogService.instance.logResponse(
-          url: url,
-          method: method,
-          statusCode: response.statusCode,
-          responseBody: '',
-          source: 'catvod',
-          durationMs: duration,
-        );
-        _resolveReq(id, content: '', headers: {});
-        return;
-      }
-
-      String respBody = utf8.decode(bytes, allowMalformed: true);
-      final resultHeaders = response.headers.map.map((k, v) => MapEntry(k, v.join(',')));
+      final bytes = response.data ?? const <int>[];
+      final rawBufferType = options['buffer'];
+      final bufferType = rawBufferType is num
+          ? rawBufferType.toInt()
+          : int.tryParse(rawBufferType?.toString() ?? '');
+      final content = bufferType == 1 || bufferType == 2
+          ? base64Encode(bytes)
+          : utf8.decode(bytes, allowMalformed: true);
+      final resultHeaders = response.headers.map.map(
+        (key, value) => MapEntry(key, value.join(',')),
+      );
 
       DebugLogService.instance.logResponse(
         url: url,
         method: method,
         statusCode: response.statusCode,
-        responseBody: respBody,
+        responseBody: utf8.decode(bytes, allowMalformed: true),
         responseSize: bytes.length,
         source: 'catvod',
         durationMs: duration,
       );
 
-      _resolveReq(id, content: respBody, headers: resultHeaders);
-    } catch (e) {
+      _resolveReq(
+        id,
+        content: content,
+        headers: resultHeaders,
+        statusCode: response.statusCode,
+        responseUrl: response.realUri.toString(),
+        bufferType: bufferType,
+      );
+    } catch (error) {
       DebugLogService.instance.logResponse(
         url: url,
         method: method,
         statusCode: null,
-        responseBody: e.toString(),
+        responseBody: error.toString(),
         source: 'catvod',
       );
-      _resolveReq(id, content: '', headers: {});
+      _resolveReq(
+        id,
+        content: '',
+        headers: {'error': error.toString()},
+        statusCode: 500,
+        responseUrl: url,
+      );
     }
   }
 
-  void _resolveReq(String id, {required String content, required Map<String, String> headers}) {
-    final result = {'content': content, 'headers': headers};
+  void _resolveReq(
+    String id, {
+    required String content,
+    required Map<String, String> headers,
+    required int? statusCode,
+    required String responseUrl,
+    dynamic bufferType,
+  }) {
+    final status = statusCode ?? 500;
+    final result = <String, dynamic>{
+      'content': content,
+      'headers': headers,
+      'status': status,
+      'statusCode': status,
+      'url': responseUrl,
+      'ok': status >= 200 && status < 300,
+      if (bufferType != null) 'buffer': bufferType,
+    };
     _runtime.evaluate('''
       (function() {
         const cb = window._reqCallbacks && window._reqCallbacks["$id"];
         if (cb) {
-          cb(${jsonEncode(result)});
+          cb(window.__catNormalizeResponse(${jsonEncode(result)}));
           delete window._reqCallbacks["$id"];
         }
       })();
     ''');
+  }
+
+  Future<void> _ensureHtmlParser() async {
+    final currentType = _runtime
+        .evaluate('typeof globalThis.pdfh')
+        .stringResult;
+    if (currentType == 'function') return;
+    _cheerioSource ??= await rootBundle.loadString(
+      'assets/js/lib/cheerio.min.js',
+    );
+    _runtime.evaluate(_cheerioSource!);
+    _runtime.evaluate(qjsCatVodHtmlParserJs);
   }
 
   Future<void> _loadRule(String ruleContent) async {
@@ -407,9 +533,11 @@ class CatvodOpenService implements ISpiderService {
         window.Spider = undefined;
         window._catApi = null;
         window._reqCallbacks = {};
+        window._localCallbacks = {};
         delete window.Spider;
       })();
     ''');
+    await _ensureHtmlParser();
 
     try {
       var lines = ruleContent.split('\n');
@@ -422,15 +550,22 @@ class CatvodOpenService implements ISpiderService {
         if (trimmed.startsWith('import ')) continue;
 
         if (trimmed.startsWith('export function __jsEvalReturn')) {
-          line = line.replaceFirst('export function ', 'window.__jsEvalReturn = function ');
+          line = line.replaceFirst(
+            'export function ',
+            'window.__jsEvalReturn = function ',
+          );
           outputLines.add(line);
-          outputLines.add('if (typeof window.__jsEvalReturn === "undefined") window.__jsEvalReturn = __jsEvalReturn;');
+          outputLines.add(
+            'if (typeof window.__jsEvalReturn === "undefined") window.__jsEvalReturn = __jsEvalReturn;',
+          );
           continue;
         }
 
         if (trimmed.startsWith('export default ')) {
           var rest = line.replaceFirst('export default ', '');
-          if (rest.trim().endsWith(';') || rest.trim().endsWith('}') || rest.trim().endsWith(')')) {
+          if (rest.trim().endsWith(';') ||
+              rest.trim().endsWith('}') ||
+              rest.trim().endsWith(')')) {
             outputLines.add('window.__defaultExports = $rest');
           } else {
             inDefaultExport = true;
@@ -442,7 +577,9 @@ class CatvodOpenService implements ISpiderService {
         if (inDefaultExport) {
           buffer.add(line);
           var combined = buffer.join('\n');
-          if (combined.trim().endsWith(';') || combined.trim().endsWith('}') || combined.trim().endsWith(')')) {
+          if (combined.trim().endsWith(';') ||
+              combined.trim().endsWith('}') ||
+              combined.trim().endsWith(')')) {
             outputLines.add('window.__defaultExports = $combined');
             inDefaultExport = false;
             buffer.clear();
@@ -565,8 +702,9 @@ class CatvodOpenService implements ISpiderService {
       final methodMap = jsonDecode(result.stringResult) as Map<String, dynamic>;
       if (methodMap.isEmpty) throw Exception('API object has no methods');
 
-      _methodMap = Map<String, String>.from(methodMap.map((k, v) => MapEntry(k, v.toString())));
-      _apiReady = true;
+      _methodMap = Map<String, String>.from(
+        methodMap.map((k, v) => MapEntry(k, v.toString())),
+      );
       print('[CatvodOpen] ✅ Rule loaded, method map: $_methodMap');
     } catch (e) {
       print('[CatvodOpen] ❌ Rule load error: $e');
@@ -578,19 +716,26 @@ class CatvodOpenService implements ISpiderService {
   void setBaseUrl(String url) {}
 
   @override
-  Future<void> switchSite(String apiUrl, String siteKey, {dynamic ext}) async {
-    // 只串行化 switchSite 自身，防止两个切站打架
-    while (_switchMutex != null) {
-      await _switchMutex;
-    }
-    final lock = Completer<void>();
-    _switchMutex = lock.future;
-    try {
-      await _switchSiteInternal(apiUrl, siteKey, ext: ext);
-    } finally {
-      lock.complete();
-      _switchMutex = null;
-    }
+  Future<void> switchSite(String apiUrl, String siteKey, {dynamic ext}) {
+    return _serial(
+      () => _switchSiteInternal(apiUrl, siteKey, ext: ext),
+    );
+  }
+
+  Future<T> _serial<T>(Future<T> Function() operation) {
+    final previous = _operationChain;
+    final completer = Completer<T>();
+    _operationChain = () async {
+      try {
+        await previous;
+      } catch (_) {}
+      try {
+        completer.complete(await operation());
+      } catch (error, stackTrace) {
+        completer.completeError(error, stackTrace);
+      }
+    }();
+    return completer.future;
   }
 
   @override
@@ -602,7 +747,10 @@ class CatvodOpenService implements ISpiderService {
     try {
       await switchSite(apiUrl, siteKey, ext: ext);
       if (_isBroken) {
-        return SiteSwitchResult.failure('规则加载失败', siteKey: siteKey);
+        return SiteSwitchResult.failure(
+          _lastSwitchError ?? '规则加载失败',
+          siteKey: siteKey,
+        );
       }
       return SiteSwitchResult.success(siteKey: siteKey);
     } catch (e) {
@@ -610,7 +758,11 @@ class CatvodOpenService implements ISpiderService {
     }
   }
 
-  Future<void> _switchSiteInternal(String apiUrl, String siteKey, {dynamic ext}) async {
+  Future<void> _switchSiteInternal(
+    String apiUrl,
+    String siteKey, {
+    dynamic ext,
+  }) async {
     print('[CatvodOpen] 🔄 switchSite: $siteKey');
 
     // 保存旧 runtime 引用，用于成功后 dispose
@@ -623,9 +775,10 @@ class CatvodOpenService implements ISpiderService {
 
     // 直接更新为新站点状态
     _currentKey = siteKey;
+    _currentRawExt = ext ?? '';
     _methodMap = null;
-    _apiReady = false;
     _isBroken = false;
+    _lastSwitchError = null;
 
     if (ext is String && ext.isNotEmpty) {
       try {
@@ -664,6 +817,21 @@ class CatvodOpenService implements ISpiderService {
         await _loadRule(apiUrl);
       }
 
+      if (_methodMap?.containsKey('init') == true) {
+        final initResult = await _callAsync('init', [
+          <String, dynamic>{
+            'stype': 4,
+            'skey': siteKey,
+            'sourceKey': siteKey,
+            'ext': _currentRawExt,
+          },
+        ]);
+        final initError = initResult['error']?.toString() ?? '';
+        if (initError.isNotEmpty) {
+          throw Exception('规则初始化失败：$initError');
+        }
+      }
+
       // 成功：dispose 旧 runtime
       try {
         oldRuntime.dispose();
@@ -681,8 +849,8 @@ class CatvodOpenService implements ISpiderService {
       // 新 runtime 保留（虽然规则加载失败，但 runtime 可用）
       // _currentKey 保持为新站点
       // _methodMap 保持 null（规则未加载成功）
-      _apiReady = false;
       _isBroken = true;
+      _lastSwitchError = e.toString();
 
       // dispose 旧 runtime，避免资源泄漏
       try {
@@ -695,7 +863,10 @@ class CatvodOpenService implements ISpiderService {
     }
   }
 
-  Future<Map<String, dynamic>> _callAsync(String method, List<dynamic> args) async {
+  Future<Map<String, dynamic>> _callAsync(
+    String method,
+    List<dynamic> args,
+  ) async {
     final runtime = _runtime;
     final methodMap = _methodMap;
     if (methodMap == null || !methodMap.containsKey(method)) {
@@ -705,7 +876,8 @@ class CatvodOpenService implements ISpiderService {
     final actualMethod = methodMap[method]!;
     final argsJson = jsonEncode(args);
 
-    final jsCode = '''
+    final jsCode =
+        '''
       (function() {
         try {
           if (typeof window.req === 'undefined') {
@@ -731,7 +903,12 @@ class CatvodOpenService implements ISpiderService {
 
           var result = fn.apply(api, $argsJson);
           if (result && typeof result.then === 'function') {
-            return result.then(r => JSON.stringify(r)).catch(e => JSON.stringify({error: e.message}));
+            return result
+              .then(r => JSON.stringify(r === undefined || r === null ? {} : r))
+              .catch(e => JSON.stringify({error: e.message}));
+          }
+          if (result === undefined || result === null) {
+            return JSON.stringify({});
           }
           return JSON.stringify(result);
         } catch(e) {
@@ -777,15 +954,21 @@ class CatvodOpenService implements ISpiderService {
     }
   }
 
-  Future<Map<String, dynamic>> _callApi(String method, {List<dynamic> args = const []}) async {
-    if (_isBroken) {
-      return {'error': '脚本执行失败：规则未加载，请切换其他源'};
-    }
-    try {
-      return await _callAsync(method, args);
-    } catch (e) {
-      return {'error': e.toString()};
-    }
+  Future<Map<String, dynamic>> _callApi(
+    String method, {
+    List<dynamic> args = const [],
+  }) async {
+    return _serial(() async {
+      if (_isBroken) {
+        return {'error': '脚本执行失败：规则未加载，请切换其他源'};
+      }
+      try {
+        await _ensureHtmlParser();
+        return await _callAsync(method, args);
+      } catch (error) {
+        return {'error': error.toString()};
+      }
+    });
   }
 
   @override
@@ -794,7 +977,11 @@ class CatvodOpenService implements ISpiderService {
   }
 
   @override
-  Future<Map<String, dynamic>> fetchCate(String cateId, int page, {String? ext}) async {
+  Future<Map<String, dynamic>> fetchCate(
+    String cateId,
+    int page, {
+    String? ext,
+  }) async {
     // 快照 _currentExtMap，避免 await 期间被 switchSite 替换
     final extend = Map<String, dynamic>.from(_currentExtMap ?? {});
     if (ext != null && ext.isNotEmpty) {
@@ -812,12 +999,19 @@ class CatvodOpenService implements ISpiderService {
   }
 
   @override
-  Future<Map<String, dynamic>> search(String wd, int page, {int quick = 0}) async {
+  Future<Map<String, dynamic>> search(
+    String wd,
+    int page, {
+    int quick = 0,
+  }) async {
     return await _callApi('search', args: [wd, quick, page]);
   }
 
   @override
-  Future<VideoDetail?> getDetail({required String vodId, required String pwd}) async {
+  Future<VideoDetail?> getDetail({
+    required String vodId,
+    required String pwd,
+  }) async {
     final map = await _callApi('detail', args: [vodId]);
     final list = map['list'];
     if (list is List && list.isNotEmpty) {
@@ -849,21 +1043,26 @@ class CatvodOpenService implements ISpiderService {
     required String pwd,
   }) async {
     final map = await _callApi('play', args: [flag, playParams, []]);
-    Map<String, dynamic>? playData;
-    if (map['data'] is Map) {
-      playData = map['data'] as Map<String, dynamic>;
-    } else if (map.containsKey('parse')) {
-      playData = map;
+    final playData = _normalizePlayData(_extractPlayData(map));
+    if (playData.containsKey('error') ||
+        (!playData.containsKey('parse') &&
+            !playData.containsKey('url') &&
+            !playData.containsKey('urls'))) {
+      return null;
     }
-    if (playData != null) {
-      return PlayUrl.fromJson(playData);
+    try {
+      final playUrl = PlayUrl.fromJson(playData);
+      final url = playUrl.defaultUrl?.trim() ?? '';
+      return url.isEmpty ? null : playUrl;
+    } catch (_) {
+      return null;
     }
-    return null;
   }
 
   @override
   Future<Map<String, dynamic>> fetchPlayUrl(String play, {String? flag}) async {
-    return await _callApi('play', args: [flag ?? '', play, []]);
+    final map = await _callApi('play', args: [flag ?? '', play, []]);
+    return _normalizePlayData(_extractPlayData(map));
   }
 
   @override
@@ -903,6 +1102,48 @@ class CatvodOpenService implements ISpiderService {
       }
     }
     return episodes;
+  }
+
+  Map<String, dynamic> _extractPlayData(Map<String, dynamic> result) {
+    dynamic data = result['data'];
+    if (data is String && data.trim().isNotEmpty) {
+      try {
+        data = jsonDecode(data);
+      } catch (_) {}
+    }
+    if (data is Map) return data.cast<String, dynamic>();
+    return result;
+  }
+
+  Map<String, dynamic> _normalizePlayData(Map<String, dynamic> data) {
+    final normalized = Map<String, dynamic>.from(data);
+    for (final key in const ['parse', 'jx', 'isDash', 'is_dash', 'dash']) {
+      final value = normalized[key];
+      if (value is bool) {
+        normalized[key] = value ? 1 : 0;
+      } else if (value is num) {
+        normalized[key] = value.toInt();
+      } else if (value is String) {
+        final text = value.trim().toLowerCase();
+        if (text == 'true') {
+          normalized[key] = 1;
+        } else if (text == 'false') {
+          normalized[key] = 0;
+        } else {
+          normalized[key] = int.tryParse(text);
+        }
+      }
+    }
+    final header = normalized['header'] ?? normalized['headers'];
+    if (header is Map) {
+      normalized['header'] = header.map(
+        (key, value) => MapEntry(
+          key.toString(),
+          value is List ? value.join(', ') : '$value',
+        ),
+      );
+    }
+    return normalized;
   }
 
   void dispose() {

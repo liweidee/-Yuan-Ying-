@@ -141,14 +141,16 @@ class SettingPage extends StatelessWidget {
             onTap: () => Get.to(() => const TmdbConfigPage()),
           ),
           const SizedBox(height: 8),
-          _buildSettingItem(
-            context: context,
-            icon: Icons.smart_toy_outlined,
-            title: 'AI 助手',
-            subtitle: '配置模型接口，打开 AI 对话界面',
-            onTap: () => Get.toNamed(AppPages.aiConfig),
-          ),
-          const SizedBox(height: 8),
+          if (Platform.isAndroid) ...[
+            _buildSettingItem(
+              context: context,
+              icon: Icons.smart_toy_outlined,
+              title: 'AI 助手',
+              subtitle: '配置模型接口，打开 AI 对话界面',
+              onTap: () => Get.toNamed(AppPages.aiConfig),
+            ),
+            const SizedBox(height: 8),
+          ],
           _buildSettingItem(
             context: context,
             icon: Icons.more_horiz,
