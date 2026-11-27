@@ -122,7 +122,9 @@ GitHub Actions 需要配置以下 Secrets：
 - `ANDROID_KEYSTORE_BASE64`：JKS 文件的 Base64 内容
 - `ANDROID_KEYSTORE_PASSWORD`：keystore 密码
 - `ANDROID_KEY_ALIAS`：密钥别名
-- `ANDROID_KEY_PASSWORD`：密钥密码
+
+本项目的 CI 固定签名使用 PKCS12，密钥密码与 keystore 密码相同。
+`ANDROID_KEY_PASSWORD` 不再需要单独配置；如果控制台中已有该项，可以保留或删除。
 
 Windows PowerShell 可把密钥内容写入剪贴板：
 
