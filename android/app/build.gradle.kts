@@ -31,6 +31,8 @@ val releaseSigningValues = mapOf(
 val hasPartialSigningConfig =
     releaseSigningValues.values.any { it != null } &&
         releaseSigningValues.values.any { it == null }
+val hasCompleteSigningConfig =
+    releaseSigningValues.values.all { it != null }
 if (hasPartialSigningConfig && releaseBuildRequested) {
     throw GradleException(
         "Android 固定签名配置不完整，请同时提供 ANDROID_KEYSTORE_FILE、" +
@@ -44,20 +46,6 @@ fun resolveKeystoreFile(path: String): File {
     if (absolute.isAbsolute) return absolute
     val appRelative = project.file(path)
     return if (appRelative.exists()) appRelative else rootProject.file(path)
-}
-
-val releaseSigningConfig = if (releaseSigningValues.values.all { it != null }) {
-    signingConfigs.create("release") {
-        storeFile = resolveKeystoreFile(releaseSigningValues.getValue("storeFile")!!)
-        storePassword = releaseSigningValues.getValue("storePassword")
-        keyAlias = releaseSigningValues.getValue("keyAlias")
-        keyPassword = releaseSigningValues.getValue("keyPassword")
-        enableV1Signing = true
-        enableV2Signing = true
-        enableV3Signing = true
-    }
-} else {
-    null
 }
 
 val resolvedVersionCode =
@@ -105,20 +93,36 @@ android {
         }
     }
 
+    signingConfigs {
+        if (hasCompleteSigningConfig) {
+            create("release") {
+                storeFile = resolveKeystoreFile(releaseSigningValues.getValue("storeFile")!!)
+                storePassword = releaseSigningValues.getValue("storePassword")
+                keyAlias = releaseSigningValues.getValue("keyAlias")
+                keyPassword = releaseSigningValues.getValue("keyPassword")
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
+            }
+        }
+    }
+
     buildTypes {
         debug {
             signingConfig = signingConfigs.getByName("debug")
             applicationIdSuffix = ".debug"
         }
         release {
-            if (releaseSigningConfig == null && releaseBuildRequested) {
+            if (!hasCompleteSigningConfig && releaseBuildRequested) {
                 throw GradleException(
                     "Release APK 必须使用固定签名。请配置 ANDROID_KEYSTORE_FILE、" +
                         "ANDROID_KEYSTORE_PASSWORD、ANDROID_KEY_ALIAS、ANDROID_KEY_PASSWORD，" +
                         "不要回退到 debug 签名。",
                 )
             }
-            releaseSigningConfig?.let { signingConfig = it }
+            if (hasCompleteSigningConfig) {
+                signingConfig = signingConfigs.getByName("release")
+            }
 
             if (project.hasProperty("dev")) {
                 applicationIdSuffix = ".dev"
