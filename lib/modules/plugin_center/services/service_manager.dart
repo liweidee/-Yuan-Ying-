@@ -248,7 +248,7 @@ class ServiceManager {
   }
 
   Future<void> remove(String id) async {
-    await stop(id);
+    await _stopForRemoval(id);
     final list = getAll();
     list.removeWhere((e) => e.id == id);
     await _saveAll(list);
@@ -265,7 +265,7 @@ class ServiceManager {
     final config = find(id);
     if (config == null) return;
 
-    await stop(id);
+    await _stopForRemoval(id);
 
     final servicesRoot = await PluginPaths.servicesRoot();
     await ServicePackageCleanup.deleteManagedRoot(
@@ -283,6 +283,13 @@ class ServiceManager {
     _startLocks.remove(id);
     await _releasePort(id);
     _notifyChange();
+  }
+
+  Future<void> _stopForRemoval(String id) async {
+    await stop(id);
+    if (_hasLiveProcess(id)) {
+      throw StateError('服务进程未能停止，已取消删除');
+    }
   }
 
   // ============================================================

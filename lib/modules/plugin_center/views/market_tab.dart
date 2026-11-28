@@ -9,6 +9,7 @@ import 'package:yuanying/modules/plugin_center/controllers/plugin_center_control
 import 'package:yuanying/modules/plugin_center/models/market_entry.dart';
 import 'package:yuanying/modules/plugin_center/models/service_config.dart';
 import 'package:yuanying/modules/plugin_center/services/install_manager.dart';
+import 'package:yuanying/modules/plugin_center/services/runtime_plugin_release.dart';
 import 'package:yuanying/modules/plugin_center/services/service_manager.dart';
 import 'package:yuanying/modules/plugin_center/widgets/install_progress_dialog.dart';
 import 'package:yuanying/modules/plugin_center/widgets/plugin_detail_sheet.dart';
@@ -376,15 +377,27 @@ class _MarketTabState extends State<MarketTab> {
       }
     }
 
-    if (runningServices.isNotEmpty && mounted) {
+    final isRuntimeReplacement =
+        RuntimePluginRelease.requiresRelease(entry.id) &&
+        InstallManager.instance.findInstalled(entry.id) != null;
+    final needsRelease = runningServices.isNotEmpty || isRuntimeReplacement;
+
+    if (needsRelease && mounted) {
       final ok = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: const Text('服务运行中'),
+          title: Text(isRuntimeReplacement ? '更新运行时插件' : '服务运行中'),
           content: Text(
-            '以下服务正在运行，更新插件需要先停止服务：\n'
-            '${runningServices.values.map((n) => '· $n').join('\n')}\n\n'
-            '是否停止这些服务并继续更新？',
+            [
+              if (runningServices.isNotEmpty)
+                '以下服务正在运行，需要先停止：\n'
+                    '${runningServices.values.map((n) => '· $n').join('\n')}',
+              if (isRuntimeReplacement)
+                '更新运行时插件还会停止当前 Node、Python 或 QJS 的已加载实例，'
+                    '避免可执行文件或原生库被占用。',
+              '更新完成后不会自动重启这些服务或实例，'
+                  '相关功能会在下次使用时重新加载；手动服务需再次启动。',
+            ].join('\n\n'),
           ),
           actions: [
             TextButton(
@@ -402,6 +415,9 @@ class _MarketTabState extends State<MarketTab> {
 
       for (final id in runningServices.keys) {
         await ServiceManager.instance.stop(id);
+      }
+      if (isRuntimeReplacement) {
+        await RuntimePluginRelease.prepareForReplacement(entry.id);
       }
     }
 

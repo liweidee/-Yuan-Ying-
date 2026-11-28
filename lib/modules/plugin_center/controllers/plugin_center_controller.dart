@@ -10,13 +10,12 @@ import 'package:yuanying/modules/plugin_center/models/market_entry.dart';
 import 'package:yuanying/modules/plugin_center/models/market_source.dart';
 import 'package:yuanying/modules/plugin_center/services/install_manager.dart';
 import 'package:yuanying/modules/plugin_center/services/market_manager.dart';
+import 'package:yuanying/modules/plugin_center/services/runtime_plugin_release.dart';
 import 'package:yuanying/modules/plugin_center/models/service_config.dart';
 import 'package:yuanying/modules/plugin_center/services/service_manager.dart';
 import 'package:yuanying/nodejs/nodejs_service.dart';
 import 'package:yuanying/modules/sandbox/services/sandbox_service_manager.dart';
 import 'package:yuanying/t4/services/jar_win_spider_service.dart';
-import 'package:yuanying/t4/services/qjs_drpy2_service.dart';
-import 'package:yuanying/t4/services/qjs_drpy3_service.dart';
 import 'package:yuanying/services/magnet/magnet_plugin_service.dart';
 
 enum MarketFilter { all, updatable, installed, notInstalled }
@@ -249,7 +248,7 @@ class PluginCenterController extends GetxController {
       }
 
       if (id == 'qjs' || id == 'qjs-arm32' || id == 'qjs-win') {
-        _disposeQjsEngines();
+        await RuntimePluginRelease.releaseQjsEngines();
       }
 
       if (id == 'magnet') {
@@ -328,22 +327,13 @@ class PluginCenterController extends GetxController {
     if (plugin.id == 'qjs' ||
         plugin.id == 'qjs-arm32' ||
         plugin.id == 'qjs-win') {
-      _disposeQjsEngines();
+      await RuntimePluginRelease.releaseQjsEngines();
     }
     if (plugin.id == 'magnet') {
       await MagnetPluginService.instance.shutdownForPluginDisabled();
     }
     await InstallManager.instance.uninstall(plugin);
     reloadInstalled();
-  }
-
-  void _disposeQjsEngines() {
-    if (Get.isRegistered<QjsDrpy2Service>()) {
-      Get.find<QjsDrpy2Service>().dispose();
-    }
-    if (Get.isRegistered<QjsDrpy3Service>()) {
-      Get.find<QjsDrpy3Service>().dispose();
-    }
   }
 
   void reloadServices() {

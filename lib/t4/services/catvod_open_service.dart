@@ -879,6 +879,11 @@ class CatvodOpenService implements ISpiderService {
     final jsCode =
         '''
       (function() {
+        const errorMessage = (e) => {
+          if (e && e.message) return String(e.message);
+          if (e === undefined || e === null) return '未知脚本错误';
+          return String(e);
+        };
         try {
           if (typeof window.req === 'undefined') {
             window.req = async function(url, options) {
@@ -905,14 +910,14 @@ class CatvodOpenService implements ISpiderService {
           if (result && typeof result.then === 'function') {
             return result
               .then(r => JSON.stringify(r === undefined || r === null ? {} : r))
-              .catch(e => JSON.stringify({error: e.message}));
+              .catch(e => JSON.stringify({error: errorMessage(e)}));
           }
           if (result === undefined || result === null) {
             return JSON.stringify({});
           }
           return JSON.stringify(result);
         } catch(e) {
-          return JSON.stringify({error: e.message});
+          return JSON.stringify({error: errorMessage(e)});
         }
       })();
     ''';
@@ -933,6 +938,16 @@ class CatvodOpenService implements ISpiderService {
       try {
         dynamic parsed = jsonDecode(raw);
         if (parsed is String) parsed = jsonDecode(parsed);
+        // CatVod only uses init for side effects. Its return value is not an
+        // API response and may legitimately be a string, array, boolean, etc.
+        // Treating that value as a Map caused iOS to report a format error.
+        if (method == 'init') {
+          if (parsed is Map && parsed['error'] != null) {
+            final error = parsed['error'].toString().trim();
+            if (error.isNotEmpty) return {'error': error};
+          }
+          return const {};
+        }
         if (parsed is Map<String, dynamic>) {
           if (parsed.containsKey('error')) {
             return {'error': parsed['error'].toString()};
@@ -941,6 +956,7 @@ class CatvodOpenService implements ISpiderService {
         }
         return {'error': '脚本执行失败：响应格式异常'};
       } catch (e) {
+        debugPrint('[CatvodOpen] Invalid script result: $raw');
         return {'error': '脚本执行失败：响应解析失败'};
       }
     } on TimeoutException catch (e) {

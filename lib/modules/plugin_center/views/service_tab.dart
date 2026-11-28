@@ -703,6 +703,9 @@ class _ServiceCard extends StatelessWidget {
     } catch (_) {}
 
     if (!context.mounted) return;
+    final status = ServiceManager.instance.getStatus(config.id);
+    final isActive =
+        status == ServiceStatus.running || status == ServiceStatus.starting;
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -719,6 +722,46 @@ class _ServiceCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('确定要删除「${config.name}」吗？'),
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: isActive
+                      ? colorScheme.errorContainer.withValues(alpha: 0.3)
+                      : colorScheme.surfaceContainerHighest.withValues(
+                          alpha: 0.3,
+                        ),
+                  borderRadius: Style.mdRadius,
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      isActive ? Icons.warning_amber : Icons.info_outline,
+                      size: 16,
+                      color: isActive ? colorScheme.error : colorScheme.primary,
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        isActive
+                            ? '服务当前正在运行或启动中。确认后将先停止服务，再执行删除。'
+                            : '删除时会先停止服务进程，再移除服务配置。',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: isActive
+                              ? colorScheme.error
+                              : colorScheme.onSurfaceVariant,
+                          height: 1.4,
+                          fontWeight: isActive
+                              ? FontWeight.w600
+                              : FontWeight.normal,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
               const SizedBox(height: 10),
               if (isServerPackage) ...[
                 Container(
@@ -871,7 +914,7 @@ class _ServiceCard extends StatelessWidget {
               backgroundColor: colorScheme.error,
               foregroundColor: colorScheme.onError,
             ),
-            child: const Text('删除'),
+            child: Text(isActive ? '停止并删除' : '删除'),
           ),
         ],
       ),

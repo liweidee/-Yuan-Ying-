@@ -14,6 +14,7 @@ import 'package:yuanying/modules/plugin_center/services/install_manager.dart';
 import 'package:yuanying/modules/plugin_center/services/plugin_paths.dart';
 import 'package:yuanying/t4/models/play_url.dart';
 import 'package:yuanying/t4/models/video_detail.dart';
+import 'package:yuanying/t4/services/jar_class_profile.dart';
 import 'package:yuanying/t4/services/i_jar_spider_service.dart';
 import 'package:yuanying/utils/business_exception.dart';
 
@@ -28,7 +29,9 @@ class JarWinSpiderService implements IJarSpiderService {
   _JarWinHostClient? _client;
   bool _needShellPayloadCheck = false;
   bool _usingNativeExtraction = false;
-  bool _guardRuntimeFallback = false;
+  bool _usingEmbeddedNativeRuntime = false;
+  bool _preferGuardRetry = false;
+  bool _guardRuntimeHint = false;
 
   @override
   String? get currentKey => _currentKey;
@@ -44,6 +47,11 @@ class JarWinSpiderService implements IJarSpiderService {
     _currentKey = siteKey;
     _ext = ext;
     _readyKey = null;
+    _needShellPayloadCheck = false;
+    _usingNativeExtraction = false;
+    _usingEmbeddedNativeRuntime = false;
+    _preferGuardRetry = false;
+    _guardRuntimeHint = false;
   }
 
   @override
@@ -54,21 +62,29 @@ class JarWinSpiderService implements IJarSpiderService {
       _client = null;
       _needShellPayloadCheck = false;
       _usingNativeExtraction = false;
-      _guardRuntimeFallback = false;
+      _usingEmbeddedNativeRuntime = false;
+      _preferGuardRetry = false;
+      _guardRuntimeHint = false;
     }
     _jarSource = next;
     _configBaseUrl = configBaseUrl;
   }
 
   @override
-  Future<void> ensureReady() async {
+  Future<void> ensureReady({bool forceGuardRetry = false}) async {
+    final guardPlugin = InstallManager.instance.findInstalled('jar-guard');
     final plugin = _requireEnabledPlugin();
     final sourceJarPath = await _resolveJarPath();
     final sourceStat = File(sourceJarPath).statSync();
+    final guardState = guardPlugin == null
+        ? 'none'
+        : '${guardPlugin.version}|${guardPlugin.enabled}|'
+              '${guardPlugin.installPath}';
     final expectedKey =
         '${plugin.version}|${plugin.installPath}|$sourceJarPath|'
         '${sourceStat.size}|${sourceStat.modified.millisecondsSinceEpoch}|'
-        '${_currentKey ?? ''}|${_api ?? ''}|${_extText(_ext)}';
+        '${_currentKey ?? ''}|${_api ?? ''}|${_extText(_ext)}|'
+        '$guardState|$forceGuardRetry';
     if (!_needShellPayloadCheck &&
         _readyKey == expectedKey &&
         _client?.isAlive == true &&
@@ -80,19 +96,19 @@ class JarWinSpiderService implements IJarSpiderService {
       plugin: plugin,
       sourceJarPath: sourceJarPath,
       api: _api ?? '',
+      allowGuardExtraction: forceGuardRetry,
     );
-    final guardEnabled =
-        InstallManager.instance.findInstalled('jar-guard')?.enabled == true;
-    if (preparedJar.requiresGuard &&
-        !preparedJar.useShellShim &&
-        !guardEnabled) {
-      _requireEnabledGuardPlugin();
+    final needsGuardRuntime = preparedJar.isShell && !preparedJar.useShellShim;
+    if (needsGuardRuntime && guardPlugin?.enabled != true) {
+      _preferGuardRetry = false;
+      throw _GuardUnavailableException(_guardRetryHint(guardPlugin));
     }
+    if (needsGuardRuntime) _preferGuardRetry = true;
+    _guardRuntimeHint = preparedJar.requiresGuardRuntime;
     _needShellPayloadCheck = preparedJar.isShell && !preparedJar.useShellShim;
     _usingNativeExtraction = _needShellPayloadCheck;
-    _guardRuntimeFallback =
-        !guardEnabled &&
-        (preparedJar.requiresGuard || preparedJar.guardFallback);
+    _usingEmbeddedNativeRuntime =
+        _usingNativeExtraction && preparedJar.usesEmbeddedNativeRuntime;
     _client = await _JarWinHostPool.instance.acquire(plugin, preparedJar);
     _readyKey = expectedKey;
   }
@@ -103,7 +119,9 @@ class JarWinSpiderService implements IJarSpiderService {
     _client = null;
     _needShellPayloadCheck = false;
     _usingNativeExtraction = false;
-    _guardRuntimeFallback = false;
+    _usingEmbeddedNativeRuntime = false;
+    _preferGuardRetry = false;
+    _guardRuntimeHint = false;
   }
 
   static Future<void> shutdownAll() => _JarWinHostPool.instance.shutdownAll();
@@ -119,29 +137,74 @@ class JarWinSpiderService implements IJarSpiderService {
     return plugin;
   }
 
-  InstalledPlugin _requireEnabledGuardPlugin() {
-    final plugin = InstallManager.instance.findInstalled('jar-guard');
-    if (plugin == null) {
-      throw const BusinessException(
-        '当前配置属于加固 JAR 源，需要安装 jar-guard。'
-        '请前往「插件中心 → 市场」安装「JAR 加固壳支持（Windows）」后重试。',
-      );
-    }
-    if (!plugin.enabled) {
-      throw const BusinessException(
-        '当前配置属于加固 JAR 源，但 jar-guard 已关闭。'
-        '请前往「插件中心」开启「JAR 加固壳支持（Windows）」后重试。',
-      );
-    }
-    return plugin;
-  }
-
+  /// JAR 运行采用 fail-open 策略：首次请求始终使用普通模式。只有普通模式
+  /// 真实失败后才尝试 guard 模式，避免仅凭类名或包内资源误判。
   Future<dynamic> _call(
     String method,
     List<String> args, {
     bool allowShellRetry = true,
   }) async {
-    await ensureReady();
+    try {
+      return await _callWithCurrentRuntime(
+        method,
+        args,
+        allowShellRetry: allowShellRetry,
+      );
+    } on _GuardUnavailableException {
+      rethrow;
+    } catch (normalError, normalStack) {
+      if (_preferGuardRetry) {
+        Error.throwWithStackTrace(normalError, normalStack);
+      }
+      final guardPlugin = InstallManager.instance.findInstalled('jar-guard');
+      if (_guardRuntimeHint && guardPlugin?.enabled != true) {
+        throw BusinessException(
+          '${_guardRetryHint(guardPlugin)}\n原始错误：$normalError',
+        );
+      }
+
+      _preferGuardRetry = true;
+      _needShellPayloadCheck = false;
+      _client = null;
+      _readyKey = null;
+
+      try {
+        return await _callWithCurrentRuntime(
+          method,
+          args,
+          allowShellRetry: true,
+        );
+      } catch (guardError) {
+        if (!_preferGuardRetry) {
+          final guardPlugin = InstallManager.instance.findInstalled(
+            'jar-guard',
+          );
+          throw BusinessException(
+            '${_guardRetryHint(guardPlugin)}\n原始错误：$normalError',
+          );
+        }
+        _preferGuardRetry = false;
+        throw BusinessException(
+          '普通模式运行失败：$normalError\n'
+          'jar-guard 模式重试失败：$guardError',
+        );
+      }
+    }
+  }
+
+  String _guardRetryHint(InstalledPlugin? guardPlugin) {
+    final action = guardPlugin == null
+        ? '安装「JAR 加固壳支持（Windows）」'
+        : '开启「JAR 加固壳支持（Windows）」';
+    return '普通模式运行失败。可$action后再次尝试。';
+  }
+
+  Future<dynamic> _callWithCurrentRuntime(
+    String method,
+    List<String> args, {
+    required bool allowShellRetry,
+  }) async {
+    await ensureReady(forceGuardRetry: _preferGuardRetry);
     final wasNativeExtraction = _usingNativeExtraction;
     final client = _client;
     if (client == null || !client.isAlive) {
@@ -152,13 +215,42 @@ class JarWinSpiderService implements IJarSpiderService {
       throw BusinessException('不支持的 JAR 接口标识：$api');
     }
     final className = 'com.github.catvod.spider.${api.substring(4)}';
-    try {
-      final response = await client.request(
-        className: className,
-        method: method,
-        args: [_extText(_ext), ...args],
-      );
+    final startupDeadline = DateTime.now().add(const Duration(seconds: 90));
+    var nativePendingLogged = false;
+    while (true) {
+      _JarWinResponse response;
+      try {
+        response = await client.request(
+          className: className,
+          method: method,
+          args: [_extText(_ext), ...args],
+        );
+      } catch (e) {
+        if (wasNativeExtraction && allowShellRetry) {
+          _needShellPayloadCheck = true;
+          try {
+            if (await _tryPromoteRuntimePayload(
+              className: className,
+              outerJarPath: client.jarPath,
+            )) {
+              return _call(method, args, allowShellRetry: false);
+            }
+          } catch (_) {}
+        }
+        rethrow;
+      }
+
       if (!response.ok) {
+        if (wasNativeExtraction) {
+          try {
+            if (await _tryPromoteRuntimePayload(
+              className: className,
+              outerJarPath: client.jarPath,
+            )) {
+              return _call(method, args, allowShellRetry: false);
+            }
+          } catch (_) {}
+        }
         throw BusinessException(
           response.data.isEmpty ? 'SpiderHost 请求失败' : response.data,
         );
@@ -166,46 +258,88 @@ class JarWinSpiderService implements IJarSpiderService {
       if (response.data.isEmpty) {
         throw Exception('JAR 爬虫 $method 返回空数据');
       }
+
       final decoded = jsonDecode(response.data);
       final pending =
           decoded is Map && decoded.toString().contains('__host_pending__');
-      if (_guardRuntimeFallback && pending) {
-        _requireEnabledGuardPlugin();
+      if (!pending) return decoded;
+
+      _needShellPayloadCheck = true;
+      if (!wasNativeExtraction) {
+        throw const BusinessException('JAR 返回了需要加固解包的状态');
       }
-      if (wasNativeExtraction) {
-        _needShellPayloadCheck = true;
-        if (pending && allowShellRetry) {
-          await ensureReady();
-          if (!_usingNativeExtraction) {
-            return _call(method, args, allowShellRetry: false);
-          }
+      if (!allowShellRetry) {
+        throw const BusinessException('加固运行环境尚未初始化完成');
+      }
+
+      if (await _tryPromoteRuntimePayload(
+        className: className,
+        outerJarPath: client.jarPath,
+      )) {
+        return _call(method, args, allowShellRetry: false);
+      }
+
+      if (!_usingEmbeddedNativeRuntime) {
+        final payloadReady = await _waitForRuntimePayload(
+          className: className,
+          outerJarPath: client.jarPath,
+        );
+        if (payloadReady) {
+          return _call(method, args, allowShellRetry: false);
         }
+        throw const BusinessException('加固解包仍在进行，请稍后再次请求');
       }
-      return decoded;
-    } catch (e) {
-      if (_guardRuntimeFallback && _looksLikeGuardRuntimeError('$e')) {
-        _requireEnabledGuardPlugin();
+
+      // 内嵌 ARM SO 的 JAR 在 shell emulator 内完成初始化，不会产出
+      // runtime_dex/*.r2.jar。复用同一个 SpiderHost 重试当前请求，避免把
+      // 首次 native 初始化误判成需要用户手动再次点击的解包失败。
+      if (!_preferGuardRetry) {
+        throw const BusinessException('JAR 返回了需要加固解包的状态');
       }
-      if (wasNativeExtraction && allowShellRetry) {
-        _needShellPayloadCheck = true;
-        try {
-          await ensureReady();
-          if (!_usingNativeExtraction) {
-            return _call(method, args, allowShellRetry: false);
-          }
-        } catch (_) {}
+      if (!DateTime.now().isBefore(startupDeadline)) {
+        throw const BusinessException('加固运行环境初始化超时，请稍后重试');
       }
-      rethrow;
+
+      if (!nativePendingLogged) {
+        nativePendingLogged = true;
+        debugPrint('[jar-win] native runtime initializing: $className');
+      }
+      await Future<void>.delayed(const Duration(seconds: 2));
     }
   }
 
-  bool _looksLikeGuardRuntimeError(String message) {
-    return message.contains('FishCrypto') ||
-        message.contains('DexNative') ||
-        message.contains('Shinidie') ||
-        message.contains('UnsatisfiedLinkError') ||
-        message.contains('payload') ||
-        message.contains('原生库');
+  Future<bool> _waitForRuntimePayload({
+    required String className,
+    required String outerJarPath,
+  }) async {
+    final deadline = DateTime.now().add(const Duration(seconds: 60));
+    while (DateTime.now().isBefore(deadline)) {
+      if (!_preferGuardRetry) return false;
+      if (await _tryPromoteRuntimePayload(
+        className: className,
+        outerJarPath: outerJarPath,
+      )) {
+        debugPrint('[jar-win] payload ready: $className');
+        return true;
+      }
+      await Future<void>.delayed(const Duration(seconds: 2));
+    }
+    return false;
+  }
+
+  Future<bool> _tryPromoteRuntimePayload({
+    required String className,
+    required String outerJarPath,
+  }) async {
+    final exists = await _JarWinPreprocessor.instance.hasRuntimePayload(
+      className: className,
+      outerJarPath: outerJarPath,
+    );
+    if (!exists) return false;
+
+    _needShellPayloadCheck = true;
+    await ensureReady(forceGuardRetry: true);
+    return !_usingNativeExtraction;
   }
 
   Map<String, dynamic> _asMap(dynamic value, String method) {
@@ -455,8 +589,8 @@ class _PreparedJar {
   final bool needsNoVerify;
   final bool hasOwnProxy;
   final bool isShell;
-  final bool requiresGuard;
-  final bool guardFallback;
+  final bool requiresGuardRuntime;
+  final bool usesEmbeddedNativeRuntime;
   final bool useShellShim;
   final bool isAowu;
   final String? shellClasses;
@@ -466,15 +600,16 @@ class _PreparedJar {
     required this.needsNoVerify,
     required this.hasOwnProxy,
     this.isShell = false,
-    this.requiresGuard = false,
-    this.guardFallback = false,
+    this.requiresGuardRuntime = false,
+    this.usesEmbeddedNativeRuntime = false,
     this.useShellShim = false,
     this.isAowu = false,
     this.shellClasses,
   });
 
   String get runtimeKey =>
-      '$path|$isShell|$requiresGuard|$guardFallback|$useShellShim|'
+      '$path|$isShell|$requiresGuardRuntime|$usesEmbeddedNativeRuntime|'
+      '$useShellShim|'
       '$isAowu|${shellClasses ?? ''}';
 }
 
@@ -489,11 +624,15 @@ class _JarWinPreprocessor {
   static const _cacheVersion = 'v1';
 
   final Map<String, Future<_PreparedJar>> _pending = {};
+  final Map<String, Future<JarClassProfile>> _profiles = {};
 
   Future<_PreparedJar> prepare({
     required InstalledPlugin plugin,
     required String sourceJarPath,
     required String api,
+
+    /// 仅在普通模式失败后的 guard 重试中启用。
+    bool allowGuardExtraction = false,
   }) async {
     final source = File(sourceJarPath);
     if (!source.existsSync()) {
@@ -503,9 +642,9 @@ class _JarWinPreprocessor {
     final sourceArchive = await _decodeJar(source);
     final hasDex = _hasDex(sourceArchive);
     final sourceHasOwnProxy = _hasEntry(sourceArchive, _ownProxyEntry);
+    final hasEmbeddedNativeLibrary = _hasEmbeddedNativeLibrary(sourceArchive);
     final className = _classNameOf(api);
     final isAowu = _isAowuClass(className);
-    final hasShellAssets = _hasShellEntry(sourceArchive);
 
     if (!hasDex) {
       return _withShellMode(
@@ -513,9 +652,10 @@ class _JarWinPreprocessor {
         path: source.path,
         needsNoVerify: false,
         hasOwnProxy: sourceHasOwnProxy,
-        hasShellAssets: hasShellAssets,
+        hasEmbeddedNativeLibrary: hasEmbeddedNativeLibrary,
         isAowu: isAowu,
         className: className,
+        allowGuardExtraction: allowGuardExtraction,
       );
     }
 
@@ -529,18 +669,20 @@ class _JarWinPreprocessor {
     );
     final output = File(p.join(cacheDir.path, '$cacheKey.jar'));
     if (output.existsSync() && output.lengthSync() > 0) {
+      final cachedArchive = await _decodeJar(output);
       return _withShellMode(
         plugin: plugin,
         path: output.path,
         needsNoVerify: true,
-        hasOwnProxy: _hasEntry(await _decodeJar(output), _ownProxyEntry),
-        hasShellAssets: hasShellAssets,
+        hasOwnProxy: _hasEntry(cachedArchive, _ownProxyEntry),
+        hasEmbeddedNativeLibrary: _hasEmbeddedNativeLibrary(cachedArchive),
         isAowu: isAowu,
         className: className,
+        allowGuardExtraction: allowGuardExtraction,
       );
     }
 
-    final pendingKey = '$cacheKey|$className|$isAowu';
+    final pendingKey = '$cacheKey|$className|$isAowu|$allowGuardExtraction';
     final running = _pending[pendingKey];
     if (running != null) return running;
 
@@ -550,9 +692,10 @@ class _JarWinPreprocessor {
       sourceArchive: sourceArchive,
       output: output,
       sourceHasOwnProxy: sourceHasOwnProxy,
-      hasShellAssets: hasShellAssets,
+      hasEmbeddedNativeLibrary: hasEmbeddedNativeLibrary,
       isAowu: isAowu,
       className: className,
+      allowGuardExtraction: allowGuardExtraction,
     );
     _pending[pendingKey] = future;
     try {
@@ -567,48 +710,50 @@ class _JarWinPreprocessor {
     required String path,
     required bool needsNoVerify,
     required bool hasOwnProxy,
-    required bool hasShellAssets,
+    required bool hasEmbeddedNativeLibrary,
     required bool isAowu,
     required String className,
+    required bool allowGuardExtraction,
   }) async {
-    final preparedArchive = await _decodeJar(File(path));
-    final requiresGuard = _classRequiresGuard(preparedArchive, className);
-    final guardEnabled =
-        InstallManager.instance.findInstalled('jar-guard')?.enabled == true;
-    final useGuardRuntime = requiresGuard || (hasShellAssets && guardEnabled);
-    if (!useGuardRuntime) {
-      return _PreparedJar(
-        path: path,
-        needsNoVerify: needsNoVerify,
-        hasOwnProxy: hasOwnProxy,
-        guardFallback: hasShellAssets,
-      );
-    }
-
+    final profile = await _profileFor(File(path));
+    final requiresGuardRuntime =
+        profile.bootstrapUsesNative || profile.entryUsesNative(className);
     final payload = await _findRuntimePayload(className, path);
-    if (payload == null) {
+    if (payload != null) {
+      debugPrint('[jar-win] runtime payload found: $className');
+      final shim = await _payloadShim(payload, excludeAowuCrypto: isAowu);
       return _PreparedJar(
         path: path,
         needsNoVerify: needsNoVerify,
         hasOwnProxy: hasOwnProxy,
         isShell: true,
-        requiresGuard: requiresGuard,
-        guardFallback: hasShellAssets,
+        requiresGuardRuntime: requiresGuardRuntime,
+        usesEmbeddedNativeRuntime: hasEmbeddedNativeLibrary,
+        useShellShim: true,
         isAowu: isAowu,
+        shellClasses: await _shellSpecWithProxyBridge(shim.path, plugin),
       );
     }
 
-    final shim = await _payloadShim(payload, excludeAowuCrypto: isAowu);
+    if (!allowGuardExtraction) {
+      return _PreparedJar(
+        path: path,
+        needsNoVerify: needsNoVerify,
+        hasOwnProxy: hasOwnProxy,
+        requiresGuardRuntime: requiresGuardRuntime,
+        isShell: requiresGuardRuntime,
+        usesEmbeddedNativeRuntime: hasEmbeddedNativeLibrary,
+      );
+    }
+
     return _PreparedJar(
       path: path,
       needsNoVerify: needsNoVerify,
       hasOwnProxy: hasOwnProxy,
       isShell: true,
-      requiresGuard: requiresGuard,
-      guardFallback: hasShellAssets,
-      useShellShim: true,
+      requiresGuardRuntime: requiresGuardRuntime,
+      usesEmbeddedNativeRuntime: hasEmbeddedNativeLibrary,
       isAowu: isAowu,
-      shellClasses: await _shellSpecWithProxyBridge(shim.path, plugin),
     );
   }
 
@@ -621,39 +766,25 @@ class _JarWinPreprocessor {
     return value.isEmpty ? '' : 'com.github.catvod.spider.$value';
   }
 
+  Future<JarClassProfile> _profileFor(File file) {
+    final key =
+        '${file.path}|${file.lengthSync()}|'
+        '${file.lastModifiedSync().millisecondsSinceEpoch}';
+    return _profiles.putIfAbsent(key, () async {
+      try {
+        return JarClassProfile.fromArchive(await _decodeJar(file));
+      } catch (_) {
+        _profiles.remove(key);
+        rethrow;
+      } finally {
+        _profiles.removeWhere((cachedKey, _) => cachedKey != key);
+      }
+    });
+  }
+
   bool _isAowuClass(String className) {
     final simple = className.split('.').last.toLowerCase();
     return simple.endsWith('amns') || simple.contains('aowu');
-  }
-
-  bool _classRequiresGuard(Archive archive, String className) {
-    final simple = className.split('.').last;
-    if (simple.endsWith('Guard') ||
-        simple.endsWith('Amns') ||
-        (simple.endsWith('CAT') && simple.length > 'CAT'.length) ||
-        simple.contains('Aowu') ||
-        simple.contains('Shinidie') ||
-        simple.contains('DexNative')) {
-      return true;
-    }
-
-    final entryName = '${className.replaceAll('.', '/')}.class';
-    for (final file in archive.files) {
-      if (!file.isFile || file.name != entryName) continue;
-      final text = String.fromCharCodes(file.content);
-      return [
-        'DexNative',
-        'BaseSpiderGuard',
-        'BaseSpiderCAT',
-        'Shinidie',
-        'FishNative',
-        'MyCrypto',
-        'LoadNiMa',
-        'libDexNative',
-        'libfishcrypto',
-      ].any(text.contains);
-    }
-    return false;
   }
 
   List<String> _payloadClassEntries(String className) {
@@ -786,28 +917,15 @@ class _JarWinPreprocessor {
     return bridge.existsSync() ? '${bridge.path};$shellClasses' : shellClasses;
   }
 
-  bool _hasShellEntry(Archive archive) {
-    for (final file in archive.files) {
-      if (!file.isFile) continue;
-      final lower = file.name.toLowerCase();
-      if (lower.endsWith('.so') ||
-          lower.endsWith('.guard') ||
-          (lower.startsWith('assets/') && lower.endsWith('.bin'))) {
-        return true;
-      }
-      if (!lower.endsWith('.dex')) continue;
-      final text = String.fromCharCodes(file.content);
-      if (text.contains('DexNative') ||
-          text.contains('BaseSpiderGuard') ||
-          text.contains('Shinidie')) {
-        return true;
-      }
-    }
-    return false;
-  }
-
   String _nativeScopeName(String outerJar) {
     return sha256.convert(utf8.encode(outerJar)).toString();
+  }
+
+  Future<bool> hasRuntimePayload({
+    required String className,
+    required String outerJarPath,
+  }) async {
+    return await _findRuntimePayload(className, outerJarPath) != null;
   }
 
   Future<_PreparedJar> _prepareDexJar({
@@ -816,9 +934,10 @@ class _JarWinPreprocessor {
     required Archive sourceArchive,
     required File output,
     required bool sourceHasOwnProxy,
-    required bool hasShellAssets,
+    required bool hasEmbeddedNativeLibrary,
     required bool isAowu,
     required String className,
+    required bool allowGuardExtraction,
   }) async {
     final root = plugin.installPath;
     final javaExe = _JarWinHostClient._findJava(root);
@@ -872,9 +991,10 @@ class _JarWinPreprocessor {
         path: output.path,
         needsNoVerify: true,
         hasOwnProxy: hasOwnProxy,
-        hasShellAssets: hasShellAssets,
+        hasEmbeddedNativeLibrary: hasEmbeddedNativeLibrary,
         isAowu: isAowu,
         className: className,
+        allowGuardExtraction: allowGuardExtraction,
       );
     } on TimeoutException {
       throw const BusinessException('dex2jar 转换超时');
@@ -937,6 +1057,23 @@ class _JarWinPreprocessor {
     return archive.files.any(
       (file) => file.isFile && RegExp(r'classes\d*\.dex$').hasMatch(file.name),
     );
+  }
+
+  bool _hasEmbeddedNativeLibrary(Archive archive) {
+    for (final file in archive.files) {
+      if (!file.isFile || !file.name.toLowerCase().endsWith('.so')) {
+        continue;
+      }
+      final content = file.content;
+      if (content.length >= 4 &&
+          content[0] == 0x7f &&
+          content[1] == 0x45 &&
+          content[2] == 0x4c &&
+          content[3] == 0x46) {
+        return true;
+      }
+    }
+    return false;
   }
 
   bool _hasEntry(Archive archive, String name) {
@@ -1002,7 +1139,16 @@ class _JarWinHostPool {
     InstalledPlugin plugin,
     _PreparedJar jar,
   ) async {
-    final key = '${plugin.version}|${plugin.installPath}|${jar.runtimeKey}';
+    final guardPlugin = jar.isShell
+        ? InstallManager.instance.findInstalled('jar-guard')
+        : null;
+    final guardRuntimeKey = jar.isShell
+        ? '${guardPlugin?.version ?? ''}|${guardPlugin?.enabled ?? false}|'
+              '${guardPlugin?.installPath ?? ''}'
+        : 'normal';
+    final key =
+        '${plugin.version}|${plugin.installPath}|${jar.runtimeKey}|'
+        '$guardRuntimeKey';
     final existing = _clients[key];
     if (existing != null && existing.isAlive) return existing;
     final pending = _starting[key];
@@ -1127,7 +1273,8 @@ class _JarWinHostClient {
       ..addAll(_jarFilesIn(p.join(root, 'd2j')));
     final d2jClasspath = _jarFilesIn(p.join(root, 'd2j')).join(';');
     final jarGuard = InstallManager.instance.findInstalled('jar-guard');
-    if (jarGuard != null &&
+    if (jar.isShell &&
+        jarGuard != null &&
         jarGuard.enabled &&
         Directory(jarGuard.installPath).existsSync()) {
       classpathEntries
@@ -1356,4 +1503,8 @@ class _JarWinHostClient {
     }
     _onIdle?.call();
   }
+}
+
+class _GuardUnavailableException extends BusinessException {
+  const _GuardUnavailableException(super.message);
 }

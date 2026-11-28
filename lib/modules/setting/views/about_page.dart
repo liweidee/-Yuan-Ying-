@@ -304,6 +304,10 @@ class _AboutPageState extends State<AboutPage> {
             onTap: () => Update.checkUpdate(false),
             onLongPress: () => Utils.copyText(AppVersion.display),
             title: const Text('当前版本'),
+            subtitle: const Text(
+              '点击检查更新',
+              style: TextStyle(fontSize: 12),
+            ),
             leading: const Icon(Icons.commit_outlined),
             trailing: Text('v${AppVersion.display}', style: subTitleStyle),
           ),
@@ -312,12 +316,11 @@ class _AboutPageState extends State<AboutPage> {
           ListTile(
             title: Text(
               '版本号: ${AppVersion.name} '
-              '(build: ${AppVersion.code}'
-              '${AppVersion.ciRunNumber > 0 ? ', CI #${AppVersion.ciRunNumber}' : ''})',
+              '(build: ${AppVersion.code})',
               style: const TextStyle(fontSize: 14),
             ),
             leading: const Icon(Icons.info_outline),
-            onLongPress: () => Utils.copyText(AppVersion.detail),
+            onLongPress: () => Utils.copyText(AppVersion.display),
           ),
 
           Divider(

@@ -33,7 +33,7 @@ abstract final class Update {
     try {
       final release = await _findLatestRelease();
       if (release == null) {
-        if (!isAuto) SmartDialog.showToast('当前还没有可用的线上版本');
+        if (!isAuto) SmartDialog.showToast('已是最新版本');
         return;
       }
 
@@ -46,7 +46,7 @@ abstract final class Update {
         AppVersion.name,
         AppVersion.code,
       )) {
-        if (!isAuto) SmartDialog.showToast('已是最新版本 v${AppVersion.display}');
+        if (!isAuto) SmartDialog.showToast('已是最新版本');
         return;
       }
 

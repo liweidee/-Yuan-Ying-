@@ -20,6 +20,7 @@ import 'package:yuanying/modules/plugin_center/services/install_manager.dart';
 import 'package:yuanying/modules/plugin_center/services/live_source_manager.dart';
 import 'package:yuanying/modules/plugin_center/services/plugin_paths.dart';
 import 'package:yuanying/modules/plugin_center/services/resource_install_transaction.dart';
+import 'package:yuanying/modules/plugin_center/services/runtime_plugin_release.dart';
 import 'package:yuanying/modules/plugin_center/services/server_package_resolver.dart';
 import 'package:yuanying/modules/plugin_center/services/service_manager.dart';
 
@@ -215,6 +216,8 @@ class _ImportPackageDialogState extends State<_ImportPackageDialog> {
 
     final identity = ManualImportIdentity.fromJson(decoded);
     final linkedIdentity = _isUsableIdentity(identity) ? identity : null;
+    final linkedToMarket =
+        linkedIdentity != null && _hasMarketEntry(linkedIdentity.id, 'live');
     final existing = linkedIdentity == null
         ? null
         : InstallManager.instance.findInstalled(linkedIdentity.id);
@@ -264,10 +267,11 @@ class _ImportPackageDialogState extends State<_ImportPackageDialog> {
 
       if (linkedIdentity != null) {
         _refreshPluginCenter();
+        final associationText = linkedToMarket ? '已关联市场插件' : '市场未找到对应插件';
         SmartDialog.showToast(
           '直播配置导入成功：新增 ${result.added} 个，'
           '更新 ${result.updated} 个，移除 ${result.removed} 个，'
-          '已关联市场插件',
+          '关联状态：$associationText',
         );
       } else {
         SmartDialog.showToast(
@@ -358,11 +362,15 @@ class _ImportPackageDialogState extends State<_ImportPackageDialog> {
     String path,
   ) async {
     String? target;
+    String? description;
+    String? changelog;
     ManualImportIdentity? linkedIdentity;
     try {
       final content = await sourceJson.readAsString();
       final j = jsonDecode(content) as Map;
       target = j['target']?.toString();
+      description = (j['desc'] ?? j['description'])?.toString().trim();
+      changelog = j['changelog']?.toString().trim();
       final identity = ManualImportIdentity.fromJson(j);
       linkedIdentity = _isUsableIdentity(identity) ? identity : null;
     } catch (_) {}
@@ -385,6 +393,8 @@ class _ImportPackageDialogState extends State<_ImportPackageDialog> {
             pinned: false,
             installedAtMs: DateTime.now().millisecondsSinceEpoch,
             type: 'source',
+            desc: description?.isEmpty == true ? null : description,
+            changelog: changelog?.isEmpty == true ? null : changelog,
             extras: {
               if (target != null) 'sourceTarget': target,
             },
@@ -393,9 +403,13 @@ class _ImportPackageDialogState extends State<_ImportPackageDialog> {
       },
     );
 
+    final linkedToMarket =
+        linkedIdentity != null && _hasMarketEntry(linkedIdentity.id, 'source');
     if (linkedIdentity != null) {
       _refreshPluginCenter();
-      SmartDialog.showToast('源码包导入成功，已关联市场插件');
+      SmartDialog.showToast(
+        linkedToMarket ? '源码包导入成功，已关联市场插件' : '源码包导入成功（市场未找到对应插件）',
+      );
     } else {
       SmartDialog.showToast('源码包导入成功（未声明插件身份，未关联市场）');
     }
@@ -484,6 +498,9 @@ class _ImportPackageDialogState extends State<_ImportPackageDialog> {
 
     final id = j['name']?.toString() ?? p.basenameWithoutExtension(path);
     final version = j['version']?.toString() ?? '0.0.0';
+    final linkedToMarket = _hasMarketEntry(id, 'import');
+    final description = (j['desc'] ?? j['description'])?.toString().trim();
+    final changelog = j['changelog']?.toString().trim();
     PluginPaths.ensureSafePathSegment(id, '组件包 ID');
     PluginPaths.ensureSafePathSegment(version, '组件包版本');
     final binaries = j['binaries'];
@@ -566,6 +583,8 @@ class _ImportPackageDialogState extends State<_ImportPackageDialog> {
             pinned: false,
             installedAtMs: DateTime.now().millisecondsSinceEpoch,
             type: 'import',
+            desc: description?.isEmpty == true ? null : description,
+            changelog: changelog?.isEmpty == true ? null : changelog,
           ),
         );
         await swap.commit();
@@ -575,7 +594,9 @@ class _ImportPackageDialogState extends State<_ImportPackageDialog> {
       }
 
       _refreshPluginCenter();
-      SmartDialog.showToast('组件包导入成功');
+      SmartDialog.showToast(
+        linkedToMarket ? '组件包导入成功，已关联市场插件' : '组件包导入成功（市场未找到对应插件）',
+      );
       if (mounted) Navigator.pop(context);
     } finally {
       if (staging.existsSync()) {
@@ -649,13 +670,22 @@ class _ImportPackageDialogState extends State<_ImportPackageDialog> {
   }
 
   Future<void> _stopRuntimeServices(String runtimeId) async {
-    await InstallManager.instance.stopRuntimeConsumers(runtimeId);
+    await RuntimePluginRelease.prepareForReplacement(runtimeId);
   }
 
   bool _isUsableIdentity(ManualImportIdentity? identity) {
     return identity != null &&
         PluginPaths.isSafePathSegment(identity.id) &&
         PluginPaths.isSafePathSegment(identity.version);
+  }
+
+  bool _hasMarketEntry(String id, String type) {
+    if (!Get.isRegistered<PluginCenterController>()) return false;
+    final controller = Get.find<PluginCenterController>();
+    for (final entry in controller.marketEntries) {
+      if (entry.id == id && entry.type == type) return true;
+    }
+    return false;
   }
 
   void _refreshPluginCenter() {

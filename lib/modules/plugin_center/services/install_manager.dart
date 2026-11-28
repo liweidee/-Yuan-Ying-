@@ -365,12 +365,14 @@ class InstallManager {
       bool changed = false;
       for (int i = 0; i < list.length; i++) {
         final plugin = list[i];
+        final hasDescription = plugin.desc?.trim().isNotEmpty == true;
+        final hasChangelog = plugin.changelog?.trim().isNotEmpty == true;
         final iconIsAbsolute =
             plugin.icon?.startsWith('http://') == true ||
             plugin.icon?.startsWith('https://') == true;
-        if (plugin.desc != null &&
-            plugin.changelog != null &&
-            plugin.icon != null &&
+        if (hasDescription &&
+            hasChangelog &&
+            (plugin.icon?.trim().isNotEmpty ?? false) &&
             iconIsAbsolute) {
           continue;
         }
@@ -383,8 +385,10 @@ class InstallManager {
         }
         if (matched == null) continue;
         final resolvedIcon = _resolvedIcon(matched);
-        final nextDesc = plugin.desc ?? matched.desc;
-        final nextChangelog = plugin.changelog ?? matched.changelog;
+        final nextDesc = hasDescription ? plugin.desc : matched.desc;
+        final nextChangelog = hasChangelog
+            ? plugin.changelog
+            : matched.changelog;
         final nextIcon = iconIsAbsolute
             ? plugin.icon
             : resolvedIcon ?? plugin.icon;
@@ -973,6 +977,7 @@ class InstallManager {
           staging: apkStage,
           finalDir: finalDir,
           tag: 'apk-${entry.id}',
+          beginCommit: token.beginCommit,
           writeRegistry: () => register(
             InstalledPlugin(
               id: entry.id,
@@ -1032,6 +1037,7 @@ class InstallManager {
         staging: tmpDir,
         finalDir: finalDir,
         tag: 'zip-${entry.id}',
+        beginCommit: token.beginCommit,
         writeRegistry: () => register(installed),
         onRegistering: () => emit(InstallStage.registering),
         isCancelled: () => token.isCancelled,
@@ -1291,6 +1297,7 @@ class InstallManager {
         staging: staging,
         finalDir: targetDir.path,
         tag: 'apk-import-${entry.id}',
+        beginCommit: () => cancelToken?.beginCommit() ?? true,
         isCancelled: () => cancelToken?.isCancelled ?? false,
         writeRegistry: () => register(
           InstalledPlugin(
@@ -1579,6 +1586,7 @@ class InstallManager {
         staging: staging,
         finalDir: finalDir,
         tag: 'format2-${entry.id}',
+        beginCommit: cancelToken.beginCommit,
         onRegistering: onRegistering,
         isCancelled: () => cancelToken.isCancelled,
         writeRegistry: () => register(
@@ -2092,6 +2100,9 @@ class InstallManager {
       );
       try {
         _throwIfCancelled(token);
+        if (!token.beginCommit()) {
+          throw _CancelledException();
+        }
         final cwd = plan.workDir.isEmpty
             ? packageRoot.path
             : p.join(packageRoot.path, plan.workDir);
@@ -2182,6 +2193,7 @@ class InstallManager {
     required String tag,
     required Future<void> Function() writeRegistry,
     required bool Function() isCancelled,
+    required bool Function() beginCommit,
     void Function()? onRegistering,
   }) async {
     if (isCancelled()) throw _CancelledException();
@@ -2193,6 +2205,7 @@ class InstallManager {
     );
     try {
       if (isCancelled()) throw _CancelledException();
+      if (!beginCommit()) throw _CancelledException();
       onRegistering?.call();
       await writeRegistry();
       await swap.commit();

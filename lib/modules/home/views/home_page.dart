@@ -629,7 +629,10 @@ class _HomePageState extends CommonPageState<HomePage>
 
   Widget _buildTopBarContent(ThemeData theme) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: Style.safeSpace),
+      padding: const EdgeInsets.only(
+        left: Style.safeSpace,
+        right: 0,
+      ),
       child: Row(
         children: [
           Expanded(child: _buildSourceInfo(theme)),

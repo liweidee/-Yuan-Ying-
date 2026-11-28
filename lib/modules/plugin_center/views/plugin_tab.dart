@@ -634,8 +634,18 @@ class _InstalledPluginCardState extends State<_InstalledPluginCard> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    final description = plugin.desc?.trim() ?? '';
+    final marketEntry = _matchingMarketEntry;
+    final marketDescription = marketEntry?.desc?.trim() ?? '';
+    final localDescription = plugin.desc?.trim() ?? '';
+    final description = marketDescription.isNotEmpty
+        ? marketDescription
+        : localDescription;
     final hasDescription = description.isNotEmpty;
+    final marketIcon = marketEntry?.icon?.trim() ?? '';
+    final displayIcon = marketIcon.isNotEmpty ? marketIcon : plugin.icon;
+    final displayIndexBaseUrl = marketEntry?.indexBaseUrl.isNotEmpty == true
+        ? marketEntry!.indexBaseUrl
+        : controller.getCurrentIndexBaseUrl();
 
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
@@ -674,8 +684,8 @@ class _InstalledPluginCardState extends State<_InstalledPluginCard> {
                 children: [
                   PluginIcon(
                     id: plugin.id,
-                    icon: plugin.icon,
-                    indexBaseUrl: controller.getCurrentIndexBaseUrl(),
+                    icon: displayIcon,
+                    indexBaseUrl: displayIndexBaseUrl,
                     size: 48,
                   ),
                   const SizedBox(width: 12),
@@ -694,7 +704,8 @@ class _InstalledPluginCardState extends State<_InstalledPluginCard> {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          '${plugin.id} · v${plugin.version} · ${plugin.source}',
+                          '${plugin.id} · v${plugin.version} · '
+                          '${_displaySource(marketEntry)}',
                           style: TextStyle(
                             fontSize: 12,
                             color: colorScheme.outline,
@@ -926,6 +937,29 @@ class _InstalledPluginCardState extends State<_InstalledPluginCard> {
       await ServiceManager.instance.stop(s.id);
     }
     await controller.toggleEnabled(plugin.id, false);
+  }
+
+  MarketEntry? get _matchingMarketEntry {
+    for (final entry in controller.marketEntries) {
+      if (entry.id == plugin.id) return entry;
+    }
+    return null;
+  }
+
+  String _displaySource(MarketEntry? marketEntry) {
+    if (marketEntry != null) {
+      final marketName = marketEntry.marketName.trim();
+      return marketName.isEmpty ? '市场' : marketName;
+    }
+
+    final source = plugin.source.trim();
+    if (source.isEmpty ||
+        source == '未知' ||
+        source == '未知来源' ||
+        source == 'unknown') {
+      return '未知来源';
+    }
+    return source;
   }
 
   Widget _buildActions(BuildContext context) {

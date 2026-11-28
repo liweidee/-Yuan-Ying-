@@ -28,12 +28,6 @@ abstract final class AppVersion {
     return nativeCode ?? BuildConfig.versionCode;
   }
 
-  static int get ciRunNumber => BuildConfig.runNumber;
-
   /// 例如 `2.0.8+43`。
   static String get display => '$name+$code';
-
-  /// 例如 `2.0.8+43 · CI #42`。
-  static String get detail =>
-      ciRunNumber > 0 ? '$display · CI #$ciRunNumber' : display;
 }
