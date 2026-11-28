@@ -16,8 +16,6 @@ import 'package:yuanying/services/magnet/magnet_models.dart';
 
 typedef _DmAbiVersionNative = Int32 Function();
 typedef _DmAbiVersionDart = int Function();
-typedef _DmVersionNative = Pointer<Utf8> Function();
-typedef _DmVersionDart = Pointer<Utf8> Function();
 typedef _DmInitNative = Int32 Function(Pointer<Utf8>, Pointer<Utf8>);
 typedef _DmInitDart = int Function(Pointer<Utf8>, Pointer<Utf8>);
 typedef _DmParseNative = Int64 Function(Pointer<Utf8>);
@@ -59,7 +57,6 @@ class MagnetPluginService {
 
   final currentStatus = Rxn<MagnetPlaybackStatus>();
   final _lock = Lock();
-  final Map<int, String> _parseTaskOwners = {};
 
   DynamicLibrary? _library;
   bool _initialized = false;
@@ -70,7 +67,6 @@ class MagnetPluginService {
   bool _pollingStatus = false;
 
   _DmAbiVersionDart? _dmAbiVersion;
-  _DmVersionDart? _dmVersion;
   _DmInitDart? _dmInit;
   _DmParseDart? _dmParse;
   _DmPollDart? _dmPoll;
@@ -155,13 +151,12 @@ class MagnetPluginService {
       if (_dmAbiVersion!() != _abiVersion) {
         throw const MagnetPluginException('磁力播放插件 ABI 不兼容');
       }
-      final nativeVersion = _readNativeVersion();
 
       final cachePtr = cacheDir.path.toNativeUtf8();
       final optionsPtr = jsonEncode(magnetInitOptions).toNativeUtf8();
       try {
         final ok = _dmInit!(cachePtr, optionsPtr);
-        if (ok != 1) {
+        if (ok == 0) {
           throw const MagnetPluginException('磁力播放插件初始化失败');
         }
       } finally {
@@ -173,7 +168,7 @@ class MagnetPluginService {
       _loadedPluginVersion = availability.pluginVersion;
       debugPrint(
         '[Magnet] initialized abi=${Abi.current()} '
-        'abiVersion=$_abiVersion native=${nativeVersion ?? '-'} '
+        'abiVersion=$_abiVersion '
         'manifest=${availability.pluginVersion ?? '-'} '
         'cache=${cacheDir.path}',
       );
@@ -192,7 +187,7 @@ class MagnetPluginService {
     final magnetPtr = magnet.toNativeUtf8();
     final int parseTaskId;
     try {
-      parseTaskId = await _lock.synchronized(() => _dmParse!(magnetPtr));
+      parseTaskId = _dmParse!(magnetPtr);
     } finally {
       malloc.free(magnetPtr);
     }
@@ -202,51 +197,52 @@ class MagnetPluginService {
     debugPrint(
       '[Magnet] parse task=$parseTaskId timeout=${timeout.inSeconds}s',
     );
-    _parseTaskOwners[parseTaskId] = ownerTag;
+    debugPrint(
+      '[Magnet] parse input '
+      'infohash=${MagnetUri.infoHashFromMagnet(magnet) ?? '-'}',
+    );
     final deadline = DateTime.now().add(timeout);
     MagnetTaskSnapshot? lastSnapshot;
     var lastLoggedState = '';
-    try {
-      while (DateTime.now().isBefore(deadline)) {
-        final snapshot = await _poll(parseTaskId);
-        lastSnapshot = snapshot;
-        if (snapshot.state != lastLoggedState) {
-          lastLoggedState = snapshot.state;
-          debugPrint(
-            '[Magnet] parse state=${snapshot.state} '
-            'error=${snapshot.error.isEmpty ? '-' : snapshot.error}',
-          );
-        }
-        if (snapshot.isError) {
-          throw MagnetPluginException(
-            snapshot.error.isEmpty ? '磁力元数据解析失败' : snapshot.error,
-          );
-        }
-        final infoHash = snapshot.infoHash;
-        if (snapshot.isReady && infoHash != null && infoHash.isNotEmpty) {
-          return MagnetExpansion(
-            originalMagnet: magnet,
-            infoHash: infoHash,
-            files: snapshot.files,
-          );
-        }
-        await Future<void>.delayed(const Duration(milliseconds: 400));
+    while (DateTime.now().isBefore(deadline)) {
+      final snapshot = _poll(parseTaskId);
+      lastSnapshot = snapshot;
+      if (snapshot.state != lastLoggedState) {
+        lastLoggedState = snapshot.state;
+        debugPrint(
+          '[Magnet] parse state=${snapshot.state} '
+          'error=${snapshot.error.isEmpty ? '-' : snapshot.error}',
+        );
       }
-      debugPrint(
-        '[Magnet] metadata timeout infohash='
-        '${MagnetUri.infoHashFromMagnet(magnet) ?? '-'} '
-        'state=${lastSnapshot?.state ?? 'unknown'}',
-      );
-      throw MagnetPluginException(
-        '磁力元数据解析超时（${timeout.inSeconds} 秒内未获取到种子信息）。'
-        '请检查种子是否有可用节点、网络是否允许 BT/DHT，或尝试关闭代理后重试',
-      );
-    } finally {
-      _parseTaskOwners.remove(parseTaskId);
-      await _lock.synchronized(() {
-        _safeDispose(parseTaskId);
-      });
+      if (snapshot.isError) {
+        throw MagnetPluginException(
+          snapshot.error.isEmpty ? '磁力任务失败' : snapshot.error,
+        );
+      }
+      final infoHash = snapshot.infoHash;
+      if (snapshot.state == 'ready' &&
+          infoHash != null &&
+          infoHash.isNotEmpty) {
+        return MagnetExpansion(
+          originalMagnet: magnet,
+          infoHash: infoHash,
+          files: snapshot.files,
+        );
+      }
     }
+    debugPrint(
+      '[Magnet] metadata timeout infohash='
+      '${MagnetUri.infoHashFromMagnet(magnet) ?? '-'} '
+      'state=${lastSnapshot?.state ?? 'unknown'} '
+      'peers=${lastSnapshot?.peers ?? 0} '
+      'seeders=${lastSnapshot?.seeders ?? 0} '
+      'files=${lastSnapshot?.files.length ?? 0}',
+    );
+    throw MagnetPluginException(
+      '磁力元数据解析超时（${timeout.inSeconds} 秒内未获取到种子信息）。'
+      '最后状态 ${lastSnapshot?.state ?? 'unknown'}，'
+      '节点 ${lastSnapshot?.peers ?? 0}',
+    );
   }
 
   Future<MagnetPlaybackResult> resolveToStream({
@@ -288,9 +284,7 @@ class MagnetPluginService {
     final hashPtr = infoHash.toNativeUtf8();
     final int playTaskId;
     try {
-      playTaskId = await _lock.synchronized(
-        () => _dmStart!(hashPtr, file.index),
-      );
+      playTaskId = _dmStart!(hashPtr, file.index);
     } finally {
       malloc.free(hashPtr);
     }
@@ -312,13 +306,13 @@ class MagnetPluginService {
     final deadline = DateTime.now().add(startTimeout);
     try {
       while (DateTime.now().isBefore(deadline)) {
-        final snapshot = await _stats(playTaskId);
+        final snapshot = _poll(playTaskId);
         if (snapshot.isError) {
           throw MagnetPluginException(
             snapshot.error.isEmpty ? '磁力起播失败' : snapshot.error,
           );
         }
-        if (snapshot.hasUrl) {
+        if (snapshot.state == 'streaming' && snapshot.hasUrl) {
           _updateFromSnapshot(session, snapshot);
           _startStatusTimer();
           unawaited(
@@ -331,7 +325,6 @@ class MagnetPluginService {
             session: session,
           );
         }
-        await Future<void>.delayed(const Duration(milliseconds: 500));
       }
       throw const MagnetPluginException('磁力起播超时，请检查节点或网络');
     } catch (_) {
@@ -350,14 +343,12 @@ class MagnetPluginService {
     _statusTimer = null;
     final shouldDelete =
         deleteMedia ?? MagnetCacheManager.instance.deleteMediaOnStop;
-    await _lock.synchronized(() {
-      try {
-        _dmStop!(session.playTaskId, shouldDelete ? 1 : 0);
-      } catch (_) {}
-      try {
-        _dmDispose!(session.playTaskId);
-      } catch (_) {}
-    });
+    try {
+      _dmStop!(session.playTaskId, shouldDelete ? 1 : 0);
+    } catch (_) {}
+    try {
+      _dmDispose!(session.playTaskId);
+    } catch (_) {}
     if (identical(_currentSession, session)) {
       _currentSession = null;
       currentStatus.value = null;
@@ -384,18 +375,6 @@ class MagnetPluginService {
     if (session?.ownerTag == ownerTag) {
       await stopCurrent(deleteMedia: deleteMedia);
     }
-    final parseIds = _parseTaskOwners.entries
-        .where((entry) => entry.value == ownerTag)
-        .map((entry) => entry.key)
-        .toList();
-    if (parseIds.isNotEmpty) {
-      _parseTaskOwners.removeWhere((key, value) => value == ownerTag);
-      await _lock.synchronized(() {
-        for (final id in parseIds) {
-          _safeDispose(id);
-        }
-      });
-    }
   }
 
   Future<void> shutdownForPluginDisabled() async {
@@ -406,15 +385,6 @@ class MagnetPluginService {
 
   Future<void> disposeAll({required bool? deleteMedia}) async {
     await stopCurrent(deleteMedia: deleteMedia);
-    final ids = _parseTaskOwners.keys.toList();
-    _parseTaskOwners.clear();
-    if (ids.isNotEmpty) {
-      await _lock.synchronized(() {
-        for (final id in ids) {
-          _safeDispose(id);
-        }
-      });
-    }
     currentStatus.value = null;
   }
 
@@ -425,9 +395,6 @@ class MagnetPluginService {
         .lookupFunction<_DmAbiVersionNative, _DmAbiVersionDart>(
           'dm_abi_version',
         );
-    _dmVersion = _library!.lookupFunction<_DmVersionNative, _DmVersionDart>(
-      'dm_version',
-    );
     _dmInit = _library!.lookupFunction<_DmInitNative, _DmInitDart>(
       'dm_init',
     );
@@ -454,27 +421,18 @@ class MagnetPluginService {
     );
   }
 
-  String? _readNativeVersion() {
-    final ptr = _dmVersion!();
-    if (ptr == nullptr) return null;
-    return _takeString(ptr);
+  MagnetTaskSnapshot _poll(int taskId) {
+    final ptr = _dmPoll!(taskId);
+    return _decodeSnapshot(_takeString(ptr));
   }
 
-  Future<MagnetTaskSnapshot> _poll(int taskId) {
-    return _lock.synchronized(() {
-      final ptr = _dmPoll!(taskId);
-      return _decodeSnapshot(_takeString(ptr));
-    });
-  }
-
-  Future<MagnetTaskSnapshot> _stats(int taskId) {
-    return _lock.synchronized(() {
-      final ptr = _dmStats!(taskId);
-      return _decodeSnapshot(_takeString(ptr));
-    });
+  MagnetTaskSnapshot _stats(int taskId) {
+    final ptr = _dmStats!(taskId);
+    return _decodeSnapshot(_takeString(ptr));
   }
 
   MagnetTaskSnapshot _decodeSnapshot(String value) {
+    if (value.isEmpty) return MagnetTaskSnapshot.empty;
     try {
       final decoded = jsonDecode(value);
       if (decoded is Map) {
@@ -485,20 +443,12 @@ class MagnetPluginService {
   }
 
   String _takeString(Pointer<Utf8> ptr) {
-    if (ptr == nullptr) {
-      throw const MagnetPluginException('磁力插件返回空结果');
-    }
+    if (ptr == nullptr) return '';
     try {
       return ptr.toDartString();
     } finally {
       _dmFree!(ptr);
     }
-  }
-
-  void _safeDispose(int taskId) {
-    try {
-      _dmDispose!(taskId);
-    } catch (_) {}
   }
 
   void _startStatusTimer() {
@@ -513,7 +463,7 @@ class MagnetPluginService {
     if (session == null || _pollingStatus) return;
     _pollingStatus = true;
     try {
-      final snapshot = await _stats(session.playTaskId);
+      final snapshot = _stats(session.playTaskId);
       if (!identical(_currentSession, session)) return;
       _updateFromSnapshot(session, snapshot);
       if (snapshot.isError) {

@@ -91,6 +91,21 @@ class MagnetFileInfo {
 }
 
 class MagnetTaskSnapshot {
+  static const empty = MagnetTaskSnapshot(
+    state: '',
+    error: '',
+    infoHash: null,
+    url: null,
+    files: <MagnetFileInfo>[],
+    progress: 0,
+    completed: 0,
+    total: 0,
+    downRate: 0,
+    upRate: 0,
+    peers: 0,
+    seeders: 0,
+  );
+
   final String state;
   final String error;
   final String? infoHash;
