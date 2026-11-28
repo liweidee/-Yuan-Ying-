@@ -85,6 +85,10 @@ $displayVersion = "$AppVersion+$BuildNumber"
 $numericVersion = "$AppVersion.$BuildNumber"
 $outputBaseName = "yuanying-windows-x64-v$displayVersion-r$RunNumber"
 $setupIcon = Resolve-RepoPath "windows\runner\resources\app_icon.ico"
+$languageFile = Join-Path $PSScriptRoot "ChineseSimplified.isl"
+if (-not (Test-Path -LiteralPath $languageFile -PathType Leaf)) {
+    throw "缺少 Inno Setup 简体中文语言文件: $languageFile"
+}
 
 $content = Get-Content -LiteralPath $templatePath -Raw
 $content = $content.Replace("AppId={{APP_ID}}", "AppId={{$appId}")
@@ -99,6 +103,10 @@ $content = $content.Replace("{{SETUP_ICON_FILE}}", $setupIcon)
 $content = $content.Replace("{{PRIVILEGES_REQUIRED}}", $privileges)
 $content = $content.Replace("{{SOURCE_DIR}}", $sourcePath)
 $content = $content.Replace("{{EXECUTABLE_NAME}}", "yuanying.exe")
+$content = $content.Replace(
+    "compiler:Languages\ChineseSimplified.isl",
+    $languageFile
+)
 $content = [Regex]::Replace(
     $content,
     "(?m)^OutputDir=.*$",
