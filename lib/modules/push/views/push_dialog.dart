@@ -474,37 +474,50 @@ class _PushDialogState extends State<PushDialog> {
   }
 
   Future<void> _playMagnet(String input) async {
+    if (_isLoading.value) return;
     if (!MagnetUri.isMagnet(input)) {
       SmartDialog.showToast('请输入 magnet: 开头的磁力链接');
       return;
     }
-    final availability = MagnetPluginGate.check();
-    debugPrint(
-      '[Magnet] push plugin=${availability.state.name} '
-      'version=${availability.pluginVersion ?? '-'}',
-    );
-    if (availability.state == MagnetPluginState.unsupportedPlatform) {
-      SmartDialog.showToast(
-        '本机磁力播放仅支持 Android，非 Android 端请使用“网盘”离线转存',
+    _isLoading.value = true;
+    try {
+      final availability = MagnetPluginGate.check();
+      debugPrint(
+        '[Magnet] push plugin=${availability.state.name} '
+        'version=${availability.pluginVersion ?? '-'}',
       );
-      return;
-    }
-    if (!await MagnetPluginGate.ensureReady()) return;
+      if (availability.state == MagnetPluginState.unsupportedPlatform) {
+        SmartDialog.showToast(
+          '本机磁力播放仅支持 Android，非 Android 端请使用“网盘”离线转存',
+        );
+        return;
+      }
+      if (!await MagnetPluginGate.ensureReady()) return;
 
-    final tag = 'push_${DateTime.now().millisecondsSinceEpoch}';
-    final title = MagnetUri.displayNameFromMagnet(input) ?? '磁力播放';
-    Get.toNamed(
-      AppPages.detail,
-      arguments: {
-        'isMagnetMode': true,
-        'magnetUrl': input,
-        'magnetAutoPlay': true,
-        'directTitle': title,
-        'sourceName': '磁力',
-        '_controllerTag': tag,
-      },
-      preventDuplicates: false,
-    );
+      final navigator = Navigator.of(context);
+      if (navigator.canPop()) {
+        navigator.pop();
+        // Let the modal-bottom-sheet route finish before pushing Detail.
+        await Future<void>.delayed(const Duration(milliseconds: 250));
+      }
+
+      final tag = 'push_${DateTime.now().millisecondsSinceEpoch}';
+      final title = MagnetUri.displayNameFromMagnet(input) ?? '磁力播放';
+      await Get.toNamed(
+        AppPages.detail,
+        arguments: {
+          'isMagnetMode': true,
+          'magnetUrl': input,
+          'magnetAutoPlay': true,
+          'directTitle': title,
+          'sourceName': '磁力',
+          '_controllerTag': tag,
+        },
+        preventDuplicates: false,
+      );
+    } finally {
+      if (mounted) _isLoading.value = false;
+    }
   }
 
   // ===== 直链播放 =====
