@@ -204,16 +204,21 @@ class _EpisodePanelDialogState extends State<EpisodePanelDialog>
           if (isMulti)
             Container(
               height: 44,
-              child: TabBar(
-                controller: _sourceTabController,
-                tabAlignment: TabAlignment.start, 
-                padding: EdgeInsets.zero,
-                isScrollable: true,
-                labelStyle: const TextStyle(fontSize: 12),
-                unselectedLabelStyle: const TextStyle(fontSize: 12),
-                tabs: sourceNames.map((name) => Tab(text: name)).toList(),
-                dividerHeight: 1,
-                dividerColor: theme.dividerColor.withValues(alpha: 0.1),
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: TabBar(
+                  controller: _sourceTabController,
+                  tabAlignment: TabAlignment.start,
+                  padding: EdgeInsets.zero,
+                  labelPadding: const EdgeInsets.only(right: 24),
+                  isScrollable: true,
+                  labelStyle: const TextStyle(fontSize: 12),
+                  unselectedLabelStyle: const TextStyle(fontSize: 12),
+                  tabs: sourceNames.map((name) => Tab(text: name)).toList(),
+                  dividerHeight: 1,
+                  dividerColor: theme.dividerColor.withValues(alpha: 0.1),
+                ),
               ),
             ),
           Obx(() {
@@ -246,37 +251,54 @@ class _EpisodePanelDialogState extends State<EpisodePanelDialog>
                   children: [
                     Container(
                       height: 34,
-                      child: TabBar(
-                        tabAlignment: TabAlignment.start,
-                        isScrollable: true,
-                        padding: EdgeInsets.zero,
-                        labelPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
-                        labelStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
-                        unselectedLabelStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.normal),
-                        labelColor: colorScheme.primary,
-                        unselectedLabelColor: colorScheme.onSurfaceVariant,
-                        indicatorSize: TabBarIndicatorSize.label,
-                        indicatorWeight: 1.5,
-                        dividerColor: Colors.transparent,
-                        dividerHeight: 0,
-                        tabs: List.generate(groupCount, (index) {
-                          final start = index * 50 + 1;
-                          final end = (start + 49).clamp(0, total);
-                          return Tab(text: '$start-$end');
-                        }),
-                        onTap: (index) {
-                          _itemScrollControllers[tabIndex].animateTo(
-                            0,
-                            duration: const Duration(milliseconds: 200),
-                            curve: Curves.easeInOut,
-                          );
-                        },
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: TabBar(
+                          tabAlignment: TabAlignment.start,
+                          isScrollable: true,
+                          padding: EdgeInsets.zero,
+                          labelPadding: const EdgeInsets.only(
+                            right: 20,
+                            top: 2,
+                            bottom: 2,
+                          ),
+                          labelStyle: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          unselectedLabelStyle: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.normal,
+                          ),
+                          labelColor: colorScheme.primary,
+                          unselectedLabelColor: colorScheme.onSurfaceVariant,
+                          indicatorSize: TabBarIndicatorSize.label,
+                          indicatorWeight: 1.5,
+                          dividerColor: Colors.transparent,
+                          dividerHeight: 0,
+                          tabs: List.generate(groupCount, (index) {
+                            final start = index * 50 + 1;
+                            final end = (start + 49).clamp(0, total);
+                            return Tab(text: '$start-$end');
+                          }),
+                          onTap: (index) {
+                            _itemScrollControllers[tabIndex].animateTo(
+                              0,
+                              duration: const Duration(milliseconds: 200),
+                              curve: Curves.easeInOut,
+                            );
+                          },
+                        ),
                       ),
                     ),
                     Expanded(
                       child: TabBarView(
                         children: List.generate(groupCount, (groupIdx) {
-                          final groupEpisodes = _getGroupedEpisodes(tabIndex, groupIdx);
+                          final groupEpisodes = _getGroupedEpisodes(
+                            tabIndex,
+                            groupIdx,
+                          );
                           return _buildEpisodeGrid(
                             episodes: groupEpisodes,
                             allEpisodes: allEpisodes,
@@ -539,7 +561,9 @@ class _EpisodePanelDialogState extends State<EpisodePanelDialog>
                 style: TextStyle(
                   fontSize: fontSize,
                   color: isCurrentIndex ? primary : colorScheme.onSurface,
-                  fontWeight: isCurrentIndex ? FontWeight.w600 : FontWeight.normal,
+                  fontWeight: isCurrentIndex
+                      ? FontWeight.w600
+                      : FontWeight.normal,
                   height: lineHeight,
                 ),
               ),
