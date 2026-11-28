@@ -204,6 +204,10 @@ class MagnetPluginService {
     final deadline = DateTime.now().add(timeout);
     MagnetTaskSnapshot? lastSnapshot;
     var lastLoggedState = '';
+    // Never busy-poll native task state on Flutter's UI isolate. Yielding here
+    // lets dialogs paint and prevents the polling loop from starving the native
+    // network goroutines and the rest of the application.
+    await _yieldBeforePolling();
     while (DateTime.now().isBefore(deadline)) {
       final snapshot = _poll(parseTaskId);
       lastSnapshot = snapshot;
@@ -229,6 +233,7 @@ class MagnetPluginService {
           files: snapshot.files,
         );
       }
+      await _yieldBeforePolling();
     }
     debugPrint(
       '[Magnet] metadata timeout infohash='
@@ -305,6 +310,7 @@ class MagnetPluginService {
 
     final deadline = DateTime.now().add(startTimeout);
     try {
+      await _yieldBeforePolling();
       while (DateTime.now().isBefore(deadline)) {
         final snapshot = _poll(playTaskId);
         if (snapshot.isError) {
@@ -325,6 +331,7 @@ class MagnetPluginService {
             session: session,
           );
         }
+        await _yieldBeforePolling();
       }
       throw const MagnetPluginException('磁力起播超时，请检查节点或网络');
     } catch (_) {
@@ -424,6 +431,10 @@ class MagnetPluginService {
   MagnetTaskSnapshot _poll(int taskId) {
     final ptr = _dmPoll!(taskId);
     return _decodeSnapshot(_takeString(ptr));
+  }
+
+  Future<void> _yieldBeforePolling() {
+    return Future<void>.delayed(const Duration(milliseconds: 100));
   }
 
   MagnetTaskSnapshot _stats(int taskId) {

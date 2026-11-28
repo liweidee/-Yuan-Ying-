@@ -1445,6 +1445,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
         ),
       ),
     );
+    await WidgetsBinding.instance.endOfFrame;
 
     try {
       final expansion = await MagnetPluginService.instance.expandMagnet(
@@ -2438,6 +2439,7 @@ class DetailController extends GetxController with GetTickerProviderStateMixin {
         ),
       ),
     );
+    await WidgetsBinding.instance.endOfFrame;
     try {
       final result = await MagnetPluginService.instance.resolveToStream(
         source: source,
