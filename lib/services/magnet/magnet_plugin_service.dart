@@ -230,7 +230,7 @@ class MagnetPluginService {
           infoHash != null &&
           infoHash.isNotEmpty) {
         return MagnetExpansion(
-          originalMagnet: magnet,
+          originalMagnet: nativeMagnet,
           infoHash: infoHash,
           files: snapshot.files,
         );
@@ -298,6 +298,10 @@ class MagnetPluginService {
     if (playTaskId <= 0) {
       throw const MagnetPluginException('磁力播放任务启动失败');
     }
+    debugPrint(
+      '[Magnet] start handle=$playTaskId infohash=$infoHash '
+      'fileIndex=${file.index}',
+    );
 
     final session = MagnetPlaybackSession(
       ownerTag: ownerTag,
@@ -313,8 +317,19 @@ class MagnetPluginService {
     final deadline = DateTime.now().add(startTimeout);
     try {
       await _yieldBeforePolling();
+      var lastStartState = '';
       while (DateTime.now().isBefore(deadline)) {
         final snapshot = _poll(playTaskId);
+        if (snapshot.state != lastStartState) {
+          lastStartState = snapshot.state;
+          debugPrint(
+            '[Magnet] start state=${snapshot.state} '
+            'error=${snapshot.error.isEmpty ? '-' : snapshot.error} '
+            'peers=${snapshot.peers} '
+            'seeders=${snapshot.seeders} '
+            'downRate=${snapshot.downRate}',
+          );
+        }
         if (snapshot.isError) {
           throw MagnetPluginException(
             snapshot.error.isEmpty ? '磁力起播失败' : snapshot.error,

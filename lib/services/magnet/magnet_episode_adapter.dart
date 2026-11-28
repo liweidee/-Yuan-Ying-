@@ -46,7 +46,7 @@ abstract final class MagnetEpisodeAdapter {
           final fileEpisodes = expansion.files
               .map(
                 (file) => episodeFromFile(
-                  originalMagnet: episode.url,
+                  originalMagnet: expansion.originalMagnet,
                   infoHash: expansion.infoHash,
                   file: file,
                 ),
@@ -96,7 +96,7 @@ abstract final class MagnetEpisodeAdapter {
     final episodes = videos
         .map(
           (file) => episodeFromFile(
-            originalMagnet: magnet,
+            originalMagnet: expansion.originalMagnet,
             infoHash: expansion.infoHash,
             file: file,
           ),
