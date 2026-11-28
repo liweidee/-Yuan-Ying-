@@ -184,7 +184,8 @@ class MagnetPluginService {
       throw const MagnetPluginException('仅支持 magnet: 链接');
     }
     await ensureInitialized();
-    final magnetPtr = magnet.toNativeUtf8();
+    final nativeMagnet = MagnetUri.ensureFallbackTracker(magnet);
+    final magnetPtr = nativeMagnet.toNativeUtf8();
     final int parseTaskId;
     try {
       parseTaskId = _dmParse!(magnetPtr);
@@ -199,7 +200,8 @@ class MagnetPluginService {
     );
     debugPrint(
       '[Magnet] parse input '
-      'infohash=${MagnetUri.infoHashFromMagnet(magnet) ?? '-'}',
+      'infohash=${MagnetUri.infoHashFromMagnet(nativeMagnet) ?? '-'} '
+      'trackers=${RegExp(r'[?&]tr=', caseSensitive: false).allMatches(nativeMagnet).length}',
     );
     final deadline = DateTime.now().add(timeout);
     MagnetTaskSnapshot? lastSnapshot;

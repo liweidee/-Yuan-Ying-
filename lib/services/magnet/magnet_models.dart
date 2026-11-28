@@ -287,9 +287,27 @@ class MagnetUriRef {
 
 abstract final class MagnetUri {
   static const scheme = 'magnetplay';
+  static const verifiedFallbackTracker =
+      'https://tracker.opentrackr.org:443/announce';
 
   static bool isMagnet(String? value) {
     return value != null && value.trim().toLowerCase().startsWith('magnet:?');
+  }
+
+  /// DsPlayer receives source links that occasionally contain only a btih.
+  /// Add one verified HTTP tracker for those links so peer discovery remains
+  /// usable when the current network blocks DHT UDP. Explicit trackers are
+  /// never modified.
+  static String ensureFallbackTracker(String value) {
+    final magnet = value.trim();
+    if (!isMagnet(magnet) ||
+        RegExp(r'[?&]tr=', caseSensitive: false).hasMatch(magnet)) {
+      return magnet;
+    }
+    final separator = magnet.endsWith('&') || magnet.endsWith('?') ? '' : '&';
+    return '$magnet${separator}tr=${Uri.encodeQueryComponent(
+      verifiedFallbackTracker,
+    )}';
   }
 
   static bool isMagnetPlay(String? value) {
