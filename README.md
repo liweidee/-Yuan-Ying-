@@ -141,6 +141,9 @@ Windows PowerShell 可把密钥内容写入剪贴板：
 Windows 使用 `Build Windows EXE` 工作流，会同时生成 Inno Setup 安装包和
 便携 ZIP；Windows 程序与安装包的版本均来自同一个 `pubspec.yaml` 版本源。
 
+需要一次生成多个平台时，运行 `Build All Platforms` 工作流并勾选目标平台。
+该入口会直接调用现有的 Android、iOS、macOS、Windows 工作流，不复制构建逻辑。
+
 在线更新读取当前仓库的 GitHub Releases。需要发布时，请手动创建
 `v2.0.8` 形式的 Release 并上传对应平台产物；Android 会按设备 ABI 选择 APK，
 下载后拉起系统安装器。设置 → 关于 → 当前版本即可在线检查更新。

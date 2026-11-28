@@ -2,6 +2,7 @@ name: Build Windows EXE
 
 on:
   workflow_dispatch:
+  workflow_call:
 
 jobs:
   build:
@@ -60,12 +61,20 @@ jobs:
           if (-not (Test-Path -LiteralPath $exe)) {
             throw "未找到 $exe"
           }
-          $expected = "${{ steps.version.outputs.numeric_version }}"
-          $actual = (Get-Item -LiteralPath $exe).VersionInfo.FileVersion
-          Write-Output "Expected FileVersion: $expected"
-          Write-Output "Actual FileVersion: $actual"
-          if ($actual -ne $expected) {
-            throw "Windows FileVersion 不一致"
+          $versionInfo = (Get-Item -LiteralPath $exe).VersionInfo
+          $expectedDisplay = "${{ steps.version.outputs.display_version }}"
+          $expectedNumeric = "${{ steps.version.outputs.numeric_version }}"
+          $actualDisplay = $versionInfo.FileVersion.Trim()
+          $actualNumeric = "$($versionInfo.FileMajorPart).$($versionInfo.FileMinorPart).$($versionInfo.FileBuildPart).$($versionInfo.FilePrivatePart)"
+          Write-Output "Expected FileVersion: $expectedDisplay"
+          Write-Output "Actual FileVersion: $actualDisplay"
+          Write-Output "Expected Numeric Version: $expectedNumeric"
+          Write-Output "Actual Numeric Version: $actualNumeric"
+          if ($actualDisplay -ne $expectedDisplay) {
+            throw "Windows 字符串版本不一致"
+          }
+          if ($actualNumeric -ne $expectedNumeric) {
+            throw "Windows 数字版本不一致"
           }
 
       - name: Install Inno Setup
